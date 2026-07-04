@@ -6,17 +6,25 @@ import {
   AlertTriangle,
   Bell,
   Brain,
+  CalendarClock,
   CheckCircle2,
+  ChevronRight,
+  CircleDot,
   ClipboardList,
+  FileClock,
   Headphones,
   HeartPulse,
   Languages,
+  ListChecks,
+  MapPin,
   Mic,
   PhoneCall,
   PlayCircle,
+  RadioTower,
   ShieldAlert,
   ShieldCheck,
   Stethoscope,
+  Timer,
   UserRoundCheck,
   UsersRound
 } from "lucide-react";
@@ -49,6 +57,27 @@ import "./styles.css";
 const riskOrder: Record<RiskLevel, number> = { Green: 0, Watch: 1, Amber: 2, Red: 3 };
 type AppView = "demo" | "call" | "dashboard";
 type CallState = "Ready" | "Connecting" | "In call" | "Saving" | "Analysing" | "Complete" | "Failed";
+type ScenarioTone = { label: string; risk: RiskLevel; detail: string };
+
+function scenarioToneFor(scenario: Scenario): ScenarioTone {
+  if (scenario.id.includes("red")) return { label: "Emergency path", risk: "Red", detail: "Escalates to urgent medical help" };
+  if (scenario.id.includes("amber") || scenario.id.includes("missed")) return { label: "Same-day path", risk: "Amber", detail: "Creates caregiver or volunteer follow-up" };
+  if (scenario.id.includes("parkinsons") || scenario.id.includes("chronic") || scenario.id.includes("mental")) {
+    return { label: "Watch path", risk: "Watch", detail: "Logs evidence for repeated-pattern follow-up" };
+  }
+  return { label: "Routine path", risk: "Green", detail: "Records a completed baseline check-in" };
+}
+
+function countsByRisk(categories: ConversationCategory[]): Record<RiskLevel, number> {
+  return categories.reduce<Record<RiskLevel, number>>(
+    (counts, category) => ({ ...counts, [category.severity]: counts[category.severity] + 1 }),
+    { Green: 0, Watch: 0, Amber: 0, Red: 0 }
+  );
+}
+
+function sortByRisk<T extends { severity: RiskLevel }>(items: T[]): T[] {
+  return [...items].sort((a, b) => riskOrder[b.severity] - riskOrder[a.severity]);
+}
 
 function StatCard({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
   return (
@@ -64,6 +93,26 @@ function StatCard({ label, value, icon }: { label: string; value: string; icon: 
 
 function RiskBadge({ level }: { level: RiskLevel }) {
   return <span className={`risk-badge risk-${level.toLowerCase()}`}>{level}</span>;
+}
+
+function SectionHeading({
+  eyebrow,
+  title,
+  meta
+}: {
+  eyebrow?: string;
+  title: string;
+  meta?: React.ReactNode;
+}) {
+  return (
+    <div className="section-heading">
+      <div>
+        {eyebrow ? <span className="eyebrow">{eyebrow}</span> : null}
+        <h3>{title}</h3>
+      </div>
+      {meta ? <div className="section-meta">{meta}</div> : null}
+    </div>
+  );
 }
 
 function cleanTranscriptText(text: string): string {
@@ -99,27 +148,46 @@ function stopRecorder(recorder: MediaRecorder | null): Promise<Blob | null> {
 function CategoryList({ categories }: { categories: ConversationCategory[] }) {
   if (!categories.length) return <p className="empty-state">No categorized evidence is available for this record.</p>;
 
+  const counts = countsByRisk(categories);
+  const elevated = sortByRisk(categories.filter((category) => category.severity !== "Green"));
+  const clear = categories.filter((category) => category.severity === "Green");
+  const primaryCategories = elevated.length ? elevated : categories;
+
+  const renderCategory = (category: ConversationCategory) => (
+    <article className={`category-card category-${category.severity.toLowerCase()}`} key={category.id}>
+      <div className="category-card-header">
+        <strong>{category.label}</strong>
+        <RiskBadge level={category.severity} />
+      </div>
+      {category.evidence.length ? (
+        <ul>
+          {category.evidence.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      ) : (
+        <p>No evidence in this check-in.</p>
+      )}
+      <small>{category.recommendedAction}</small>
+    </article>
+  );
+
   return (
-    <div className="category-grid">
-      {categories.map((category) => (
-        <article className={`category-card category-${category.severity.toLowerCase()}`} key={category.id}>
-          <div className="category-card-header">
-            <strong>{category.label}</strong>
-            <RiskBadge level={category.severity} />
-          </div>
-          {category.evidence.length ? (
-            <ul>
-              {category.evidence.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          ) : (
-            <p>No evidence in this check-in.</p>
-          )}
-          <small>{category.recommendedAction}</small>
-        </article>
-      ))}
-    </div>
+    <>
+      <div className="category-summary">
+        <span className="summary-pill summary-red">{counts.Red} Red</span>
+        <span className="summary-pill summary-amber">{counts.Amber} Amber</span>
+        <span className="summary-pill summary-watch">{counts.Watch} Watch</span>
+        <span className="summary-pill summary-green">{counts.Green} Clear</span>
+      </div>
+      <div className="category-grid">{primaryCategories.map(renderCategory)}</div>
+      {elevated.length > 0 && clear.length > 0 ? (
+        <details className="clear-category-drawer">
+          <summary>{clear.length} clear categories recorded</summary>
+          <div className="category-grid compact-category-grid">{clear.map(renderCategory)}</div>
+        </details>
+      ) : null}
+    </>
   );
 }
 
@@ -128,11 +196,14 @@ function EscalationTrail({ steps }: { steps: EscalationStep[] }) {
 
   return (
     <div className="escalation-list">
-      {steps.map((step) => (
+      {steps.map((step, index) => (
         <article className={`escalation-step status-${step.status.toLowerCase()}`} key={step.id}>
-          <span>{step.status}</span>
-          <strong>{step.label}</strong>
-          <p>{step.detail}</p>
+          <div className="step-index">{index + 1}</div>
+          <div>
+            <span>{step.status}</span>
+            <strong>{step.label}</strong>
+            <p>{step.detail}</p>
+          </div>
         </article>
       ))}
     </div>
@@ -417,6 +488,7 @@ function ScenarioRunner({
   const [status, setStatus] = useState("");
   const activeScenario = scenarios.find((scenario) => scenario.id === scenarioId) ?? selectedScenario;
   const activeSenior = seniors.find((senior) => senior.id === activeScenario?.seniorId) ?? seniors[0];
+  const activeTone = activeScenario ? scenarioToneFor(activeScenario) : null;
 
   useEffect(() => {
     if (activeScenario && activeScenario.seniorId !== selectedSeniorId) {
@@ -443,24 +515,52 @@ function ScenarioRunner({
     <main className="simulator-grid">
       <section className="panel scenario-panel">
         <div className="panel-heading">
-          <h2>Scenario Runner</h2>
+          <div>
+            <span className="eyebrow">Demo control room</span>
+            <h2>Scenario Runner</h2>
+          </div>
           <span>{scenarios.length} demo cases</span>
         </div>
-        <div className="scenario-tabs">
+        <div className="scenario-library">
           {scenarios.map((scenario) => (
-            <button className={scenario.id === activeScenario.id ? "active" : ""} key={scenario.id} onClick={() => setScenarioId(scenario.id)}>
-              {scenario.name}
+            <button
+              className={`scenario-card scenario-${scenarioToneFor(scenario).risk.toLowerCase()} ${scenario.id === activeScenario.id ? "active" : ""}`}
+              key={scenario.id}
+              onClick={() => setScenarioId(scenario.id)}
+            >
+              <span>{scenarioToneFor(scenario).label}</span>
+              <strong>{scenario.name}</strong>
+              <small>{scenario.label}</small>
             </button>
           ))}
         </div>
 
         <article className="scenario-brief">
           <div>
+            <div className="scenario-brief-header">
+              {activeTone ? <RiskBadge level={activeTone.risk} /> : null}
+              {activeTone ? <small>{activeTone.detail}</small> : null}
+            </div>
             <h3>{activeScenario.label}</h3>
             <p>{activeScenario.description}</p>
-            <small>
-              {activeSenior.name} · {activeSenior.preferredLanguage} · {activeSenior.knownConditions.join(", ")}
-            </small>
+            <div className="scenario-facts">
+              <span>
+                <MapPin size={15} />
+                {activeSenior.name} · {activeSenior.addressZone}
+              </span>
+              <span>
+                <Languages size={15} />
+                {activeSenior.preferredLanguage}
+              </span>
+              <span>
+                <CalendarClock size={15} />
+                Every {activeSenior.checkInFrequencyDays} days
+              </span>
+              <span>
+                <Stethoscope size={15} />
+                {activeSenior.knownConditions.join(", ")}
+              </span>
+            </div>
           </div>
           <button className="primary-action" onClick={() => void executeScenario()}>
             <PlayCircle size={18} />
@@ -468,14 +568,16 @@ function ScenarioRunner({
           </button>
         </article>
 
-        <TranscriptBubbleList messages={activeScenario.script} />
-        <div className="model-card">
-          <Brain size={22} />
-          <div>
-            <strong>Demo baseline scoring</strong>
-            <p>
-              Speech scores use synthetic baseline metrics. Real wav2vec, WavLM, or MERaLiON SpeechEncoder embeddings are future validation work, not live diagnosis.
-            </p>
+        <div className="script-and-model">
+          <TranscriptBubbleList messages={activeScenario.script} />
+          <div className="model-card">
+            <Brain size={22} />
+            <div>
+              <strong>Demo baseline scoring</strong>
+              <p>
+                Speech scores use synthetic baseline metrics. Real wav2vec, WavLM, or MERaLiON SpeechEncoder embeddings are future validation work, not live diagnosis.
+              </p>
+            </div>
           </div>
         </div>
         {status ? <p className="status-note">{status}</p> : null}
@@ -488,13 +590,17 @@ function ScenarioRunner({
         </div>
         {lastSession ? (
           <>
-            <div className="result-header">
+            <div className={`handoff-card handoff-${lastSession.riskLevel.toLowerCase()}`}>
+              <div>
+                <span className="eyebrow">Care-team handoff</span>
+                <h3>{lastSession.recommendedAction}</h3>
+                <p>{lastSession.summary}</p>
+              </div>
               <RiskBadge level={lastSession.riskLevel} />
-              <strong>{lastSession.recommendedAction}</strong>
             </div>
             <ScoreBars assessment={lastSession.riskAssessment} />
             <CategoryList categories={lastSession.categories} />
-            <h3>Escalation</h3>
+            <SectionHeading title="Escalation path" meta={<span>{lastSession.escalationPlan.filter((step) => step.status === "Triggered").length} triggered</span>} />
             <EscalationTrail steps={lastSession.escalationPlan} />
           </>
         ) : (
@@ -525,7 +631,9 @@ function OfficerDashboard({
   onTaskStatus: (taskId: string, status: VolunteerTask["status"]) => void;
 }) {
   const selectedSenior = seniors.find((senior) => senior.id === selectedSeniorId) ?? seniors[0];
-  const selectedTasks = tasks.filter((task) => task.seniorId === selectedSenior.id);
+  const selectedTasks = tasks
+    .filter((task) => task.seniorId === selectedSenior.id)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   const selectedCalls = calls.filter((call) => call.seniorId === selectedSenior.id);
   const selectedSessions = sessions.filter((session) => session.seniorId === selectedSenior.id);
   const selectedRecords = [
@@ -537,6 +645,10 @@ function OfficerDashboard({
   const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({});
   const [highlightedSignalId, setHighlightedSignalId] = useState<string | null>(null);
   const highestRisk = highestRiskLevel(selectedRecords.map((item) => item.record.riskLevel));
+  const selectedOpenTasks = selectedTasks.filter((task) => task.status !== "Closed");
+  const latestRecordKind = selectedRecords[0]?.kind === "call" ? "Agents call" : selectedRecords[0]?.kind === "session" ? "Check-in" : "No record";
+  const latestRecordTime = selectedRecords[0]?.date ? formatDate(selectedRecords[0].date) : "No check-in yet";
+  const nextAction = selectedOpenTasks[0]?.recommendedAction ?? latestRecord?.recommendedAction ?? "Continue routine scheduled check-ins.";
 
   const playRiskSignal = (call: CallRecord, signal: RiskSignal) => {
     setHighlightedSignalId(`${call.id}-${signal.id}`);
@@ -557,20 +669,29 @@ function OfficerDashboard({
           <span>{seniors.length} seniors</span>
         </div>
         <div className="senior-list">
-          {seniors.map((senior) => (
-            <button
-              className={`senior-row ${senior.id === selectedSenior.id ? "active" : ""}`}
-              key={senior.id}
-              onClick={() => setSelectedSeniorId(senior.id)}
-            >
-              <span>
-                <strong>{senior.name}</strong>
-                <small>
-                  {senior.age} · {senior.addressZone} · {senior.preferredLanguage}
-                </small>
-              </span>
-            </button>
-          ))}
+          {seniors.map((senior) => {
+            const seniorRecords = [...calls, ...sessions].filter((record) => record.seniorId === senior.id);
+            const seniorRisk = highestRiskLevel(seniorRecords.map((record) => record.riskLevel));
+            const seniorOpenTasks = tasks.filter((task) => task.seniorId === senior.id && task.status !== "Closed").length;
+            return (
+              <button
+                className={`senior-row ${senior.id === selectedSenior.id ? "active" : ""}`}
+                key={senior.id}
+                onClick={() => setSelectedSeniorId(senior.id)}
+              >
+                <span>
+                  <strong>{senior.name}</strong>
+                  <small>
+                    {senior.age} · {senior.addressZone} · {senior.preferredLanguage}
+                  </small>
+                </span>
+                <span className="senior-row-meta">
+                  <RiskBadge level={seniorRisk} />
+                  {seniorOpenTasks ? <small>{seniorOpenTasks} task{seniorOpenTasks === 1 ? "" : "s"}</small> : <small>clear</small>}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </section>
 
@@ -592,11 +713,76 @@ function OfficerDashboard({
           </div>
         </div>
 
+        <section className={`profile-handoff handoff-${highestRisk.toLowerCase()}`}>
+          <div className="handoff-icon">
+            <RadioTower size={22} />
+          </div>
+          <div>
+            <span className="eyebrow">Current handoff</span>
+            <h3>{nextAction}</h3>
+            <p>
+              {latestRecordKind} · {latestRecordTime}. {selectedOpenTasks.length ? `${selectedOpenTasks.length} open follow-up task${selectedOpenTasks.length === 1 ? "" : "s"}.` : "No open follow-up task."}
+            </p>
+          </div>
+          <div className="handoff-metrics">
+            <span>
+              <ListChecks size={16} />
+              {selectedOpenTasks.length} open
+            </span>
+            <span>
+              <FileClock size={16} />
+              {selectedSessions.length} check-ins
+            </span>
+          </div>
+        </section>
+
+        <section className="volunteer-task-section priority-section">
+          <SectionHeading title="Volunteer Tasks" meta={<span>{selectedOpenTasks.length} open</span>} />
+          <div className="task-list">
+            {selectedTasks.length ? (
+              selectedTasks.map((task) => (
+                <article key={task.id} className={`task-card task-${task.status.toLowerCase().replace(" ", "-")}`}>
+                  <div className="task-card-top">
+                    <span className={`priority priority-${task.priority.toLowerCase()}`}>{task.priority}</span>
+                    <small>{task.status}</small>
+                  </div>
+                  <strong>{task.reason}</strong>
+                  <p>{task.recommendedAction}</p>
+                  <small>
+                    {task.assignedTo} · {formatDate(task.createdAt)}
+                  </small>
+                  <div className="task-actions">
+                    <button onClick={() => onTaskStatus(task.id, "In progress")} disabled={task.status === "In progress"}>
+                      <CheckCircle2 size={16} />
+                      Acknowledge
+                    </button>
+                    <button onClick={() => onTaskStatus(task.id, "Closed")} disabled={task.status === "Closed"}>
+                      <ShieldCheck size={16} />
+                      Close
+                    </button>
+                  </div>
+                </article>
+              ))
+            ) : (
+              <p className="empty-state">No open task for this senior.</p>
+            )}
+          </div>
+        </section>
+
         <div className="metric-grid">
           <StatCard label="Language" value={selectedSenior.preferredLanguage} icon={<Languages size={20} />} />
           <StatCard label="Caregiver" value={selectedSenior.caregiverContact} icon={<UserRoundCheck size={20} />} />
           <StatCard label="Neighbour" value={selectedSenior.neighborContact ?? "Not listed"} icon={<UsersRound size={20} />} />
           <StatCard label="Known conditions" value={selectedSenior.knownConditions.join(", ")} icon={<Stethoscope size={20} />} />
+        </div>
+
+        <div className="focus-strip">
+          {selectedSenior.promptFocus.map((item) => (
+            <span key={item}>
+              <CircleDot size={13} />
+              {item}
+            </span>
+          ))}
         </div>
 
         <section className="analysis-panel dashboard-analysis">
@@ -611,7 +797,7 @@ function OfficerDashboard({
             <>
               <ScoreBars assessment={latestAssessment} />
               <div className="reason-box">
-                <h3>Reasons</h3>
+                <SectionHeading title="Reasons" meta={<span>{latestAssessment.reasons.length} signals</span>} />
                 <ul>
                   {latestAssessment.reasons.map((reason) => (
                     <li key={reason}>{reason}</li>
@@ -619,7 +805,7 @@ function OfficerDashboard({
                 </ul>
               </div>
               <CategoryList categories={latestRecord.categories ?? []} />
-              <h3>Escalation</h3>
+              <SectionHeading title="Escalation path" meta={<span>{(latestRecord.escalationPlan ?? []).filter((step) => step.status === "Triggered").length} triggered</span>} />
               <EscalationTrail steps={latestRecord.escalationPlan ?? []} />
             </>
           ) : (
@@ -628,7 +814,7 @@ function OfficerDashboard({
         </section>
 
         <section className="history-section">
-          <h3>Check-In History</h3>
+          <SectionHeading title="Check-In History" meta={<span>{selectedSessions.length} records</span>} />
           {selectedSessions.length ? (
             <div className="call-record-list">
               {selectedSessions.map((session) => (
@@ -664,7 +850,7 @@ function OfficerDashboard({
         </section>
 
         <section className="saved-calls">
-          <h3>Saved Agents Calls</h3>
+          <SectionHeading title="Saved Agents Calls" meta={<span>{selectedCalls.length} calls</span>} />
           {selectedCalls.length ? (
             <div className="call-record-list">
               {selectedCalls.map((call) => {
@@ -742,33 +928,6 @@ function OfficerDashboard({
           )}
         </section>
 
-        <section className="volunteer-task-section">
-          <h3>Volunteer Tasks</h3>
-          <div className="task-list">
-            {selectedTasks.length ? (
-              selectedTasks.map((task) => (
-                <article key={task.id} className="task-card">
-                  <span className={`priority priority-${task.priority.toLowerCase()}`}>{task.priority}</span>
-                  <strong>{task.reason}</strong>
-                  <p>{task.recommendedAction}</p>
-                  <small>
-                    {task.assignedTo} · {task.status}
-                  </small>
-                  <div className="task-actions">
-                    <button onClick={() => onTaskStatus(task.id, "In progress")} disabled={task.status === "In progress"}>
-                      Acknowledge
-                    </button>
-                    <button onClick={() => onTaskStatus(task.id, "Closed")} disabled={task.status === "Closed"}>
-                      Close
-                    </button>
-                  </div>
-                </article>
-              ))
-            ) : (
-              <p className="empty-state">No open task for this senior.</p>
-            )}
-          </div>
-        </section>
       </section>
     </main>
   );
@@ -850,6 +1009,27 @@ function App() {
         <div>
           <span className="eyebrow">Preventive care + volunteer escalation</span>
           <h1>Scheduled calls that turn silence, falls, and speech change into earlier human follow-up.</h1>
+          <div className="routing-strip" aria-label="EarlyCare escalation route">
+            <span>
+              <Timer size={15} />
+              2-3 day cadence
+            </span>
+            <ChevronRight size={16} />
+            <span>
+              <Bell size={15} />
+              retry + notify
+            </span>
+            <ChevronRight size={16} />
+            <span>
+              <UsersRound size={15} />
+              caregiver / neighbour
+            </span>
+            <ChevronRight size={16} />
+            <span>
+              <RadioTower size={15} />
+              volunteer or emergency path
+            </span>
+          </div>
         </div>
         <div className="hero-stats">
           <StatCard label="Open tasks" value={`${openTasks}`} icon={<Bell size={20} />} />
