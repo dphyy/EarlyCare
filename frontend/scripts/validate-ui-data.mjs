@@ -34,7 +34,9 @@ const requiredUiHooks = [
   "EscalationTrail",
   "updateVolunteerTask",
   "Check-In History",
-  "Demo baseline scoring"
+  "Demo baseline scoring",
+  "Open Patient overview",
+  "Running..."
 ];
 
 const missingScenarios = requiredScenarioIds.filter((id) => !dataSource.includes(`id: "${id}"`));

@@ -474,18 +474,21 @@ function ScenarioRunner({
   seniors,
   selectedSeniorId,
   onSelectSenior,
-  onScenarioRun
+  onScenarioRun,
+  onOpenDashboard
 }: {
   scenarios: Scenario[];
   seniors: Senior[];
   selectedSeniorId: string;
   onSelectSenior: (id: string) => void;
   onScenarioRun: (session: CheckInSession, tasks: VolunteerTask[]) => void;
+  onOpenDashboard: () => void;
 }) {
   const selectedScenario = scenarios.find((scenario) => scenario.seniorId === selectedSeniorId) ?? scenarios[0];
   const [scenarioId, setScenarioId] = useState(selectedScenario?.id ?? "");
   const [lastSession, setLastSession] = useState<CheckInSession | null>(null);
   const [status, setStatus] = useState("");
+  const [isRunning, setIsRunning] = useState(false);
   const activeScenario = scenarios.find((scenario) => scenario.id === scenarioId) ?? selectedScenario;
   const activeSenior = seniors.find((senior) => senior.id === activeScenario?.seniorId) ?? seniors[0];
   const activeTone = activeScenario ? scenarioToneFor(activeScenario) : null;
@@ -497,16 +500,21 @@ function ScenarioRunner({
   }, [activeScenario, onSelectSenior, selectedSeniorId]);
 
   const executeScenario = async () => {
-    if (!activeScenario) return;
+    if (!activeScenario || isRunning) return;
+    setIsRunning(true);
     setStatus("Running scenario and saving check-in...");
-    const response = await runScenario(activeScenario.id);
-    if (!response) {
-      setStatus("Backend API is required to save scenario history.");
-      return;
+    try {
+      const response = await runScenario(activeScenario.id);
+      if (!response) {
+        setStatus("Backend API is required to save scenario history.");
+        return;
+      }
+      setLastSession(response.session);
+      onScenarioRun(response.session, response.tasks);
+      setStatus("Scenario saved. Review the result here or open Patient overview.");
+    } finally {
+      setIsRunning(false);
     }
-    setLastSession(response.session);
-    onScenarioRun(response.session, response.tasks);
-    setStatus("Scenario saved to Patient overview.");
   };
 
   if (!activeScenario) return <p className="empty-state">No scenarios are configured.</p>;
@@ -562,9 +570,9 @@ function ScenarioRunner({
               </span>
             </div>
           </div>
-          <button className="primary-action" onClick={() => void executeScenario()}>
+          <button className="primary-action" onClick={() => void executeScenario()} disabled={isRunning}>
             <PlayCircle size={18} />
-            Run scenario
+            {isRunning ? "Running..." : "Run scenario"}
           </button>
         </article>
 
@@ -602,6 +610,13 @@ function ScenarioRunner({
             <CategoryList categories={lastSession.categories} />
             <SectionHeading title="Escalation path" meta={<span>{lastSession.escalationPlan.filter((step) => step.status === "Triggered").length} triggered</span>} />
             <EscalationTrail steps={lastSession.escalationPlan} />
+            <div className="result-actions">
+              <button className="primary-action" onClick={onOpenDashboard}>
+                <Activity size={18} />
+                Open Patient overview
+              </button>
+              <button onClick={() => setLastSession(null)}>Run another scenario</button>
+            </div>
           </>
         ) : (
           <p className="empty-state">Run any scenario to create a persisted check-in, categorized evidence, and follow-up task when needed.</p>
@@ -1049,8 +1064,8 @@ function App() {
             setLoadedSessions((sessions) => [session, ...sessions.filter((item) => item.id !== session.id)]);
             setLoadedTasks(tasks);
             setSelectedSeniorId(session.seniorId);
-            setView("dashboard");
           }}
+          onOpenDashboard={() => setView("dashboard")}
         />
       ) : view === "call" ? (
         <ConversationProvider>

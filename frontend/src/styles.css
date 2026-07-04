@@ -817,6 +817,28 @@ h3 {
   line-height: 1.35;
 }
 
+.result-actions {
+  border-top: 1px solid #dfe5d8;
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 16px;
+}
+
+.result-actions button {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #d8dfd0;
+  border-radius: 8px;
+  color: #243029;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 8px;
+  justify-content: center;
+  min-height: 44px;
+  padding: 10px 14px;
+}
+
 .category-grid {
   display: grid;
   gap: 10px;
@@ -1248,6 +1270,10 @@ h3 {
   }
 
   .task-actions {
+    display: grid;
+  }
+
+  .result-actions {
     display: grid;
   }
 }
