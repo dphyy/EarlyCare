@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Build outputs
+dist/
+frontend/dist/
+frontend/tsconfig.tsbuildinfo
+
+# Python environments and caches
+.venv/
+backend/.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local environment files and secrets
+.env
+.env.*
+frontend/.env
+frontend/.env.*
+backend/.env
+backend/.env.*
+!.env.example
+!frontend/.env.example
+!backend/.env.example
+
+# Local storage and generated call artifacts
+backend/storage/
+
+# OS/editor noise
+.DS_Store
+*.local
+*.log
+
+# Coverage and temporary files
+coverage/
+.coverage
+tmp/
+temp/
