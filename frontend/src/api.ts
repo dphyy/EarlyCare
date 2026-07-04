@@ -1,5 +1,5 @@
-import { seniors, sessions, volunteerTasks } from "./data";
-import type { CallRecord, CheckInSession, Senior, VolunteerTask } from "./types";
+import { scenarios, seniors, sessions, volunteerTasks } from "./data";
+import type { CallRecord, CheckInSession, Scenario, ScenarioRunResponse, Senior, VolunteerTask } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string | undefined;
 
@@ -29,6 +29,10 @@ export function fetchVolunteerTasks(): Promise<VolunteerTask[]> {
 
 export function fetchCalls(): Promise<CallRecord[]> {
   return getJson<CallRecord[]>("/calls", []);
+}
+
+export function fetchScenarios(): Promise<Scenario[]> {
+  return getJson<Scenario[]>("/scenarios", scenarios);
 }
 
 export function getCallAudioUrl(call: CallRecord): string | null {
@@ -89,6 +93,34 @@ export async function saveCall(formData: FormData): Promise<CallRecord | null> {
     if (!response.ok) throw new Error(`Request failed: ${response.status}`);
     const payload = (await response.json()) as { call: CallRecord };
     return payload.call;
+  } catch {
+    return null;
+  }
+}
+
+export async function runScenario(scenarioId: string): Promise<ScenarioRunResponse | null> {
+  if (!API_BASE_URL) return null;
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/scenarios/${scenarioId}/run`, {
+      method: "POST"
+    });
+    if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+    return (await response.json()) as ScenarioRunResponse;
+  } catch {
+    return null;
+  }
+}
+
+export async function updateVolunteerTask(taskId: string, status: VolunteerTask["status"]): Promise<VolunteerTask | null> {
+  if (!API_BASE_URL) return null;
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/volunteer-tasks/${taskId}?status=${encodeURIComponent(status)}`, {
+      method: "PATCH"
+    });
+    if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+    return (await response.json()) as VolunteerTask;
   } catch {
     return null;
   }

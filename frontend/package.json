@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
-    "lint": "tsc -b --noEmit"
+    "lint": "tsc -b --noEmit",
+    "test:data": "node scripts/validate-ui-data.mjs"
   },
   "dependencies": {
     "@elevenlabs/react": "^1.9.0",

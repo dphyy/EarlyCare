@@ -2,8 +2,10 @@
   "name": "earlycare",
   "private": true,
   "scripts": {
-    "dev": "npm run dev --prefix frontend",
-    "build": "npm run build --prefix frontend",
-    "lint": "npm run lint --prefix frontend"
+    "dev": "pnpm --dir frontend dev",
+    "build": "pnpm --dir frontend build",
+    "lint": "pnpm --dir frontend lint",
+    "frontend:smoke": "pnpm --dir frontend test:data",
+    "backend:smoke": "PYTHONPATH=backend backend/.venv/bin/python backend/tests/smoke.py"
   }
 }

@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-from app.data import CHECKINS, SENIORS, VOLUNTEER_TASKS
+from app.data import CHECKINS, SCENARIOS, SENIORS, VOLUNTEER_TASKS
 from app.ml import assess_speech_deviation, extract_demo_embedding_note
 from app.models import (
     CallRecord,
@@ -21,6 +21,8 @@ from app.models import (
     RiskAssessment,
     RiskSignal,
     SavedCallResponse,
+    Scenario,
+    ScenarioRunResponse,
     Senior,
     SpeechDeviationRequest,
     Symptoms,
@@ -29,11 +31,22 @@ from app.models import (
     VolunteerTask,
 )
 from app.providers import transcribe_with_fallback
+from app.risk import (
+    assessment_from_symptoms,
+    build_conversation_categories,
+    build_escalation_plan,
+    detect_symptoms_from_text,
+    recommended_action_for,
+    risk_signals_from_categories,
+)
 
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 CALL_STORAGE_ROOT = BACKEND_ROOT / "storage" / "calls"
+STATE_STORAGE_ROOT = BACKEND_ROOT / "storage" / "state"
+CHECKINS_STATE_PATH = STATE_STORAGE_ROOT / "checkins.json"
+TASKS_STATE_PATH = STATE_STORAGE_ROOT / "volunteer-tasks.json"
 app = FastAPI(title="EarlyCare API", version="0.1.0")
 
 app.add_middleware(
@@ -69,6 +82,33 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _state_json_default(path: Path, fallback: str) -> None:
+    if path.exists():
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(fallback)
+
+
+def _load_checkins() -> list[CheckInSession]:
+    _state_json_default(CHECKINS_STATE_PATH, json.dumps([checkin.model_dump() for checkin in CHECKINS], indent=2))
+    return [CheckInSession.model_validate(item) for item in json.loads(CHECKINS_STATE_PATH.read_text())]
+
+
+def _save_checkins(checkins: list[CheckInSession]) -> None:
+    STATE_STORAGE_ROOT.mkdir(parents=True, exist_ok=True)
+    CHECKINS_STATE_PATH.write_text(json.dumps([checkin.model_dump() for checkin in checkins], indent=2))
+
+
+def _load_tasks() -> list[VolunteerTask]:
+    _state_json_default(TASKS_STATE_PATH, json.dumps([task.model_dump() for task in VOLUNTEER_TASKS], indent=2))
+    return [VolunteerTask.model_validate(item) for item in json.loads(TASKS_STATE_PATH.read_text())]
+
+
+def _save_tasks(tasks: list[VolunteerTask]) -> None:
+    STATE_STORAGE_ROOT.mkdir(parents=True, exist_ok=True)
+    TASKS_STATE_PATH.write_text(json.dumps([task.model_dump() for task in tasks], indent=2))
+
+
 def _call_metadata_path(call_id: str) -> Path:
     return CALL_STORAGE_ROOT / call_id / "metadata.json"
 
@@ -95,6 +135,87 @@ def _empty_assessment(risk_level: str, reasons: list[str]) -> RiskAssessment:
         riskLevel=risk_level,  # type: ignore[arg-type]
         reasons=reasons or ["No notable deviation from available baseline context."],
     )
+
+
+def _enrich_session(session: CheckInSession) -> CheckInSession:
+    if session.categories and session.escalationPlan:
+        return session
+    senior = get_senior(session.seniorId)
+    symptoms = detect_symptoms_from_text(session.englishTranscript or session.originalTranscript)
+    categories = build_conversation_categories(session.englishTranscript or session.originalTranscript, symptoms, session.riskAssessment, senior)
+    escalation_plan = build_escalation_plan(session.riskAssessment, categories, senior)
+    recommended_action = session.recommendedAction or recommended_action_for(session.riskAssessment, categories, senior)
+    return session.model_copy(update={"categories": categories, "escalationPlan": escalation_plan, "recommendedAction": recommended_action})
+
+
+def _status_for_risk(assessment: RiskAssessment, symptoms: Symptoms) -> str:
+    if symptoms.missedCheckIn:
+        return "Missed"
+    if assessment.riskLevel == "Red":
+        return "Urgent"
+    if assessment.riskLevel in {"Watch", "Amber"}:
+        return "Needs follow-up"
+    return "Checked in"
+
+
+def _task_priority(risk_level: str) -> str:
+    if risk_level == "Red":
+        return "Urgent"
+    if risk_level in {"Amber", "Watch"}:
+        return "Today"
+    return "Routine"
+
+
+def _task_reason(session: CheckInSession) -> str:
+    elevated = [category.label for category in session.categories if category.severity != "Green"]
+    if elevated:
+        return ", ".join(elevated[:2])
+    return session.summary
+
+
+def _upsert_task_for_session(session: CheckInSession, senior: Senior) -> list[VolunteerTask]:
+    if session.riskLevel == "Green":
+        return _load_tasks()
+
+    tasks = _load_tasks()
+    task = VolunteerTask(
+        id=f"task-{session.id}",
+        seniorId=senior.id,
+        priority=_task_priority(session.riskLevel),  # type: ignore[arg-type]
+        reason=_task_reason(session),
+        recommendedAction=session.recommendedAction,
+        assignedTo="Community response team",
+        status="Open",
+        createdAt=session.completedAt or _now_iso(),
+        sourceSessionId=session.id,
+        escalationStep="volunteer-social-task" if session.riskLevel != "Red" else "emergency-alert",
+    )
+    tasks = [existing for existing in tasks if existing.id != task.id and existing.sourceSessionId != session.id]
+    tasks.append(task)
+    _save_tasks(tasks)
+    return tasks
+
+
+def _upsert_task_for_call(call: CallRecord, senior: Senior) -> list[VolunteerTask]:
+    if call.riskLevel == "Green":
+        return _load_tasks()
+    tasks = _load_tasks()
+    task = VolunteerTask(
+        id=f"task-{call.id}",
+        seniorId=senior.id,
+        priority=_task_priority(call.riskLevel),  # type: ignore[arg-type]
+        reason=", ".join(category.label for category in call.categories if category.severity != "Green") or call.recommendedAction,
+        recommendedAction=call.recommendedAction,
+        assignedTo="Community response team",
+        status="Open",
+        createdAt=call.completedAt,
+        sourceCallId=call.id,
+        escalationStep="volunteer-social-task" if call.riskLevel != "Red" else "emergency-alert",
+    )
+    tasks = [existing for existing in tasks if existing.id != task.id and existing.sourceCallId != call.id]
+    tasks.append(task)
+    _save_tasks(tasks)
+    return tasks
 
 
 def _risk_schema() -> dict[str, object]:
@@ -126,28 +247,52 @@ def _risk_schema() -> dict[str, object]:
                 "properties": {
                     "fall": {"type": "boolean"},
                     "headImpact": {"type": "boolean"},
+                    "whiplashOrJolt": {"type": "boolean"},
                     "headache": {"type": "boolean"},
+                    "worseningHeadache": {"type": "boolean"},
                     "dizziness": {"type": "boolean"},
                     "vomiting": {"type": "boolean"},
                     "confusion": {"type": "boolean"},
                     "slurredSpeech": {"type": "boolean"},
                     "weakness": {"type": "boolean"},
+                    "numbness": {"type": "boolean"},
+                    "unusualBehavior": {"type": "boolean"},
+                    "drowsinessOrUnwakeable": {"type": "boolean"},
                     "poorIntake": {"type": "boolean"},
                     "asksForHelp": {"type": "boolean"},
                     "missedCheckIn": {"type": "boolean"},
+                    "loneliness": {"type": "boolean"},
+                    "lowMood": {"type": "boolean"},
+                    "medicationMissed": {"type": "boolean"},
+                    "chronicConcern": {"type": "boolean"},
+                    "ckdConcern": {"type": "boolean"},
+                    "diabetesConcern": {"type": "boolean"},
+                    "highBloodPressureConcern": {"type": "boolean"},
                 },
                 "required": [
                     "fall",
                     "headImpact",
+                    "whiplashOrJolt",
                     "headache",
+                    "worseningHeadache",
                     "dizziness",
                     "vomiting",
                     "confusion",
                     "slurredSpeech",
                     "weakness",
+                    "numbness",
+                    "unusualBehavior",
+                    "drowsinessOrUnwakeable",
                     "poorIntake",
                     "asksForHelp",
                     "missedCheckIn",
+                    "loneliness",
+                    "lowMood",
+                    "medicationMissed",
+                    "chronicConcern",
+                    "ckdConcern",
+                    "diabetesConcern",
+                    "highBloodPressureConcern",
                 ],
             },
             "signals": {"type": "array", "items": signal_schema},
@@ -220,7 +365,9 @@ def _openai_risk_review(english_transcript: str, segments: list[TranscriptSegmen
                         "content": (
                             "You are an EarlyCare clinical safety review assistant. Extract decision-support risk signals from an elderly "
                             "wellbeing check-in transcript. Do not diagnose. Only mark Amber or Red when the transcript itself supports "
-                            "earlier volunteer or caregiver action."
+                            "earlier volunteer or caregiver action. Track living-alone missed check-ins, fall/head impact, whiplash or body jolts, "
+                            "possible concussion danger signs, possible Parkinson's speech-watch signals, chronic illness concerns, poor intake, "
+                            "medication issues, loneliness, and help requests."
                         ),
                     },
                     {
@@ -251,7 +398,7 @@ def _openai_risk_review(english_transcript: str, segments: list[TranscriptSegmen
         symptoms = Symptoms.model_validate(result["symptoms"])
         risk_level = result["riskLevel"]
         reasons = result.get("reasons") or [result.get("summary", "AI review completed.")]
-        assessment = _empty_assessment(risk_level, reasons)
+        assessment = assessment_from_symptoms(symptoms, risk_level, reasons)
         signals = [RiskSignal.model_validate(signal) for signal in result.get("signals", [])]
         signals = _attach_segment_timestamps(signals, segments)
         recommended_action = result.get("recommendedAction") or "Review highlighted details and continue routine follow-up."
@@ -262,6 +409,16 @@ def _openai_risk_review(english_transcript: str, segments: list[TranscriptSegmen
 
 def _load_call_record(path: Path) -> CallRecord:
     return CallRecord.model_validate_json(path.read_text())
+
+
+def _enrich_call_record(call: CallRecord) -> CallRecord:
+    if call.categories and call.escalationPlan:
+        return call
+    senior = get_senior(call.seniorId)
+    symptoms = detect_symptoms_from_text(call.englishTranscript or call.originalTranscript)
+    categories = build_conversation_categories(call.englishTranscript or call.originalTranscript, symptoms, call.riskAssessment, senior)
+    escalation_plan = build_escalation_plan(call.riskAssessment, categories, senior)
+    return call.model_copy(update={"categories": categories, "escalationPlan": escalation_plan})
 
 
 @app.get("/health")
@@ -284,14 +441,64 @@ def get_senior(senior_id: str) -> Senior:
 
 @app.get("/checkins", response_model=list[CheckInSession])
 def get_checkins() -> list[CheckInSession]:
-    return CHECKINS
+    records = [_enrich_session(checkin) for checkin in _load_checkins()]
+    return sorted(records, key=lambda record: record.completedAt or record.scheduledAt, reverse=True)
+
+
+@app.get("/scenarios", response_model=list[Scenario])
+def get_scenarios() -> list[Scenario]:
+    return SCENARIOS
+
+
+@app.post("/scenarios/{scenario_id}/run", response_model=ScenarioRunResponse)
+def run_scenario(scenario_id: str) -> ScenarioRunResponse:
+    scenario = next((item for item in SCENARIOS if item.id == scenario_id), None)
+    if scenario is None:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+
+    senior = get_senior(scenario.seniorId)
+    assessment = assess_speech_deviation(
+        senior.baselineSpeechProfile,
+        SpeechDeviationRequest(seniorId=senior.id, currentSpeechProfile=scenario.speechMetrics, symptoms=scenario.symptoms),
+    )
+    if scenario.symptoms.missedCheckIn:
+        assessment = assessment_from_symptoms(scenario.symptoms, "Amber", assessment.reasons)
+
+    categories = build_conversation_categories(scenario.englishTranscript, scenario.symptoms, assessment, senior)
+    recommended_action = recommended_action_for(assessment, categories, senior)
+    escalation_plan = build_escalation_plan(assessment, categories, senior)
+    now = _now_iso()
+    session = CheckInSession(
+        id=f"scenario-{scenario.id}-{uuid4().hex[:8]}",
+        seniorId=senior.id,
+        scenarioId=scenario.id,
+        scenarioName=scenario.name,
+        scheduledAt=now,
+        completedAt=None if scenario.symptoms.missedCheckIn else now,
+        status=_status_for_risk(assessment, scenario.symptoms),  # type: ignore[arg-type]
+        language=senior.preferredLanguage,
+        riskLevel=assessment.riskLevel,
+        summary=scenario.description,
+        recommendedAction=recommended_action,
+        originalTranscript=scenario.originalTranscript,
+        englishTranscript=scenario.englishTranscript,
+        riskAssessment=assessment,
+        categories=categories,
+        escalationPlan=escalation_plan,
+        modelNote=extract_demo_embedding_note(),
+    )
+    checkins = _load_checkins()
+    checkins.append(session)
+    _save_checkins(checkins)
+    tasks = _upsert_task_for_session(session, senior)
+    return ScenarioRunResponse(session=session, tasks=tasks)
 
 
 @app.get("/calls", response_model=list[CallRecord])
 def get_calls() -> list[CallRecord]:
     if not CALL_STORAGE_ROOT.exists():
         return []
-    records = [_load_call_record(path) for path in CALL_STORAGE_ROOT.glob("*/metadata.json")]
+    records = [_enrich_call_record(_load_call_record(path)) for path in CALL_STORAGE_ROOT.glob("*/metadata.json")]
     return sorted(records, key=lambda record: record.completedAt, reverse=True)
 
 
@@ -300,7 +507,7 @@ def get_call(call_id: str) -> CallRecord:
     path = _call_metadata_path(call_id)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Call not found")
-    return _load_call_record(path)
+    return _enrich_call_record(_load_call_record(path))
 
 
 @app.get("/calls/{call_id}/audio")
@@ -407,7 +614,15 @@ async def save_call(
 
     original_transcript = _transcript_to_text(messages)
     translation = transcribe_with_fallback(senior.preferredLanguage, original_transcript, audio_path)
-    _, assessment, risk_signals, recommended_action, ai_fallback_used = _openai_risk_review(translation.translation, translation.segments)
+    symptoms, assessment, risk_signals, ai_recommended_action, ai_fallback_used = _openai_risk_review(translation.translation, translation.segments)
+    if ai_fallback_used:
+        symptoms = detect_symptoms_from_text(translation.translation)
+        assessment = assessment_from_symptoms(symptoms, "Watch", assessment.reasons)
+    categories = build_conversation_categories(translation.translation, symptoms, assessment, senior)
+    escalation_plan = build_escalation_plan(assessment, categories, senior)
+    recommended_action = ai_recommended_action if not ai_fallback_used and assessment.riskLevel != "Red" else recommended_action_for(assessment, categories, senior)
+    if not risk_signals:
+        risk_signals = risk_signals_from_categories(categories)
     audio_url = f"/calls/{call_id}/audio" if audio_file_path else None
 
     (call_dir / "transcript-original.json").write_text(json.dumps([message.model_dump() for message in messages], indent=2))
@@ -434,8 +649,11 @@ async def save_call(
         aiRiskFallbackUsed=ai_fallback_used,
         riskAssessment=assessment,
         recommendedAction=recommended_action,
+        categories=categories,
+        escalationPlan=escalation_plan,
     )
     _call_metadata_path(call_id).write_text(call.model_dump_json(indent=2))
+    _upsert_task_for_call(call, senior)
     return SavedCallResponse(call=call)
 
 
@@ -459,13 +677,17 @@ def speech_deviation(request: SpeechDeviationRequest) -> dict[str, object]:
 
 @app.get("/volunteer-tasks", response_model=list[VolunteerTask])
 def get_volunteer_tasks() -> list[VolunteerTask]:
-    return VOLUNTEER_TASKS
+    return sorted(_load_tasks(), key=lambda task: task.createdAt, reverse=True)
 
 
 @app.patch("/volunteer-tasks/{task_id}", response_model=VolunteerTask)
 def update_volunteer_task(task_id: str, status: str) -> VolunteerTask:
-    for task in VOLUNTEER_TASKS:
+    tasks = _load_tasks()
+    if status not in {"Open", "In progress", "Closed"}:
+        raise HTTPException(status_code=400, detail="Invalid task status")
+    for task in tasks:
         if task.id == task_id:
             task.status = status  # type: ignore[assignment]
+            _save_tasks(tasks)
             return task
     raise HTTPException(status_code=404, detail="Volunteer task not found")

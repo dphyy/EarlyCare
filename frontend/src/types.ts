@@ -1,6 +1,15 @@
 export type RiskLevel = "Green" | "Watch" | "Amber" | "Red";
 export type CheckInStatus = "Checked in" | "Missed" | "Needs follow-up" | "Urgent";
 export type Language = "English" | "Mandarin" | "Malay" | "Tamil" | "Singlish/Dialect";
+export type ConversationCategoryId =
+  | "mental_wellbeing"
+  | "fall_head_impact"
+  | "concussion_danger"
+  | "parkinsons_watch"
+  | "chronic_illness"
+  | "medication_food_water"
+  | "social_isolation"
+  | "missed_checkin";
 
 export interface SpeechProfile {
   speechRate: number;
@@ -20,6 +29,9 @@ export interface Senior {
   livingAlone: boolean;
   addressZone: string;
   caregiverContact: string;
+  neighborContact?: string | null;
+  knownConditions: string[];
+  promptFocus: string[];
   checkInFrequencyDays: number;
   baselineSpeechProfile: SpeechProfile;
 }
@@ -33,18 +45,39 @@ export interface RiskAssessment {
   reasons: string[];
 }
 
+export interface ConversationCategory {
+  id: ConversationCategoryId;
+  label: string;
+  severity: RiskLevel;
+  evidence: string[];
+  recommendedAction: string;
+}
+
+export interface EscalationStep {
+  id: string;
+  label: string;
+  status: "Standby" | "Triggered" | "Complete";
+  detail: string;
+}
+
 export interface CheckInSession {
   id: string;
   seniorId: string;
+  scenarioId?: string | null;
+  scenarioName?: string | null;
   scheduledAt: string;
   completedAt?: string;
   status: CheckInStatus;
   language: Language;
   riskLevel: RiskLevel;
   summary: string;
+  recommendedAction: string;
   originalTranscript: string;
   englishTranscript: string;
   riskAssessment: RiskAssessment;
+  categories: ConversationCategory[];
+  escalationPlan: EscalationStep[];
+  modelNote?: string | null;
 }
 
 export interface VolunteerTask {
@@ -56,6 +89,9 @@ export interface VolunteerTask {
   assignedTo: string;
   status: "Open" | "In progress" | "Closed";
   createdAt: string;
+  sourceSessionId?: string | null;
+  sourceCallId?: string | null;
+  escalationStep?: string | null;
 }
 
 export interface TranscriptMessage {
@@ -102,6 +138,8 @@ export interface CallRecord {
   aiRiskFallbackUsed?: boolean;
   riskAssessment: RiskAssessment;
   recommendedAction: string;
+  categories: ConversationCategory[];
+  escalationPlan: EscalationStep[];
 }
 
 export interface Scenario {
@@ -109,17 +147,15 @@ export interface Scenario {
   name: string;
   label: string;
   seniorId: string;
-  script: string[];
-  speechMetrics: Omit<SpeechProfile, "updatedAt">;
-  symptoms: {
-    fall: boolean;
-    headImpact: boolean;
-    headache: boolean;
-    dizziness: boolean;
-    vomiting: boolean;
-    confusion: boolean;
-    slurredSpeech: boolean;
-    weakness: boolean;
-    missedCheckIn: boolean;
-  };
+  description: string;
+  script: TranscriptMessage[];
+  speechMetrics: SpeechProfile;
+  symptoms: Record<string, boolean>;
+  originalTranscript: string;
+  englishTranscript: string;
+}
+
+export interface ScenarioRunResponse {
+  session: CheckInSession;
+  tasks: VolunteerTask[];
 }

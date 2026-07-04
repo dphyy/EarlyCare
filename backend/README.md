@@ -5,12 +5,26 @@ FastAPI service for EarlyCare call sessions, transcript processing, audio storag
 ## What It Does
 
 - Creates signed ElevenLabs Agents session URLs without exposing secrets to the frontend.
+- Serves the current seven-scenario demo runner.
+- Persists scripted check-in runs and volunteer task status under local hackathon storage.
 - Saves call artifacts from the website call demo.
 - Stores browser microphone recordings as `mic-audio.webm`.
 - Cleans transcript text by removing agent delivery tags such as `[happy]` or `[relieved]`.
 - Translates or normalizes transcripts to English.
 - Uses OpenAI structured output for decision-support symptom and risk extraction.
+- Builds categorized conversation evidence and escalation trails for Patient overview.
 - Serves saved call metadata and replayable audio to the Patient overview.
+
+## Scenario Runner Flow
+
+When the frontend posts to `POST /scenarios/{scenario_id}/run`, the backend:
+
+1. Loads the selected senior profile and scripted scenario.
+2. Compares the scenario speech metrics with the senior's baseline demo profile.
+3. Categorizes the record across eight care categories.
+4. Builds the escalation trail from routine note through emergency alert.
+5. Persists the check-in under `backend/storage/state/checkins.json`.
+6. Creates or updates a volunteer task when the result is Watch, Amber, Red, or missed check-in.
 
 ## Call Save Flow
 
@@ -100,12 +114,16 @@ Never commit real `.env` files.
 | --- | --- |
 | `GET /health` | API health check. |
 | `GET /seniors` | Demo senior roster. |
+| `GET /checkins` | Historical check-in records, including persisted scenario runs. |
+| `GET /scenarios` | Scripted demo scenarios. |
+| `POST /scenarios/{scenario_id}/run` | Run and persist a scripted scenario. |
 | `GET /calls` | Saved call records, newest first. |
 | `GET /calls/{call_id}` | One saved call record. |
 | `GET /calls/{call_id}/audio` | Replayable saved microphone recording. |
 | `POST /calls` | Save transcript messages and uploaded audio. |
 | `POST /elevenlabs/signed-url` | Create a signed Agents session URL. |
 | `GET /volunteer-tasks` | Demo volunteer task list. |
+| `PATCH /volunteer-tasks/{task_id}` | Update task status to `Open`, `In progress`, or `Closed`. |
 
 ## Storage
 
@@ -124,23 +142,19 @@ Each call can include:
 
 This is intentionally simple for hackathon speed. Use a database and object storage before any real pilot.
 
+Scripted check-ins and task status updates are written to:
+
+```text
+backend/storage/state/
+```
+
+This keeps the demo persistent across refreshes without committing generated records.
+
 ## Smoke Checks
 
 From the repository root:
 
 ```bash
 python3 -m py_compile backend/app/*.py
-```
-
-With the virtual environment active:
-
-```bash
-PYTHONPATH=backend backend/.venv/bin/python - <<'PY'
-from fastapi.testclient import TestClient
-from app.main import app
-
-client = TestClient(app)
-print(client.get("/health").status_code)
-print(client.get("/calls").status_code)
-PY
+pnpm backend:smoke
 ```

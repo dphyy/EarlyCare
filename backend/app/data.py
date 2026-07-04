@@ -1,4 +1,4 @@
-from app.models import CheckInSession, RiskAssessment, Senior, SpeechProfile, VolunteerTask
+from app.models import CheckInSession, RiskAssessment, Scenario, Senior, SpeechProfile, Symptoms, TranscriptMessage, VolunteerTask
 
 
 SENIORS = [
@@ -10,6 +10,9 @@ SENIORS = [
         livingAlone=True,
         addressZone="Toa Payoh",
         caregiverContact="Daughter: Mei Ling",
+        neighborContact="Neighbour: Mr Lee, unit 08-112",
+        knownConditions=["high blood pressure", "arthritis", "fall risk"],
+        promptFocus=["fall/head impact", "medication", "blood pressure", "food and water"],
         checkInFrequencyDays=2,
         baselineSpeechProfile=SpeechProfile(
             speechRate=122,
@@ -29,6 +32,9 @@ SENIORS = [
         livingAlone=True,
         addressZone="Jurong West",
         caregiverContact="Nephew: Arjun",
+        neighborContact="Neighbour: Mdm Koh, unit 05-241",
+        knownConditions=["early Parkinson's watch", "diabetes", "lives alone"],
+        promptFocus=["speech pace", "pa-ta-ka phrase", "diabetes medication", "loneliness"],
         checkInFrequencyDays=3,
         baselineSpeechProfile=SpeechProfile(
             speechRate=116,
@@ -48,6 +54,9 @@ SENIORS = [
         livingAlone=True,
         addressZone="Bedok",
         caregiverContact="Son: Hafiz",
+        neighborContact="Neighbour: Encik Salleh, unit 03-018",
+        knownConditions=["CKD", "hypertension", "needs hydration reminders"],
+        promptFocus=["kidney symptoms", "water intake", "blood pressure", "mood"],
         checkInFrequencyDays=2,
         baselineSpeechProfile=SpeechProfile(
             speechRate=128,
@@ -72,6 +81,7 @@ CHECKINS = [
         language="Malay",
         riskLevel="Green",
         summary="Stable check-in. No falls, symptoms, or adherence concerns.",
+        recommendedAction="Record routine check-in and continue the next scheduled call.",
         originalTranscript="Saya okay. Sudah makan dan makan ubat.",
         englishTranscript="I am okay. I ate and took my medication.",
         riskAssessment=RiskAssessment(
@@ -91,6 +101,7 @@ CHECKINS = [
         language="Mandarin",
         riskLevel="Red",
         summary="Reported fall with head impact, worsening headache, confusion, and left-hand weakness.",
+        recommendedAction="Trigger emergency escalation and notify caregiver.",
         originalTranscript="我昨晚跌倒，撞到头。头很痛，有点乱，左手没有力。",
         englishTranscript="I fell last night and hit my head. My head hurts, I feel confused, and my left hand is weak.",
         riskAssessment=RiskAssessment(
@@ -101,6 +112,134 @@ CHECKINS = [
             riskLevel="Red",
             reasons=["Fall with head impact", "Confusion and weakness reported", "Large speech deviation from baseline"],
         ),
+    ),
+]
+
+
+SCENARIOS = [
+    Scenario(
+        id="stable",
+        name="Stable check-in",
+        label="Routine call completed",
+        seniorId="s-003",
+        description="Routine 2-day wellbeing call. No symptoms, food and water are okay, speech remains close to baseline.",
+        script=[
+            TranscriptMessage(role="Agent", text="Hello Encik Ahmad, this is EarlyCare. Are you feeling okay today?"),
+            TranscriptMessage(role="Senior", text="Yes, I am okay. I ate breakfast, drank water, and took my medicine."),
+            TranscriptMessage(role="Agent", text="Any falls, head bumps, dizziness, headache, or blurred vision since our last call?"),
+            TranscriptMessage(role="Senior", text="No falls. No headache. I feel normal."),
+            TranscriptMessage(role="Agent", text="Please repeat: Today I am safe at home and I can ask for help."),
+            TranscriptMessage(role="Senior", text="Today I am safe at home and I can ask for help."),
+        ],
+        speechMetrics=SpeechProfile(speechRate=126, avgPauseMs=610, responseLatencyMs=920, pitchVariability=0.66, phraseAccuracy=0.97, embedding=[0.19, 0.35, 0.3, 0.55, 0.47, 0.4]),
+        symptoms=Symptoms(),
+        originalTranscript="Saya okay. Sudah makan, minum air dan makan ubat. Tiada jatuh atau sakit kepala.",
+        englishTranscript="I am okay. I ate, drank water, and took my medication. No fall or headache.",
+    ),
+    Scenario(
+        id="missed-checkin",
+        name="Missed check-in",
+        label="No answer after retry",
+        seniorId="s-001",
+        description="Scheduled call and retry are both unanswered, creating a same-day volunteer follow-up.",
+        script=[
+            TranscriptMessage(role="System", text="EarlyCare attempted the scheduled call at 9:00 AM."),
+            TranscriptMessage(role="System", text="No answer."),
+            TranscriptMessage(role="System", text="EarlyCare retried at 9:20 AM."),
+            TranscriptMessage(role="System", text="No answer after retry. Volunteer follow-up task created."),
+        ],
+        speechMetrics=SpeechProfile(speechRate=0, avgPauseMs=0, responseLatencyMs=0, pitchVariability=0, phraseAccuracy=0, embedding=[0, 0, 0, 0, 0, 0]),
+        symptoms=Symptoms(missedCheckIn=True),
+        originalTranscript="No answer after scheduled call and retry.",
+        englishTranscript="No answer after scheduled call and retry.",
+    ),
+    Scenario(
+        id="parkinsons-watch",
+        name="Parkinson's watch",
+        label="Gradual speech drift",
+        seniorId="s-002",
+        description="No acute fall, but slower speech, longer pauses, lower pitch variation, and reduced phrase clarity compared with personal baseline.",
+        script=[
+            TranscriptMessage(role="Agent", text="Hello Mr Raman, how are you today?"),
+            TranscriptMessage(role="Senior", text="I am okay... a bit slow today, but no fall."),
+            TranscriptMessage(role="Agent", text="Can you say pa-ta-ka three times?"),
+            TranscriptMessage(role="Senior", text="Pa... ta... ka... pa... ta... ka..."),
+            TranscriptMessage(role="Agent", text="Please tell me what you had for breakfast."),
+            TranscriptMessage(role="Senior", text="I had... tea. Toast. I think... yes, toast."),
+        ],
+        speechMetrics=SpeechProfile(speechRate=84, avgPauseMs=1450, responseLatencyMs=2300, pitchVariability=0.31, phraseAccuracy=0.78, embedding=[0.46, 0.12, 0.61, 0.31, 0.19, 0.71]),
+        symptoms=Symptoms(),
+        originalTranscript="I am okay... a bit slow today. Pa... ta... ka... I had tea and toast.",
+        englishTranscript="I am okay, a bit slow today. Pa-ta-ka was slower with long pauses. I had tea and toast.",
+    ),
+    Scenario(
+        id="post-fall-amber",
+        name="Post-Fall Amber",
+        label="Fall with headache, coherent",
+        seniorId="s-001",
+        description="Fall and head bump with headache/dizziness, but no confusion, weakness, vomiting, slurred speech, or drowsiness.",
+        script=[
+            TranscriptMessage(role="Agent", text="Mdm Tan, did you fall, bump your head, or feel dizzy since our last call?"),
+            TranscriptMessage(role="Senior", text="I slipped in the kitchen and bumped my head. I have a headache and feel a bit dizzy, but I know where I am."),
+            TranscriptMessage(role="Agent", text="Any vomiting, slurred speech, confusion, weakness, numbness, or difficulty waking?"),
+            TranscriptMessage(role="Senior", text="No vomiting. I can speak clearly and my arms feel normal."),
+        ],
+        speechMetrics=SpeechProfile(speechRate=104, avgPauseMs=900, responseLatencyMs=1320, pitchVariability=0.54, phraseAccuracy=0.9, embedding=[0.2, 0.29, 0.5, 0.56, 0.31, 0.5]),
+        symptoms=Symptoms(fall=True, headImpact=True, headache=True, dizziness=True),
+        originalTranscript="I slipped in the kitchen and bumped my head. I have a headache and feel a bit dizzy. No vomiting or weakness.",
+        englishTranscript="I slipped in the kitchen and bumped my head. I have a headache and feel a bit dizzy. No vomiting, confusion, slurred speech, weakness, numbness, or drowsiness.",
+    ),
+    Scenario(
+        id="post-fall-red",
+        name="Post-Fall Red",
+        label="Fall with danger signs",
+        seniorId="s-001",
+        description="Fall/head impact plus red danger signs: worsening headache, confusion, slurred speech, and weakness.",
+        script=[
+            TranscriptMessage(role="Agent", text="Mdm Tan, are you okay today?"),
+            TranscriptMessage(role="Senior", text="I fell last night and hit my head near the kitchen."),
+            TranscriptMessage(role="Agent", text="Do you have headache, vomiting, confusion, weakness, numbness, or trouble speaking?"),
+            TranscriptMessage(role="Senior", text="My head pain is getting worse. I feel confused and my left hand feels weak. My speech feels slurred."),
+            TranscriptMessage(role="Agent", text="I am going to alert your volunteer coordinator and caregiver now."),
+        ],
+        speechMetrics=SpeechProfile(speechRate=68, avgPauseMs=1900, responseLatencyMs=3100, pitchVariability=0.27, phraseAccuracy=0.62, embedding=[0.59, 0.09, 0.68, 0.21, 0.12, 0.78]),
+        symptoms=Symptoms(fall=True, headImpact=True, headache=True, worseningHeadache=True, confusion=True, slurredSpeech=True, weakness=True),
+        originalTranscript="I fell last night and hit my head. My head pain is getting worse. I feel confused and my left hand feels weak. My speech feels slurred.",
+        englishTranscript="I fell last night and hit my head. My headache is getting worse. I feel confused, my speech feels slurred, and my left hand feels weak.",
+    ),
+    Scenario(
+        id="chronic-illness",
+        name="Chronic Illness Check-In",
+        label="CKD / diabetes / blood pressure",
+        seniorId="s-003",
+        description="Condition-specific check-in covering CKD hydration, blood pressure, diabetes-style medication adherence, food, water, and appointments.",
+        script=[
+            TranscriptMessage(role="Agent", text="Encik Ahmad, did you drink enough water today and take your blood pressure medicine?"),
+            TranscriptMessage(role="Senior", text="I drank only a little water. I took blood pressure medicine, but I am not sure about my kidney appointment."),
+            TranscriptMessage(role="Agent", text="Any dizziness, swelling, missed medicine, or poor appetite?"),
+            TranscriptMessage(role="Senior", text="No swelling. Appetite is lower today, and I want Hafiz to remind me about the appointment."),
+        ],
+        speechMetrics=SpeechProfile(speechRate=116, avgPauseMs=760, responseLatencyMs=1180, pitchVariability=0.57, phraseAccuracy=0.92, embedding=[0.22, 0.33, 0.31, 0.52, 0.45, 0.42]),
+        symptoms=Symptoms(poorIntake=True, chronicConcern=True, ckdConcern=True, highBloodPressureConcern=True),
+        originalTranscript="I drank only a little water. I took blood pressure medicine. I am not sure about my kidney appointment. Appetite is lower today.",
+        englishTranscript="I drank only a little water. I took my blood pressure medicine. I am not sure about my kidney appointment. My appetite is lower today.",
+    ),
+    Scenario(
+        id="mental-wellbeing",
+        name="Mental Wellbeing / Loneliness",
+        label="Fear of dying unnoticed",
+        seniorId="s-002",
+        description="Basic wellbeing call where the senior is physically stable but lonely and afraid nobody will know if something happens.",
+        script=[
+            TranscriptMessage(role="Agent", text="Mr Raman, how are you feeling today?"),
+            TranscriptMessage(role="Senior", text="I am physically okay, but I feel lonely. Sometimes I worry I will die alone and nobody will know."),
+            TranscriptMessage(role="Agent", text="Would you like a befriender call or a neighbour check-in this week?"),
+            TranscriptMessage(role="Senior", text="Yes, please. I would like someone to call me."),
+        ],
+        speechMetrics=SpeechProfile(speechRate=108, avgPauseMs=900, responseLatencyMs=1500, pitchVariability=0.5, phraseAccuracy=0.9, embedding=[0.34, 0.2, 0.55, 0.39, 0.25, 0.66]),
+        symptoms=Symptoms(loneliness=True, lowMood=True, asksForHelp=True),
+        originalTranscript="I am physically okay, but I feel lonely. Sometimes I worry I will die alone and nobody will know. Yes, please call me.",
+        englishTranscript="I am physically okay, but I feel lonely. Sometimes I worry I will die alone and nobody will know. I would like someone to call me.",
     ),
 ]
 

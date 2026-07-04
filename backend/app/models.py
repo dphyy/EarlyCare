@@ -1,10 +1,21 @@
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 RiskLevel = Literal["Green", "Watch", "Amber", "Red"]
 Language = Literal["English", "Mandarin", "Malay", "Tamil", "Singlish/Dialect"]
+ConversationCategoryId = Literal[
+    "mental_wellbeing",
+    "fall_head_impact",
+    "concussion_danger",
+    "parkinsons_watch",
+    "chronic_illness",
+    "medication_food_water",
+    "social_isolation",
+    "missed_checkin",
+]
+EscalationStepStatus = Literal["Standby", "Triggered", "Complete"]
 
 
 class SpeechProfile(BaseModel):
@@ -25,6 +36,9 @@ class Senior(BaseModel):
     livingAlone: bool
     addressZone: str
     caregiverContact: str
+    neighborContact: str | None = None
+    knownConditions: list[str] = Field(default_factory=list)
+    promptFocus: list[str] = Field(default_factory=list)
     checkInFrequencyDays: int
     baselineSpeechProfile: SpeechProfile
 
@@ -32,15 +46,27 @@ class Senior(BaseModel):
 class Symptoms(BaseModel):
     fall: bool = False
     headImpact: bool = False
+    whiplashOrJolt: bool = False
     headache: bool = False
+    worseningHeadache: bool = False
     dizziness: bool = False
     vomiting: bool = False
     confusion: bool = False
     slurredSpeech: bool = False
     weakness: bool = False
+    numbness: bool = False
+    unusualBehavior: bool = False
+    drowsinessOrUnwakeable: bool = False
     poorIntake: bool = False
     asksForHelp: bool = False
     missedCheckIn: bool = False
+    loneliness: bool = False
+    lowMood: bool = False
+    medicationMissed: bool = False
+    chronicConcern: bool = False
+    ckdConcern: bool = False
+    diabetesConcern: bool = False
+    highBloodPressureConcern: bool = False
 
 
 class RiskAssessment(BaseModel):
@@ -52,18 +78,39 @@ class RiskAssessment(BaseModel):
     reasons: list[str]
 
 
+class ConversationCategory(BaseModel):
+    id: ConversationCategoryId
+    label: str
+    severity: RiskLevel
+    evidence: list[str] = Field(default_factory=list)
+    recommendedAction: str
+
+
+class EscalationStep(BaseModel):
+    id: str
+    label: str
+    status: EscalationStepStatus
+    detail: str
+
+
 class CheckInSession(BaseModel):
     id: str
     seniorId: str
+    scenarioId: str | None = None
+    scenarioName: str | None = None
     scheduledAt: str
     completedAt: str | None = None
     status: Literal["Checked in", "Missed", "Needs follow-up", "Urgent"]
     language: Language
     riskLevel: RiskLevel
     summary: str
+    recommendedAction: str = "Continue routine scheduled check-ins."
     originalTranscript: str
     englishTranscript: str
     riskAssessment: RiskAssessment
+    categories: list[ConversationCategory] = Field(default_factory=list)
+    escalationPlan: list[EscalationStep] = Field(default_factory=list)
+    modelNote: str | None = None
 
 
 class VolunteerTask(BaseModel):
@@ -75,6 +122,9 @@ class VolunteerTask(BaseModel):
     assignedTo: str
     status: Literal["Open", "In progress", "Closed"]
     createdAt: str
+    sourceSessionId: str | None = None
+    sourceCallId: str | None = None
+    escalationStep: str | None = None
 
 
 class SpeechDeviationRequest(BaseModel):
@@ -137,7 +187,27 @@ class CallRecord(BaseModel):
     aiRiskFallbackUsed: bool = False
     riskAssessment: RiskAssessment
     recommendedAction: str
+    categories: list[ConversationCategory] = Field(default_factory=list)
+    escalationPlan: list[EscalationStep] = Field(default_factory=list)
 
 
 class SavedCallResponse(BaseModel):
     call: CallRecord
+
+
+class Scenario(BaseModel):
+    id: str
+    name: str
+    label: str
+    seniorId: str
+    description: str
+    script: list[TranscriptMessage]
+    speechMetrics: SpeechProfile
+    symptoms: Symptoms = Symptoms()
+    originalTranscript: str
+    englishTranscript: str
+
+
+class ScenarioRunResponse(BaseModel):
+    session: CheckInSession
+    tasks: list[VolunteerTask]
