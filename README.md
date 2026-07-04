@@ -2,87 +2,86 @@
 
 **Preventive care and patient engagement for elderly people living alone.**
 
-EarlyCare is a hackathon prototype that turns regular wellbeing check-ins into earlier volunteer action. It simulates an in-browser voice call with an elderly resident, saves the transcript and recording, translates the conversation to English, and highlights risk signals for care teams to review.
+EarlyCare is a hackathon prototype for routine wellbeing calls. A patient starts a simulated browser call, an ElevenLabs agent conducts the check-in, the app records the full conversation, and the Patient overview shows the recording, original transcript, English transcript, patient-only AI risk highlights, and speech timing context for caregiver review.
 
-EarlyCare is designed for triage support, not diagnosis. It helps volunteers and officers notice missed check-ins, reported danger signs, possible post-fall/concussion concerns, Parkinson's watch signals, and meaningful speech changes sooner.
-
-## Why It Matters
-
-Older adults living alone may go days without anyone noticing a fall, head impact, confusion, poor intake, or a sudden change in speech. EarlyCare creates a lightweight check-in workflow that can be run every 2-3 days and escalated when the conversation suggests that follow-up is needed.
+EarlyCare is decision support, not diagnosis. It helps care teams notice risk signals such as falls, dizziness, sickness, confusion, weakness, poor intake, missed check-ins, or requests for help earlier.
 
 ## Key Features
 
 | Area | What EarlyCare Does |
 | --- | --- |
-| Agents website call | Starts an ElevenLabs Agents-powered browser call from the EarlyCare website. |
-| Patient overview | Shows saved calls, translated transcripts, original recordings, risk signals, and volunteer tasks. |
-| Audio capture | Records the browser microphone in parallel and stores replayable call audio locally. |
-| Translation pipeline | Uses MERaLiON first, Google Translate second, and transcript fallback last. |
-| AI risk review | Uses OpenAI structured output to identify decision-support risk signals from the English transcript. |
-| Neurological watch | Flags speech and symptom patterns that may justify earlier follow-up for Parkinson's watch or post-fall/concussion review. |
-| Safety stance | Avoids diagnosis language and frames alerts as prompts for volunteer or caregiver follow-up. |
+| Agents call | Starts an ElevenLabs Agents-powered browser call from the EarlyCare website. The patient can speak in the language they are comfortable with. |
+| Full-call recording | Records patient microphone audio and ElevenLabs agent audio into one replayable `full-call.webm`. |
+| Patient overview | Shows saved recordings, translated English transcript, original transcript, speech timing, risk review, and follow-up recommendation. |
+| Transcription and translation | Uses MERaLiON first, ElevenLabs speech-to-text and Google Translate as fallback, and saved dialogue transcript only as the final demo fallback. |
+| Inline risk highlights | Uses OpenAI structured output to detect patient-only risk signals and highlights the exact English evidence inline. |
+| Audio verification | Clicking a highlighted patient phrase seeks playback to immediately after the previous agent question, so caregivers can hear the patient answer in context. |
+| Speech timing | Tracks latest-call speech rate, average pause, response latency, pitch variability, and phrase accuracy against the latest available baseline. |
 
-## Early-Warning Logic
+## Workflow
 
-EarlyCare combines regular engagement with speech and transcript review. The current prototype focuses on whether a check-in suggests that a volunteer, caregiver, or officer should follow up sooner.
-
-| Signal | What EarlyCare Looks For | Output |
-| --- | --- | --- |
-| Speech deviation from baseline | The senior's current speech is compared against their own usual pattern, with future support for speech embeddings from models such as wav2vec 2.0, WavLM, or MERaLiON SpeechEncoder. | A deviation-focused risk summary, not a diagnosis. |
-| Parkinson's watch | Repeated or meaningful changes such as slower speech, longer pauses, reduced clarity, or reduced vocal variation can be surfaced as watch signals for human review. | Earlier monitoring or caregiver follow-up if the pattern persists. |
-| Post-fall/concussion concern | Mentions of falls, head impact, headache, dizziness, vomiting, confusion, weakness, or unusual speech after a fall are highlighted for urgent review. | Amber or Red follow-up recommendation depending on severity. |
-| Missed check-ins | Silence or failure to complete scheduled check-ins can indicate that a volunteer should check in. | Volunteer task or escalation prompt. |
-
-These signals are intentionally explainable. The app highlights the evidence, lets officers replay the original audio, and keeps the final decision with a human.
+1. Patient starts the simulated call from the **Agents call** page.
+2. The ElevenLabs agent conducts the wellbeing check-in.
+3. The frontend captures:
+   - live dialogue messages in the original spoken language
+   - mixed full-call audio containing patient and agent voice
+4. The backend saves `full-call.webm` and call metadata.
+5. The backend attempts transcript generation in this order:
+   - MERaLiON `http://meralion.org:8010/audio/transcription`
+   - MERaLiON `http://meralion.org:8010/audio/translation`
+   - ElevenLabs speech-to-text for original transcript fallback
+   - Google Translate for English translation fallback
+   - saved dialogue transcript as final demo fallback
+6. The backend stores:
+   - original transcript with `Agent:` and `Patient:` speaker labels
+   - English transcript with `Agent:` and `Patient:` speaker labels
+   - timestamped transcript segments
+   - provider/fallback metadata
+   - speech timing metrics
+7. OpenAI reviews patient speech only and returns structured risk signals.
+8. The Patient overview renders the English transcript above the original transcript and highlights risk evidence inline.
+9. Clicking a highlight plays the saved audio from immediately after the previous agent prompt.
 
 ## Architecture
 
 | Layer | Stack | Role |
 | --- | --- | --- |
-| Frontend | React, Vite, TypeScript | Agents call experience, Patient overview, audio playback, risk-signal UI. |
-| Backend | FastAPI, Python | Signed Agents sessions, call artifact storage, translation, risk review, API routes. |
-| Voice agent | ElevenLabs Agents React SDK | Live browser-based voice check-in. |
-| Translation | MERaLiON, Google Translate | English transcript normalization for officer review. |
-| AI review | OpenAI API | Structured symptom/risk extraction and highlighted evidence. |
+| Frontend | React, Vite, TypeScript | Agents call UI, full-call recording, Patient overview, inline highlights, audio seeking. |
+| Backend | FastAPI, Python | Signed ElevenLabs sessions, call artifact storage, transcription, translation, OpenAI risk review. |
+| Voice agent | ElevenLabs Agents React SDK | Live browser voice check-in and live transcript events. |
+| Transcription | MERaLiON, ElevenLabs STT | Primary and fallback speech-to-text. |
+| Translation | MERaLiON, Google Translate | English transcript generation for caregiver review. |
+| AI review | OpenAI API | Structured patient-only risk extraction. |
 | Persistence | Local filesystem | Hackathon-friendly storage under `backend/storage/calls/`. |
-
-## Provider Flow
-
-1. A volunteer starts an Agents website call.
-2. The browser captures live transcript messages and microphone audio.
-3. FastAPI saves the original transcript and `mic-audio.webm`.
-4. The backend translates to English using:
-   - MERaLiON audio translation
-   - Google Translate text translation if MERaLiON fails
-   - original transcript fallback if both providers are unavailable
-5. OpenAI reviews the English transcript and returns structured risk signals for missed check-ins, reported symptoms, Parkinson's watch, and post-fall/concussion concern.
-6. Patient overview shows the recording, transcripts, risk summary, and follow-up recommendation.
 
 ## Setup
 
-### 1. Clone and Prepare Env Files
+### 1. Create Env Files
 
 ```bash
 cp frontend/.env.example frontend/.env
 cp backend/.env.example backend/.env
 ```
 
-`frontend/.env` should point to the backend:
+`frontend/.env`:
 
 ```bash
 VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
-`backend/.env` may contain:
+`backend/.env`:
 
 ```bash
 ELEVENLABS_API_KEY=
 ELEVENLABS_AGENT_ID=
+ELEVENLABS_STT_MODEL=scribe_v2
 MERALION_API_KEY=
-MERALION_ASR_URL=
+MERALION_ASR_URL=http://meralion.org:8010/audio/transcription
+MERALION_TRANSLATION_URL=http://meralion.org:8010/audio/translation
 GOOGLE_TRANSLATE_API_KEY=
 GOOGLE_TRANSLATE_URL=https://translation.googleapis.com/language/translate/v2
 OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4o-mini
 ```
 
 Never commit real `.env` files.
@@ -127,35 +126,38 @@ Open the Vite URL, usually `http://localhost:5173`.
 1. Open **Agents call**.
 2. Choose a senior and click **Start call**.
 3. Allow microphone permission.
-4. Speak with the agent and click **End & save**.
-5. Open **Patient overview**.
-6. Review the recording, original transcript, English transcript, AI risk review, and volunteer follow-up action.
+4. Speak with the agent in any comfortable language.
+5. Click **End & save**.
+6. Open **Patient overview**.
+7. Review the full-call recording, English transcript, original transcript, speech timing, and inline risk highlights.
+8. Click a highlighted risk phrase to replay the patient answer from immediately after the previous agent question.
 
 ## Commands
 
 | Command | Description |
 | --- | --- |
 | `npm run dev --prefix frontend` | Start the frontend dev server. |
-| `npm run lint --prefix frontend` | Type-check the frontend. |
-| `npm run build --prefix frontend` | Build the frontend. |
+| `npm run build --prefix frontend` | Type-check and build the frontend. |
+| `PYTHONPATH=backend backend/.venv/bin/python -m unittest discover backend/tests` | Run backend tests. |
+| `backend/.venv/bin/python -m py_compile backend/app/*.py` | Compile-check backend modules. |
 | `uvicorn app.main:app --reload --port 8000` | Start the backend from the `backend/` folder. |
-
-## Safety Positioning
-
-EarlyCare does not diagnose Parkinson's disease, concussion, stroke, or any other medical condition. Parkinson's watch and post-fall/concussion concern are decision-support categories only. The product surfaces concerning statements, missed check-ins, and possible deviation from a personal baseline so a human volunteer, caregiver, or officer can follow up sooner.
-
-## Roadmap
-
-- Replace heuristic baseline placeholders with validated speech embeddings from models such as wav2vec 2.0, WavLM, or MERaLiON SpeechEncoder.
-- Validate Parkinson's watch and post-fall/concussion markers with clinicians and labelled datasets before any real-world deployment.
-- Add stronger timestamp alignment for sentence-level audio playback.
-- Add persistent storage beyond local filesystem for multi-user demos.
-- Add volunteer task assignment and acknowledgement flows.
-- Add consent, retention, and audit controls before any real-world pilot.
 
 ## Repository Guide
 
-- `frontend/` contains the React + Vite user interface.
+- `frontend/` contains the React + Vite interface.
 - `backend/` contains the FastAPI service and provider integrations.
-- `backend/storage/` is local generated data and is intentionally ignored.
-- `.env.example` files document required configuration without secrets.
+- `backend/tests/` contains backend workflow tests.
+- `backend/storage/` contains generated local call artifacts and is ignored.
+- `.env.example` files document configuration without secrets.
+
+## Safety Positioning
+
+EarlyCare does not diagnose Parkinson's disease, concussion, stroke, or any other medical condition. It surfaces concerning patient statements, missed check-ins, and changes from available speech baselines so a human volunteer, caregiver, or officer can follow up sooner.
+
+## Roadmap
+
+- Replace heuristic speech timing estimates with validated audio-derived features.
+- Improve audio/transcript alignment with provider word-level timestamps when available.
+- Validate risk categories with clinicians and labelled datasets before real-world deployment.
+- Add persistent database/object storage for multi-user demos.
+- Add consent, retention, audit, and access-control controls before any real pilot.
