@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
+import math
 import shutil
 import subprocess
 import zipfile
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +21,27 @@ from urllib.request import Request, urlopen
 USER_AGENT = "EarlyCare speech ML research fetcher"
 TABLE_SUFFIXES = {".csv", ".data", ".tsv"}
 NESTED_ARCHIVE_SUFFIXES = {".rar", ".7z"}
+SPEAKER_CANDIDATES = ["speaker_id", "subject_id", "subject id", "subject#", "subject", "id"]
+LABEL_CANDIDATES = ["class information", "class", "status", "label", "target"]
+EXCLUDED_FEATURE_COLUMNS = {
+    "id",
+    "subject",
+    "subject_id",
+    "subject#",
+    "speaker",
+    "speaker_id",
+    "name",
+    "class",
+    "label",
+    "status",
+    "target",
+    "updrs",
+    "motor_updrs",
+    "total_updrs",
+    "test_time",
+}
+POSITIVE_VALUES = {"1", "true", "yes", "pd", "pwp", "parkinson", "parkinsons", "parkinsonian", "patient", "case"}
+NEGATIVE_VALUES = {"0", "false", "no", "control", "healthy", "hc", "normal", "comparison"}
 
 
 @dataclass(frozen=True)
@@ -55,6 +79,109 @@ DATASETS = {
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def normalize_name(value: str) -> str:
+    return value.strip().lower().replace(" ", "_").replace("-", "_")
+
+
+def parse_float(value: str | None) -> float | None:
+    if value is None:
+        return None
+    try:
+        result = float(value.strip())
+    except ValueError:
+        return None
+    if math.isnan(result) or math.isinf(result):
+        return None
+    return result
+
+
+def read_table(path: Path) -> list[dict[str, str]]:
+    sample = path.read_text(encoding="utf-8-sig")[:4096]
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
+    except csv.Error:
+        dialect = csv.excel
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        return list(csv.DictReader(handle, dialect=dialect))
+
+
+def find_column(fieldnames: Sequence[str], candidates: Sequence[str]) -> str | None:
+    normalized = {normalize_name(fieldname): fieldname for fieldname in fieldnames}
+    for candidate in candidates:
+        if normalize_name(candidate) in normalized:
+            return normalized[normalize_name(candidate)]
+    return None
+
+
+def numeric_feature_columns(rows: list[dict[str, str]], excluded_columns: set[str]) -> list[str]:
+    if not rows:
+        return []
+    columns: list[str] = []
+    for column in rows[0].keys():
+        if normalize_name(column) in excluded_columns:
+            continue
+        values = [parse_float(row.get(column)) for row in rows]
+        if values and all(value is not None for value in values):
+            columns.append(column)
+    return columns
+
+
+def label_bucket(value: str) -> str:
+    normalized = normalize_name(value)
+    if normalized in POSITIVE_VALUES:
+        return "positive"
+    if normalized in NEGATIVE_VALUES:
+        return "negative"
+    return "unknown"
+
+
+def summarize_table(path: Path, root: Path) -> dict[str, object]:
+    rows = read_table(path)
+    fieldnames = list(rows[0].keys()) if rows else []
+    speaker_column = find_column(fieldnames, SPEAKER_CANDIDATES)
+    label_column = find_column(fieldnames, LABEL_CANDIDATES)
+    updrs_columns = [fieldname for fieldname in fieldnames if "updrs" in normalize_name(fieldname)]
+    excluded = set(EXCLUDED_FEATURE_COLUMNS)
+    if speaker_column:
+        excluded.add(normalize_name(speaker_column))
+    if label_column:
+        excluded.add(normalize_name(label_column))
+    excluded.update(normalize_name(column) for column in updrs_columns)
+    feature_columns = numeric_feature_columns(rows, excluded)
+    speakers = {row.get(speaker_column, "").strip() for row in rows} if speaker_column else set()
+    speakers.discard("")
+    label_counts = Counter(row.get(label_column, "").strip() for row in rows) if label_column else Counter()
+    label_buckets = Counter(label_bucket(label) for label in label_counts)
+    classification_ready = bool(speaker_column and label_column and feature_columns and label_buckets["positive"] and label_buckets["negative"])
+    progression_ready = bool(speaker_column and updrs_columns and feature_columns)
+    notes: list[str] = []
+    if not speaker_column:
+        notes.append("No speaker/subject column detected; speaker-level splits are not possible yet.")
+    if not label_column:
+        notes.append("No class/label column detected; current classifier training should not run on this table.")
+    elif not (label_buckets["positive"] and label_buckets["negative"]):
+        notes.append("Class labels do not include both positive and negative groups.")
+    if not feature_columns:
+        notes.append("No fully numeric feature columns detected after exclusions.")
+    if progression_ready and not classification_ready:
+        notes.append("Progression analysis candidate only; do not use as PD/control classifier input.")
+    return {
+        "path": str(path.relative_to(root)),
+        "rows": len(rows),
+        "columns": len(fieldnames),
+        "speaker_column": speaker_column,
+        "speakers": len(speakers),
+        "label_column": label_column,
+        "label_counts": dict(label_counts),
+        "updrs_columns": updrs_columns,
+        "numeric_feature_count": len(feature_columns),
+        "numeric_feature_columns": feature_columns[:20],
+        "classification_ready": classification_ready,
+        "progression_ready": progression_ready,
+        "notes": notes,
+    }
 
 
 def safe_extract_zip(zip_path: Path, output_dir: Path) -> list[Path]:
@@ -143,6 +270,7 @@ def write_manifest(
     archive_path: Path,
     extracted_files: list[Path],
     tables: list[Path],
+    table_summaries: list[dict[str, object]],
     archives: list[Path],
     notes: list[str],
 ) -> None:
@@ -158,6 +286,7 @@ def write_manifest(
         "archive": str(archive_path.relative_to(root)),
         "extracted_files": [str(path.relative_to(root)) for path in extracted_files if path.exists()],
         "table_candidates": [str(path.relative_to(root)) for path in tables],
+        "table_summaries": table_summaries,
         "nested_archives": [str(path.relative_to(root)) for path in archives],
         "notes": notes,
     }
@@ -184,13 +313,19 @@ def fetch_dataset(dataset: PublicDataset, args: argparse.Namespace, source_url: 
         notes.append(f"Nested archive extraction required; see {note_path.name}.")
 
     tables = table_candidates(output_dir)
+    table_summaries = [summarize_table(table, output_dir) for table in tables]
     if not tables:
         notes.append("No feature table was found after extraction.")
     manifest_path = output_dir / "dataset_fetch_manifest.json"
-    write_manifest(manifest_path, dataset, url, archive_path, extracted_files, tables, archives, notes)
+    write_manifest(manifest_path, dataset, url, archive_path, extracted_files, tables, table_summaries, archives, notes)
     print(f"wrote dataset fetch manifest to {manifest_path}")
     for table in tables:
         print(f"table candidate: {table}")
+    for summary in table_summaries:
+        status = "classification-ready" if summary["classification_ready"] else "not classifier-ready"
+        if summary["progression_ready"] and not summary["classification_ready"]:
+            status = "progression-only"
+        print(f"table readiness: {summary['path']} ({status})")
     for note in notes:
         print(f"note: {note}")
     return manifest_path

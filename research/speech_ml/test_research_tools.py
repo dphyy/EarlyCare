@@ -112,7 +112,7 @@ class ResearchToolTests(unittest.TestCase):
             source_zip = root / "source.zip"
             output_root = root / "datasets"
             with zipfile.ZipFile(source_zip, "w") as archive:
-                archive.writestr("training_data.csv", "Subject id,Jitter,class information\n1,0.2,1\n")
+                archive.writestr("training_data.csv", "Subject id,Jitter,class information\n1,0.2,1\n2,0.1,0\n")
                 archive.writestr("notes/readme.txt", "sample")
 
             exit_code = fetch_public_datasets.main(
@@ -132,7 +132,47 @@ class ResearchToolTests(unittest.TestCase):
             self.assertEqual(manifest["dataset_id"], "uci-parkinson-speech")
             self.assertEqual(manifest["table_candidates"], ["training_data.csv"])
             self.assertEqual(manifest["nested_archives"], [])
+            self.assertEqual(len(manifest["table_summaries"]), 1)
+            self.assertTrue(manifest["table_summaries"][0]["classification_ready"])
+            self.assertFalse(manifest["table_summaries"][0]["progression_ready"])
+            self.assertEqual(manifest["table_summaries"][0]["speaker_column"], "Subject id")
+            self.assertEqual(manifest["table_summaries"][0]["label_column"], "class information")
             self.assertTrue((output_root / "uci-parkinson-speech" / "training_data.csv").exists())
+
+    def test_fetch_public_dataset_marks_progression_only_tables(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_zip = root / "source.zip"
+            output_root = root / "datasets"
+            with zipfile.ZipFile(source_zip, "w") as archive:
+                archive.writestr(
+                    "parkinsons_updrs.data",
+                    "subject#,motor_UPDRS,total_UPDRS,Jitter(%),Shimmer\n"
+                    "1,20,30,0.1,0.2\n"
+                    "1,21,31,0.2,0.3\n"
+                    "2,25,35,0.3,0.4\n",
+                )
+
+            exit_code = fetch_public_datasets.main(
+                [
+                    "--dataset",
+                    "uci-parkinsons-telemonitoring",
+                    "--source-url",
+                    source_zip.resolve().as_uri(),
+                    "--output-root",
+                    str(output_root),
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            manifest = json.loads((output_root / "uci-parkinsons-telemonitoring" / "dataset_fetch_manifest.json").read_text())
+            summary = manifest["table_summaries"][0]
+            self.assertEqual(summary["speaker_column"], "subject#")
+            self.assertIsNone(summary["label_column"])
+            self.assertEqual(summary["updrs_columns"], ["motor_UPDRS", "total_UPDRS"])
+            self.assertFalse(summary["classification_ready"])
+            self.assertTrue(summary["progression_ready"])
+            self.assertIn("Progression analysis candidate only", summary["notes"][-1])
 
     def test_fetch_public_dataset_flags_nested_rar_without_external_extractor(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -157,6 +197,7 @@ class ResearchToolTests(unittest.TestCase):
             dataset_root = output_root / "uci-parkinson-speech"
             manifest = json.loads((dataset_root / "dataset_fetch_manifest.json").read_text())
             self.assertEqual(manifest["table_candidates"], [])
+            self.assertEqual(manifest["table_summaries"], [])
             self.assertEqual(manifest["nested_archives"], ["Parkinson_Multiple_Sound_Recording.rar"])
             self.assertTrue((dataset_root / "EXTRACTION_REQUIRED.md").exists())
             self.assertIn("Nested archive extraction required", manifest["notes"][0])

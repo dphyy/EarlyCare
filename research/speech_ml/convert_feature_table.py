@@ -127,7 +127,7 @@ def build_rows(args: argparse.Namespace, source_rows: list[dict[str, str]]) -> l
         raise ValueError("Feature table has no rows")
 
     fieldnames = list(source_rows[0].keys())
-    speaker_column = find_column(fieldnames, args.speaker_column, ["speaker_id", "subject_id", "subject id", "subject", "id"])
+    speaker_column = find_column(fieldnames, args.speaker_column, ["speaker_id", "subject_id", "subject id", "subject#", "subject", "id"])
     label_column = find_column(fieldnames, args.label_column, ["class information", "class", "status", "label", "target"])
     task_column = find_column(fieldnames, args.task_column, ["task", "sample", "recording"])
     updrs_column = find_column(fieldnames, args.updrs_column, ["updrs", "motor_updrs", "total_updrs"])

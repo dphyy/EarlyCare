@@ -45,7 +45,7 @@ python3 research/speech_ml/fetch_public_datasets.py \
   --dataset uci-parkinson-speech
 ```
 
-The fetcher writes `dataset_fetch_manifest.json` with source URL, table candidates, nested archives, and extraction notes. UCI's Parkinson speech package currently contains a nested `.rar`; install `unar`, `unrar`, or `7z` and re-run with `--allow-external-extractors` if the manifest says extraction is still required.
+The fetcher writes `dataset_fetch_manifest.json` with source URL, table candidates, nested archives, extraction notes, and table readiness summaries. Only run classifier training when a table summary has `classification_ready=true`. UCI's Parkinson speech package currently contains a nested `.rar`; install `unar`, `unrar`, or `7z` and re-run with `--allow-external-extractors` if the manifest says extraction is still required. UCI Parkinsons Telemonitoring should be treated as progression-only even when `progression_ready=true`.
 
 ## Dataset Shortlist
 
