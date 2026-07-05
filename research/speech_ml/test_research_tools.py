@@ -169,6 +169,57 @@ class ResearchToolTests(unittest.TestCase):
 
             self.assertIn("needs-review", str(raised.exception))
 
+    def test_run_experiment_supports_feature_table_input(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            input_path = root / "uci_like.csv"
+            output_dir = root / "artifacts"
+            with input_path.open("w", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=["Subject id", "Jitter", "Shimmer", "class information"])
+                writer.writeheader()
+                writer.writerows(
+                    [
+                        {"Subject id": "pd-001", "Jitter": "10", "Shimmer": "12", "class information": "1"},
+                        {"Subject id": "pd-001", "Jitter": "11", "Shimmer": "13", "class information": "1"},
+                        {"Subject id": "pd-002", "Jitter": "12", "Shimmer": "14", "class information": "1"},
+                        {"Subject id": "pd-002", "Jitter": "13", "Shimmer": "15", "class information": "1"},
+                        {"Subject id": "ctl-001", "Jitter": "0", "Shimmer": "1", "class information": "0"},
+                        {"Subject id": "ctl-001", "Jitter": "1", "Shimmer": "2", "class information": "0"},
+                        {"Subject id": "ctl-002", "Jitter": "2", "Shimmer": "3", "class information": "0"},
+                        {"Subject id": "ctl-002", "Jitter": "3", "Shimmer": "4", "class information": "0"},
+                    ]
+                )
+
+            exit_code = run_experiment.main(
+                [
+                    "--feature-table",
+                    str(input_path),
+                    "--output-dir",
+                    str(output_dir),
+                    "--experiment-name",
+                    "feature-run",
+                    "--dataset",
+                    "UCI Parkinson Speech",
+                    "--language",
+                    "Turkish",
+                    "--test-fraction",
+                    "0.5",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            rows_path = output_dir / "feature-run_embeddings.jsonl"
+            report_path = output_dir / "feature-run_experiment.md"
+            evaluation_path = output_dir / "feature-run_eval.json"
+            model_path = output_dir / "feature-run_baseline_model.json"
+            self.assertEqual(json.loads(evaluation_path.read_text())["status"], "ok")
+            self.assertEqual(json.loads(model_path.read_text())["status"], "ok")
+            first_row = json.loads(rows_path.read_text().splitlines()[0])
+            self.assertEqual(first_row["provenance"]["source_type"], "feature_table")
+            report = report_path.read_text()
+            self.assertIn("Input mode: feature table", report)
+            self.assertIn("Model: `feature-table-zscore`", report)
+
     def test_convert_feature_table_writes_evaluable_jsonl(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

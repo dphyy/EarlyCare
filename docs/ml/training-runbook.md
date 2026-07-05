@@ -83,16 +83,23 @@ Manual commands are still available when a step needs to be inspected separately
 Feature-only UCI sanity check, after downloading and extracting the UCI table locally:
 
 ```bash
+python3 research/speech_ml/run_experiment.py \
+  --feature-table research/datasets/uci-parkinson/training_data.csv \
+  --output-dir research/artifacts \
+  --experiment-name uci-parkinson-feature \
+  --dataset "UCI Parkinson Speech" \
+  --language Turkish
+```
+
+This writes feature rows, a speaker-level evaluation JSON file, a baseline model artifact, and a markdown report. Manual commands are still available when a step needs to be inspected separately:
+
+```bash
 python3 research/speech_ml/convert_feature_table.py \
   --input research/datasets/uci-parkinson/training_data.csv \
   --output research/artifacts/uci_parkinson_feature_rows.jsonl \
   --dataset "UCI Parkinson Speech" \
   --language Turkish
-```
 
-Then evaluate and train against the generated JSONL:
-
-```bash
 python3 research/speech_ml/evaluate_baseline.py \
   --input research/artifacts/uci_parkinson_feature_rows.jsonl \
   --output research/artifacts/uci_parkinson_feature_eval.json \

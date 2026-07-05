@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
-from research.speech_ml import evaluate_baseline, extract_embeddings, train_baseline
+from research.speech_ml import convert_feature_table, evaluate_baseline, extract_embeddings, train_baseline
 
 
 def utc_now() -> str:
@@ -68,6 +68,10 @@ def read_json(path: Path) -> dict[str, object]:
     return json.loads(path.read_text())
 
 
+def read_jsonl(path: Path) -> list[dict[str, object]]:
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
 def artifact_paths(output_dir: Path, slug: str) -> dict[str, Path]:
     return {
         "embeddings": output_dir / f"{slug}_embeddings.jsonl",
@@ -96,6 +100,33 @@ def extract_args(args: argparse.Namespace, embeddings_path: Path) -> list[str]:
         values.append("--trust-remote-code")
     if args.limit is not None:
         values.extend(["--limit", str(args.limit)])
+    return values
+
+
+def feature_table_args(args: argparse.Namespace, embeddings_path: Path) -> list[str]:
+    values = [
+        "--input",
+        str(args.feature_table),
+        "--output",
+        str(embeddings_path),
+        "--dataset",
+        args.dataset,
+        "--language",
+        args.language,
+        "--task",
+        args.task,
+    ]
+    optional_pairs = [
+        ("--speaker-column", args.speaker_column),
+        ("--label-column", args.label_column),
+        ("--task-column", args.task_column),
+        ("--updrs-column", args.updrs_column),
+        ("--source-id-column", args.source_id_column),
+        ("--exclude-columns", args.exclude_columns),
+    ]
+    for flag, value in optional_pairs:
+        if value:
+            values.extend([flag, value])
     return values
 
 
@@ -136,14 +167,18 @@ def write_report(
 ) -> None:
     metrics = evaluation.get("metrics") if isinstance(evaluation.get("metrics"), dict) else {}
     split = evaluation.get("split") if isinstance(evaluation.get("split"), dict) else {}
+    input_label = args.manifest if args.manifest else args.feature_table
+    input_mode = "raw-audio manifest" if args.manifest else "feature table"
+    model_label = args.model if args.manifest else "feature-table-zscore"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         f"# EarlyCare Speech ML Experiment: {args.experiment_name}",
         "",
         f"- Generated at: {utc_now()}",
-        f"- Manifest: `{args.manifest}`",
-        f"- Audio root: `{args.audio_root}`",
-        f"- Model: `{args.model}`",
+        f"- Input mode: {input_mode}",
+        f"- Input: `{input_label}`",
+        f"- Audio root: `{args.audio_root}`" if args.manifest else f"- Source type: feature table",
+        f"- Model: `{model_label}`",
         "- Scope: offline research only; not a diagnosis model and not app runtime routing.",
         "",
         "## Artifacts",
@@ -210,7 +245,9 @@ def write_report(
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run EarlyCare offline speech extraction, evaluation, training, and reporting.")
-    parser.add_argument("--manifest", type=Path, required=True, help="Reviewed CSV or JSONL manifest.")
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument("--manifest", type=Path, help="Reviewed CSV or JSONL manifest.")
+    input_group.add_argument("--feature-table", type=Path, help="Feature-only CSV or TSV dataset.")
     parser.add_argument("--audio-root", type=Path, default=Path("research/datasets"), help="Folder that manifest audio_path values are relative to.")
     parser.add_argument("--output-dir", type=Path, default=Path("research/artifacts"))
     parser.add_argument("--experiment-name", help="Human-readable experiment name. Defaults to manifest stem plus model.")
@@ -224,31 +261,58 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--test-dataset", help="Test only on this dataset name.")
     parser.add_argument("--limit", type=int, help="Process only the first N manifest rows.")
     parser.add_argument("--allow-review-rows", action="store_true", help="Allow rows marked needs-review to proceed.")
+    parser.add_argument("--dataset", default="UCI Parkinson Speech", help="Dataset name for --feature-table mode.")
+    parser.add_argument("--language", default="", help="Language stored in feature-table provenance.")
+    parser.add_argument("--speaker-column", help="Feature-table speaker/subject column.")
+    parser.add_argument("--label-column", help="Feature-table class/label column.")
+    parser.add_argument("--task-column", help="Feature-table task/sample column.")
+    parser.add_argument("--updrs-column", help="Feature-table UPDRS column stored in provenance.")
+    parser.add_argument("--source-id-column", help="Feature-table source row id column.")
+    parser.add_argument("--task", default="feature_table", help="Feature-table task value when no task column exists.")
+    parser.add_argument("--exclude-columns", help="Comma-separated feature-table columns excluded from the vector.")
     args = parser.parse_args(argv)
     if (args.train_dataset and not args.test_dataset) or (args.test_dataset and not args.train_dataset):
         parser.error("--train-dataset and --test-dataset must be provided together")
     if not args.experiment_name:
-        args.experiment_name = f"{args.manifest.stem}-{args.model}"
+        input_stem = args.manifest.stem if args.manifest else args.feature_table.stem
+        model_name = args.model if args.manifest else "feature-table"
+        args.experiment_name = f"{input_stem}-{model_name}"
     return args
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
-    manifest_rows = read_manifest_rows(args.manifest)
-    unresolved = review_row_count(manifest_rows)
-    if unresolved and not args.allow_review_rows:
-        raise SystemExit(f"Manifest has {unresolved} rows marked needs-review. Review them or pass --allow-review-rows.")
-
     slug = slugify(args.experiment_name)
     paths = artifact_paths(args.output_dir, slug)
 
-    extract_embeddings.main(extract_args(args, paths["embeddings"]))
+    if args.manifest:
+        manifest_rows = read_manifest_rows(args.manifest)
+        unresolved = review_row_count(manifest_rows)
+        if unresolved and not args.allow_review_rows:
+            raise SystemExit(f"Manifest has {unresolved} rows marked needs-review. Review them or pass --allow-review-rows.")
+        extract_embeddings.main(extract_args(args, paths["embeddings"]))
+        summary = manifest_summary(manifest_rows)
+    else:
+        convert_feature_table.main(feature_table_args(args, paths["embeddings"]))
+        summary = manifest_summary(
+            [
+                {
+                    "dataset": str(row.get("dataset") or "unknown"),
+                    "speaker_id": str(row.get("speaker_id") or ""),
+                    "label": str(row.get("label") or "unknown"),
+                    "task": str(row.get("task") or "feature_table"),
+                    "review_status": "",
+                }
+                for row in read_jsonl(paths["embeddings"])
+            ]
+        )
+
     evaluate_baseline.main(evaluation_args(args, paths["embeddings"], paths["evaluation"]))
     train_baseline.main(training_args(args, paths["embeddings"], paths["model"]))
 
     evaluation = read_json(paths["evaluation"])
     model = read_json(paths["model"])
-    write_report(paths["report"], args, paths, manifest_summary(manifest_rows), evaluation, model)
+    write_report(paths["report"], args, paths, summary, evaluation, model)
     print(f"wrote experiment report to {paths['report']}")
     return 0
 

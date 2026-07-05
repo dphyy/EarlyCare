@@ -60,14 +60,15 @@ The runner refuses manifests with `review_status=needs-review` unless `--allow-r
 Feature-only datasets such as UCI Parkinson's Speech do not validate raw-audio embeddings, but they are useful for quick speaker-level sanity checks:
 
 ```bash
-python3 research/speech_ml/convert_feature_table.py \
-  --input research/datasets/uci-parkinson/training_data.csv \
-  --output research/artifacts/uci_parkinson_feature_rows.jsonl \
+python3 research/speech_ml/run_experiment.py \
+  --feature-table research/datasets/uci-parkinson/training_data.csv \
+  --output-dir research/artifacts \
+  --experiment-name uci-parkinson-feature \
   --dataset "UCI Parkinson Speech" \
   --language Turkish
 ```
 
-The converter writes z-scored numeric feature vectors using `source_type=feature_table` provenance. Feed the JSONL into the same `evaluate_baseline.py` and `train_baseline.py` scripts, but keep results labelled as feature-table experiments.
+The runner writes z-scored numeric feature vectors using `source_type=feature_table` provenance, then evaluates and trains through the same speaker-level baseline flow. Keep results labelled as feature-table experiments.
 
 ## Extract Embeddings
 
