@@ -2,6 +2,7 @@
   --ink: #17201a;
   --muted: #667065;
   --surface: #ffffff;
+  --surface-raised: #fbfcfd;
   --surface-soft: #f8faf5;
   --surface-muted: #f2f5ef;
   --line: #dfe5d8;
@@ -32,7 +33,7 @@
 
 body {
   background:
-    linear-gradient(180deg, #f7fafb 0, #eef4f1 340px, #f6f8fb 100%),
+    linear-gradient(180deg, #f8fafb 0, #eef3f5 360px, #f7f8fa 100%),
     #f4f7f8;
   margin: 0;
   min-width: 320px;
@@ -68,9 +69,9 @@ input:focus-visible {
 
 .topbar {
   align-items: center;
-  background: rgba(255, 255, 255, 0.94);
+  background: rgba(255, 255, 255, 0.96);
   border-bottom: 1px solid rgba(200, 212, 221, 0.95);
-  box-shadow: 0 10px 28px rgba(30, 44, 64, 0.06);
+  box-shadow: 0 10px 28px rgba(30, 44, 64, 0.05);
   backdrop-filter: blur(18px);
   display: flex;
   gap: 24px;
@@ -269,14 +270,14 @@ button:disabled {
 .hero-band {
   align-items: stretch;
   background:
-    linear-gradient(135deg, rgba(14, 42, 48, 0.98) 0%, rgba(22, 69, 63, 0.97) 48%, rgba(36, 75, 154, 0.94) 100%),
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.05) 0 1px, transparent 1px 76px);
+    linear-gradient(135deg, rgba(13, 34, 42, 0.98) 0%, rgba(19, 62, 58, 0.97) 52%, rgba(31, 67, 126, 0.94) 100%),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.045) 0 1px, transparent 1px 72px);
   border-bottom: 1px solid rgba(14, 42, 48, 0.3);
   color: #ffffff;
   display: grid;
-  gap: 18px;
-  grid-template-columns: minmax(0, 1.18fr) minmax(420px, 0.82fr);
-  padding: 20px 28px;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1.24fr) minmax(360px, 0.76fr);
+  padding: 18px 28px;
 }
 
 .hero-copy {
@@ -326,7 +327,7 @@ button:disabled {
   background: rgba(255, 255, 255, 0.12);
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 8px;
-  box-shadow: 0 18px 42px rgba(7, 21, 27, 0.2);
+  box-shadow: 0 18px 42px rgba(7, 21, 27, 0.18);
   backdrop-filter: blur(16px);
   display: grid;
   gap: 14px;
@@ -601,9 +602,9 @@ h3 {
 .call-first-grid,
 .call-only-grid {
   display: grid;
-  gap: 20px;
-  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
-  padding: 20px 28px 40px;
+  gap: 18px;
+  grid-template-columns: minmax(300px, 370px) minmax(0, 1fr);
+  padding: 18px 28px 40px;
 }
 
 .simulator-grid,
@@ -623,7 +624,7 @@ h3 {
 
 .roster-panel {
   align-self: start;
-  max-height: calc(100vh - 96px);
+  max-height: calc(100vh - 98px);
   overflow: auto;
   position: sticky;
   top: 82px;
@@ -1725,6 +1726,7 @@ h3 {
 .record-category:hover,
 .record-event:hover,
 .task-card:hover,
+.task-workflow-card:hover,
 .call-record:hover {
   border-color: #c9d8bf;
   box-shadow: 0 8px 18px rgba(31, 45, 34, 0.05);
@@ -1895,6 +1897,207 @@ h3 {
   gap: 7px;
   justify-content: center;
   padding: 8px 10px;
+}
+
+.patient-command-strip {
+  background: #ffffff;
+  border: 1px solid #d4dde4;
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(36, 52, 74, 0.05);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 10px;
+}
+
+.patient-command-strip span {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e1e8ee;
+  border-radius: 8px;
+  color: #344036;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 750;
+  gap: 7px;
+  min-height: 38px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+}
+
+.patient-command-strip svg {
+  color: #0b7685;
+  flex: 0 0 auto;
+}
+
+.operator-workbench {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.operator-workbench > * {
+  margin: 0;
+  min-width: 0;
+}
+
+.operator-workbench .call-plan-panel {
+  box-shadow: 0 14px 32px rgba(36, 52, 74, 0.06);
+}
+
+.operator-workbench .call-plan-question-list {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.operator-workbench .call-plan-footer {
+  align-items: stretch;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+}
+
+.operator-workbench .call-plan-footer .primary-action {
+  min-width: 168px;
+  white-space: nowrap;
+}
+
+.task-pipeline-section {
+  background:
+    linear-gradient(180deg, #ffffff, var(--surface-raised));
+  border: 1px solid #d4dde4;
+  border-radius: 8px;
+  box-shadow: 0 14px 32px rgba(36, 52, 74, 0.07);
+  padding: 16px;
+}
+
+.pipeline-meta {
+  color: #667065;
+}
+
+.pipeline-meta strong {
+  color: #17201a;
+}
+
+.task-lane-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.task-lane {
+  background: #f8fafc;
+  border: 1px solid #e1e8ee;
+  border-radius: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.lane-open {
+  box-shadow: inset 0 3px 0 #df6d5f;
+}
+
+.lane-in-progress {
+  box-shadow: inset 0 3px 0 #6b87d6;
+}
+
+.lane-closed {
+  box-shadow: inset 0 3px 0 #67a56f;
+}
+
+.task-lane-header {
+  align-items: center;
+  background: #ffffff;
+  border-bottom: 1px solid #e1e8ee;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-height: 44px;
+  padding: 10px;
+}
+
+.task-lane-header span {
+  align-items: center;
+  color: #243029;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 900;
+  gap: 7px;
+}
+
+.task-lane-header svg {
+  color: #0b7685;
+}
+
+.task-lane-header strong {
+  background: #eef3e8;
+  border-radius: 999px;
+  color: #16453f;
+  display: grid;
+  font-size: 12px;
+  height: 26px;
+  place-items: center;
+  width: 26px;
+}
+
+.task-lane-body {
+  display: grid;
+  gap: 10px;
+  min-height: 142px;
+  padding: 10px;
+}
+
+.task-workflow-card {
+  background: #ffffff;
+  border: 1px solid #dfe5d8;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.task-workflow-card strong {
+  color: #17201a;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.task-workflow-card p {
+  color: #344036;
+  font-size: 13px;
+  line-height: 1.42;
+  margin: 0;
+}
+
+.task-source {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.task-source span {
+  background: #f8faf5;
+  border: 1px solid #dfe5d8;
+  border-radius: 999px;
+  color: #495549;
+  font-size: 12px;
+  padding: 5px 8px;
+}
+
+.task-empty {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.68);
+  border: 1px dashed #c9d4dd;
+  border-radius: 8px;
+  color: #667065;
+  display: flex;
+  font-size: 13px;
+  justify-content: center;
+  margin: 0;
+  min-height: 112px;
+  padding: 12px;
+  text-align: center;
 }
 
 .result-header strong {
@@ -2479,11 +2682,14 @@ h3 {
   .schedule-grid,
   .speech-metric-grid,
   .contact-route-grid,
+  .patient-command-strip,
+  .operator-workbench,
   .decision-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .decision-grid {
+  .decision-grid,
+  .operator-workbench {
     grid-template-columns: 1fr;
   }
 
@@ -2496,6 +2702,10 @@ h3 {
   .handoff-card,
   .profile-handoff {
     display: grid;
+  }
+
+  .profile-handoff {
+    grid-template-columns: 1fr;
   }
 
   .queue-card {
@@ -2520,6 +2730,10 @@ h3 {
   .call-plan-footer {
     align-items: stretch;
     display: grid;
+  }
+
+  .operator-workbench .call-plan-question-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .scenario-library {
@@ -2603,6 +2817,8 @@ h3 {
   .schedule-grid,
   .speech-metric-grid,
   .contact-route-grid,
+  .patient-command-strip,
+  .task-lane-grid,
   .queue-pressure-strip,
   .pressure-segments {
     grid-template-columns: 1fr;
@@ -2717,6 +2933,11 @@ h3 {
 
   .task-actions {
     display: grid;
+  }
+
+  .operator-workbench .call-plan-question-list,
+  .operator-workbench .call-plan-footer {
+    grid-template-columns: 1fr;
   }
 
   .result-actions {

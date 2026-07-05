@@ -3,20 +3,26 @@ import { createRoot } from "react-dom/client";
 import {
   Activity,
   AlertTriangle,
+  ArrowRight,
   Bell,
   Brain,
   CalendarClock,
   CheckCircle2,
   ChevronRight,
+  ClipboardCheck,
   CircleDot,
+  Clock3,
   ClipboardList,
   FileClock,
+  Gauge,
   Headphones,
   HeartPulse,
+  History,
   Languages,
   ListChecks,
   MapPin,
   PhoneCall,
+  PhoneForwarded,
   PlayCircle,
   RadioTower,
   RefreshCw,
@@ -71,6 +77,7 @@ const riskOrder: Record<RiskLevel, number> = { Green: 0, Watch: 1, Amber: 2, Red
 type AppView = "demo" | "call" | "dashboard";
 type ScenarioTone = { label: string; risk: RiskLevel; detail: string };
 type RosterFilter = "all" | "due" | "tasks" | "risk";
+type TaskLane = VolunteerTask["status"];
 
 const AgentsCall = lazy(() => import("./AgentsCall"));
 
@@ -169,6 +176,11 @@ function formatSyncTime(value?: string | null): string {
   return `Synced ${new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 }
 
+function formatShortDate(value?: string | null): string {
+  if (!value) return "Not available";
+  return new Date(value).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
 function formatHours(value: number): string {
   if (!Number.isFinite(value)) return "Not set";
   if (Math.abs(value) < 0.1) return "now";
@@ -242,6 +254,83 @@ function EscalationTrail({ steps }: { steps: EscalationStep[] }) {
         </article>
       ))}
     </div>
+  );
+}
+
+function FollowUpPipeline({
+  tasks,
+  onTaskStatus
+}: {
+  tasks: VolunteerTask[];
+  onTaskStatus: (taskId: string, status: VolunteerTask["status"]) => void;
+}) {
+  const lanes: Array<{ status: TaskLane; title: string; icon: React.ReactNode; empty: string }> = [
+    { status: "Open", title: "Needs owner", icon: <Bell size={16} />, empty: "No unowned work." },
+    { status: "In progress", title: "Being handled", icon: <PhoneForwarded size={16} />, empty: "No active handoff." },
+    { status: "Closed", title: "Closed", icon: <ClipboardCheck size={16} />, empty: "No closed tasks yet." }
+  ];
+  const groupedTasks = lanes.map((lane) => ({
+    ...lane,
+    tasks: tasks.filter((task) => task.status === lane.status)
+  }));
+  const openCount = tasks.filter((task) => task.status !== "Closed").length;
+  const urgentCount = tasks.filter((task) => task.priority === "Urgent" && task.status !== "Closed").length;
+
+  return (
+    <section className="task-pipeline-section">
+      <SectionHeading
+        eyebrow="Follow-up control"
+        title="Action Pipeline"
+        meta={
+          <span className="pipeline-meta">
+            <strong>{openCount}</strong> open · <strong>{urgentCount}</strong> urgent
+          </span>
+        }
+      />
+      <div className="task-lane-grid" aria-label="Volunteer task pipeline">
+        {groupedTasks.map((lane) => (
+          <div className={`task-lane lane-${lane.status.toLowerCase().replace(" ", "-")}`} key={lane.status}>
+            <div className="task-lane-header">
+              <span>
+                {lane.icon}
+                {lane.title}
+              </span>
+              <strong>{lane.tasks.length}</strong>
+            </div>
+            <div className="task-lane-body">
+              {lane.tasks.length ? (
+                lane.tasks.map((task) => (
+                  <article className={`task-workflow-card task-${task.status.toLowerCase().replace(" ", "-")}`} key={task.id}>
+                    <div className="task-card-top">
+                      <span className={`priority priority-${task.priority.toLowerCase()}`}>{task.priority}</span>
+                      <small>{formatShortDate(task.createdAt)}</small>
+                    </div>
+                    <strong>{task.reason}</strong>
+                    <p>{task.recommendedAction}</p>
+                    <div className="task-source">
+                      <span>{task.assignedTo}</span>
+                      {task.escalationStep ? <span>{task.escalationStep.replaceAll("-", " ")}</span> : null}
+                    </div>
+                    <div className="task-actions">
+                      <button onClick={() => onTaskStatus(task.id, "In progress")} disabled={task.status !== "Open"}>
+                        <CheckCircle2 size={16} />
+                        Acknowledge
+                      </button>
+                      <button onClick={() => onTaskStatus(task.id, "Closed")} disabled={task.status === "Closed"}>
+                        <ShieldCheck size={16} />
+                        Close
+                      </button>
+                    </div>
+                  </article>
+                ))
+              ) : (
+                <p className="task-empty">{lane.empty}</p>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -665,7 +754,7 @@ function ScenarioRunner({
       }
       setLastSession(response.session);
       await onScenarioRun(response.session, response.tasks);
-      setStatus("Scenario saved. Review the result here or open Patient overview.");
+      setStatus("Scenario saved. Review the result here or open Care desk.");
     } finally {
       setIsRunning(false);
     }
@@ -767,7 +856,7 @@ function ScenarioRunner({
             <div className="result-actions">
               <button className="primary-action" onClick={onOpenDashboard}>
                 <Activity size={18} />
-                Open Patient overview
+                Open Care desk
               </button>
               <button onClick={() => setLastSession(null)}>Run another scenario</button>
             </div>
@@ -1237,7 +1326,7 @@ function OfficerDashboard({
           <div className="profile-copy">
             <div className="profile-title-block">
               <div>
-                <span className="eyebrow">Patient overview</span>
+                <span className="eyebrow">Care desk profile</span>
                 <h2>{selectedSenior.name}</h2>
               </div>
               <RiskBadge level={highestRisk} />
@@ -1321,6 +1410,30 @@ function OfficerDashboard({
           </div>
         </section>
 
+        <section className="patient-command-strip" aria-label="Selected patient command summary">
+          <span>
+            <Clock3 size={16} />
+            {selectedSchedule ? `${selectedSchedule.status} · ${scheduleTimingSummary}` : "No active cadence"}
+          </span>
+          <span>
+            <Gauge size={16} />
+            Highest risk {highestRisk}
+          </span>
+          <span>
+            <History size={16} />
+            {selectedRecords.length} record{selectedRecords.length === 1 ? "" : "s"}
+          </span>
+          <span>
+            <ArrowRight size={16} />
+            {selectedOpenTasks.length ? selectedOpenTasks[0].assignedTo : "Routine monitoring"}
+          </span>
+        </section>
+
+        <div className="operator-workbench">
+          <FollowUpPipeline tasks={selectedTasks} onTaskStatus={onTaskStatus} />
+          <CallPlanPanel callPlan={selectedCallPlan} onStartCall={() => onStartCall(selectedSenior.id)} />
+        </div>
+
         <OperationsQueuePanel
           queue={operationsQueue}
           selectedSeniorId={selectedSenior.id}
@@ -1387,42 +1500,7 @@ function OfficerDashboard({
           )}
         </section>
 
-        <CallPlanPanel callPlan={selectedCallPlan} onStartCall={() => onStartCall(selectedSenior.id)} />
-
         <SeniorRecordPanel record={selectedSeniorRecord} />
-
-        <section className="volunteer-task-section priority-section">
-          <SectionHeading title="Volunteer Tasks" meta={<span>{selectedOpenTasks.length} open</span>} />
-          <div className="task-list">
-            {selectedTasks.length ? (
-              selectedTasks.map((task) => (
-                <article key={task.id} className={`task-card task-${task.status.toLowerCase().replace(" ", "-")}`}>
-                  <div className="task-card-top">
-                    <span className={`priority priority-${task.priority.toLowerCase()}`}>{task.priority}</span>
-                    <small>{task.status}</small>
-                  </div>
-                  <strong>{task.reason}</strong>
-                  <p>{task.recommendedAction}</p>
-                  <small>
-                    {task.assignedTo} · {formatDate(task.createdAt)}
-                  </small>
-                  <div className="task-actions">
-                    <button onClick={() => onTaskStatus(task.id, "In progress")} disabled={task.status === "In progress"}>
-                      <CheckCircle2 size={16} />
-                      Acknowledge
-                    </button>
-                    <button onClick={() => onTaskStatus(task.id, "Closed")} disabled={task.status === "Closed"}>
-                      <ShieldCheck size={16} />
-                      Close
-                    </button>
-                  </div>
-                </article>
-              ))
-            ) : (
-              <p className="empty-state">No open task for this senior.</p>
-            )}
-          </div>
-        </section>
 
         <div className="focus-strip">
           {selectedSenior.promptFocus.map((item) => (
@@ -1727,7 +1805,7 @@ function App() {
       scheduledAt: scheduleItem?.nextDueAt ?? now,
       retryAt: now,
       attemptCount: 2,
-      note: "Logged from Patient overview after scheduled call and retry were unanswered."
+      note: "Logged from Care desk after scheduled call and retry were unanswered."
     });
 
     if (!response) return false;
@@ -1752,7 +1830,7 @@ function App() {
       completedAt: new Date().toISOString(),
       originalTranscript: transcript,
       englishTranscript: transcript,
-      summary: "Completed scheduled check-in from Patient overview."
+      summary: "Completed scheduled check-in from Care desk."
     });
     if (!completed) return false;
 
@@ -1788,27 +1866,27 @@ function App() {
             </button>
             <button className={view === "call" ? "active" : ""} onClick={() => setView("call")}>
               <Headphones size={18} />
-              Agents call
+              Live call
             </button>
             <button className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}>
               <Activity size={18} />
-              Patient overview
+              Care desk
             </button>
           </nav>
         </div>
       </header>
 
-      <section className="hero-band" aria-label="Care operations command center">
+      <section className="hero-band" aria-label="Care desk command center">
         <div className="hero-copy">
           <div className="ops-title-row">
-            <span className="eyebrow">Care operations command center</span>
+            <span className="eyebrow">Care desk command center</span>
             <span className="sync-chip">
               <Activity size={14} />
               {formatSyncTime(lastSyncedAt)}
             </span>
           </div>
-          <h1>Care operations</h1>
-          <p>Monitor due check-ins, unanswered attempts, and human follow-up before silence turns into a welfare risk.</p>
+          <h1>Care desk</h1>
+          <p>Triage scheduled voice check-ins, unanswered attempts, and human follow-up before silence turns into a welfare risk.</p>
           <div className="ops-command-panel">
             <div className="priority-brief">
               <span className={`priority priority-${topQueueItem?.priority.toLowerCase() ?? "routine"}`}>{topQueueItem?.priority ?? "Clear"}</span>
