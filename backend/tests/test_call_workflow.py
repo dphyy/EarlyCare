@@ -729,6 +729,39 @@ class CallWorkflowTests(unittest.TestCase):
             finally:
                 main.CALL_STORAGE_ROOT = original_storage_root
 
+    def test_failed_call_save_removes_partial_audio_directory(self) -> None:
+        with TemporaryDirectory() as tmp:
+            original_storage_root = main.CALL_STORAGE_ROOT
+            main.CALL_STORAGE_ROOT = Path(tmp)
+            try:
+                client = TestClient(main.app, raise_server_exceptions=False)
+                with patch.object(main, "transcribe_with_fallback", side_effect=RuntimeError("provider failed")):
+                    response = client.post(
+                        "/calls",
+                        data={
+                            "seniorId": "s-001",
+                            "status": "Complete",
+                            "startedAt": "2026-07-04T10:00:00+08:00",
+                            "completedAt": "2026-07-04T10:05:00+08:00",
+                            "transcriptMessages": json.dumps(
+                                [
+                                    {
+                                        "role": "Senior",
+                                        "text": "I am okay.",
+                                        "timestamp": "2026-07-04T10:01:00+08:00",
+                                    }
+                                ]
+                            ),
+                            "agentAudioCaptured": "false",
+                        },
+                        files={"audio": ("full-call.webm", b"fake audio", "audio/webm")},
+                    )
+
+                self.assertEqual(response.status_code, 500)
+                self.assertEqual(list(main.CALL_STORAGE_ROOT.glob("call-*")), [])
+            finally:
+                main.CALL_STORAGE_ROOT = original_storage_root
+
     def test_speech_enrichment_keeps_existing_metadata_when_atomic_replace_fails(self) -> None:
         with TemporaryDirectory() as tmp:
             original_storage_root = main.CALL_STORAGE_ROOT

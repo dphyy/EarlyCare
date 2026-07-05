@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import shutil
 from contextlib import suppress
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -203,6 +204,11 @@ def _quarantine_corrupt_file(path: Path) -> Path | None:
         path.replace(backup_path)
         return backup_path
     return None
+
+
+def _remove_directory_quietly(path: Path) -> None:
+    with suppress(OSError):
+        shutil.rmtree(path)
 
 
 def _load_state_records(path: Path, defaults: list[StateRecord], model: type[StateRecord]) -> list[StateRecord]:
@@ -1765,78 +1771,84 @@ async def save_call(
     messages = _clean_messages(messages)
     call_id = f"call-{uuid4().hex[:10]}"
     call_dir = CALL_STORAGE_ROOT / call_id
-    call_dir.mkdir(parents=True, exist_ok=True)
+    metadata_path = _call_metadata_path(call_id)
+    try:
+        call_dir.mkdir(parents=True, exist_ok=True)
 
-    audio_file_path: str | None = None
-    audio_path: Path | None = None
-    if audio is not None:
-        audio_path = call_dir / "full-call.webm"
-        _write_bytes_atomic(audio_path, await audio.read())
-        audio_file_path = str(audio_path)
+        audio_file_path: str | None = None
+        audio_path: Path | None = None
+        if audio is not None:
+            audio_path = call_dir / "full-call.webm"
+            _write_bytes_atomic(audio_path, await audio.read())
+            audio_file_path = str(audio_path)
 
-    dialogue_transcript = _transcript_to_text(messages)
-    translation = transcribe_with_fallback(senior.preferredLanguage, dialogue_transcript, audio_path)
-    original_transcript = _clean_transcript_text(dialogue_transcript or translation.transcript)
-    english_transcript = _clean_transcript_text(
-        _role_labeled_english_transcript(messages, senior.preferredLanguage, translation.translation or original_transcript)
-    )
-    for segment in translation.segments:
-        segment.text = _clean_transcript_text(segment.text)
-        segment.originalText = _clean_transcript_text(segment.originalText or segment.text)
-        segment.englishText = _clean_transcript_text(segment.englishText or segment.text)
-    translation.segments = _sync_english_segments(translation.segments, original_transcript, english_transcript)
-    role_segments = _role_segments_from_messages(messages, startedAt, english_transcript)
-    if role_segments:
-        translation.segments = role_segments
-    elif not any(segment.startTimeSeconds is not None for segment in translation.segments):
-        timed_segments = _timed_segments_from_messages(messages, startedAt, english_transcript)
-        if timed_segments:
-            translation.segments = timed_segments
-    symptoms, assessment, risk_signals, ai_recommended_action, ai_fallback_used = _openai_risk_review(english_transcript, translation.segments)
-    if ai_fallback_used:
-        symptoms = detect_symptoms_from_text(english_transcript)
-        assessment = assessment_from_symptoms(symptoms, "Watch", assessment.reasons)
-    categories = build_conversation_categories(english_transcript, symptoms, assessment, senior)
-    escalation_plan = build_escalation_plan(assessment, categories, senior)
-    recommended_action = ai_recommended_action if not ai_fallback_used and assessment.riskLevel != "Red" else recommended_action_for(assessment, categories, senior)
-    if not risk_signals:
-        risk_signals = risk_signals_from_categories(categories)
-    audio_url = f"/calls/{call_id}/audio" if audio_file_path else None
-    current_speech_profile = _estimate_current_speech_profile(messages, startedAt, completedAt, translation.segments, audio_path)
+        dialogue_transcript = _transcript_to_text(messages)
+        translation = transcribe_with_fallback(senior.preferredLanguage, dialogue_transcript, audio_path)
+        original_transcript = _clean_transcript_text(dialogue_transcript or translation.transcript)
+        english_transcript = _clean_transcript_text(
+            _role_labeled_english_transcript(messages, senior.preferredLanguage, translation.translation or original_transcript)
+        )
+        for segment in translation.segments:
+            segment.text = _clean_transcript_text(segment.text)
+            segment.originalText = _clean_transcript_text(segment.originalText or segment.text)
+            segment.englishText = _clean_transcript_text(segment.englishText or segment.text)
+        translation.segments = _sync_english_segments(translation.segments, original_transcript, english_transcript)
+        role_segments = _role_segments_from_messages(messages, startedAt, english_transcript)
+        if role_segments:
+            translation.segments = role_segments
+        elif not any(segment.startTimeSeconds is not None for segment in translation.segments):
+            timed_segments = _timed_segments_from_messages(messages, startedAt, english_transcript)
+            if timed_segments:
+                translation.segments = timed_segments
+        symptoms, assessment, risk_signals, ai_recommended_action, ai_fallback_used = _openai_risk_review(english_transcript, translation.segments)
+        if ai_fallback_used:
+            symptoms = detect_symptoms_from_text(english_transcript)
+            assessment = assessment_from_symptoms(symptoms, "Watch", assessment.reasons)
+        categories = build_conversation_categories(english_transcript, symptoms, assessment, senior)
+        escalation_plan = build_escalation_plan(assessment, categories, senior)
+        recommended_action = ai_recommended_action if not ai_fallback_used and assessment.riskLevel != "Red" else recommended_action_for(assessment, categories, senior)
+        if not risk_signals:
+            risk_signals = risk_signals_from_categories(categories)
+        audio_url = f"/calls/{call_id}/audio" if audio_file_path else None
+        current_speech_profile = _estimate_current_speech_profile(messages, startedAt, completedAt, translation.segments, audio_path)
 
-    _write_text_atomic(call_dir / "transcript-original.json", json.dumps([message.model_dump() for message in messages], indent=2))
-    _write_text_atomic(call_dir / "transcript-english.txt", english_transcript)
+        _write_text_atomic(call_dir / "transcript-original.json", json.dumps([message.model_dump() for message in messages], indent=2))
+        _write_text_atomic(call_dir / "transcript-english.txt", english_transcript)
 
-    call = CallRecord(
-        id=call_id,
-        seniorId=senior.id,
-        seniorName=senior.name,
-        startedAt=startedAt,
-        completedAt=completedAt or _now_iso(),
-        status="Complete" if status not in {"Failed", "Saved"} else status,  # type: ignore[arg-type]
-        riskLevel=assessment.riskLevel,
-        originalTranscript=original_transcript,
-        englishTranscript=english_transcript,
-        transcriptMessages=messages,
-        translationProvider=translation.provider,
-        translationFallbackUsed=translation.fallbackUsed,
-        audioFilePath=audio_file_path,
-        audioUrl=audio_url,
-        audioAvailable=audio_file_path is not None,
-        agentAudioCaptured=agentAudioCaptured,
-        currentSpeechProfile=current_speech_profile,
-        speechModelProvenance=_demo_speech_provenance(current_speech_profile.updatedAt or completedAt) if current_speech_profile else None,
-        transcriptSegments=translation.segments,
-        riskSignals=risk_signals,
-        aiRiskFallbackUsed=ai_fallback_used,
-        riskAssessment=assessment,
-        recommendedAction=recommended_action,
-        categories=categories,
-        escalationPlan=escalation_plan,
-    )
-    _write_text_atomic(_call_metadata_path(call_id), call.model_dump_json(indent=2))
-    _upsert_task_for_call(call, senior)
-    return SavedCallResponse(call=call)
+        call = CallRecord(
+            id=call_id,
+            seniorId=senior.id,
+            seniorName=senior.name,
+            startedAt=startedAt,
+            completedAt=completedAt or _now_iso(),
+            status="Complete" if status not in {"Failed", "Saved"} else status,  # type: ignore[arg-type]
+            riskLevel=assessment.riskLevel,
+            originalTranscript=original_transcript,
+            englishTranscript=english_transcript,
+            transcriptMessages=messages,
+            translationProvider=translation.provider,
+            translationFallbackUsed=translation.fallbackUsed,
+            audioFilePath=audio_file_path,
+            audioUrl=audio_url,
+            audioAvailable=audio_file_path is not None,
+            agentAudioCaptured=agentAudioCaptured,
+            currentSpeechProfile=current_speech_profile,
+            speechModelProvenance=_demo_speech_provenance(current_speech_profile.updatedAt or completedAt) if current_speech_profile else None,
+            transcriptSegments=translation.segments,
+            riskSignals=risk_signals,
+            aiRiskFallbackUsed=ai_fallback_used,
+            riskAssessment=assessment,
+            recommendedAction=recommended_action,
+            categories=categories,
+            escalationPlan=escalation_plan,
+        )
+        _write_text_atomic(metadata_path, call.model_dump_json(indent=2))
+        _upsert_task_for_call(call, senior)
+        return SavedCallResponse(call=call)
+    except Exception:
+        if not metadata_path.exists():
+            _remove_directory_quietly(call_dir)
+        raise
 
 
 @app.patch("/calls/{call_id}/speech-enrichment", response_model=CallRecord)
