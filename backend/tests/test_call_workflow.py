@@ -14,6 +14,34 @@ class CallWorkflowTests(unittest.TestCase):
     def test_clean_transcript_text_removes_bracket_cues(self) -> None:
         self.assertEqual(providers.clean_transcript_text("Agent: [happy] hello [concerned] there"), "Agent: hello there")
 
+    def test_schedule_items_use_frequency_and_last_contact(self) -> None:
+        with TemporaryDirectory() as tmp:
+            original_state_root = main.STATE_STORAGE_ROOT
+            original_checkins_path = main.CHECKINS_STATE_PATH
+            original_tasks_path = main.TASKS_STATE_PATH
+            original_call_root = main.CALL_STORAGE_ROOT
+            state_root = Path(tmp) / "state"
+            main.STATE_STORAGE_ROOT = state_root
+            main.CHECKINS_STATE_PATH = state_root / "checkins.json"
+            main.TASKS_STATE_PATH = state_root / "volunteer-tasks.json"
+            main.CALL_STORAGE_ROOT = Path(tmp) / "calls"
+            try:
+                now = main._parse_iso("2026-07-05T10:00:00+08:00")
+                assert now is not None
+                schedule = {item.seniorId: item for item in main._build_schedule_items(now)}
+
+                self.assertEqual(schedule["s-001"].status, "Due soon")
+                self.assertEqual(schedule["s-001"].lastContactKind, "check-in")
+                self.assertTrue(schedule["s-001"].nextDueAt.startswith("2026-07-06T09:00:00"))
+                self.assertEqual(schedule["s-002"].status, "Due now")
+                self.assertIsNone(schedule["s-002"].lastContactAt)
+                self.assertEqual(schedule["s-003"].status, "Due soon")
+            finally:
+                main.STATE_STORAGE_ROOT = original_state_root
+                main.CHECKINS_STATE_PATH = original_checkins_path
+                main.TASKS_STATE_PATH = original_tasks_path
+                main.CALL_STORAGE_ROOT = original_call_root
+
     def test_transcript_to_text_uses_patient_label(self) -> None:
         messages = [
             main.TranscriptMessage(role="Agent", text="Are you okay?", timestamp=None),

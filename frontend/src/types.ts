@@ -1,5 +1,6 @@
 export type RiskLevel = "Green" | "Watch" | "Amber" | "Red";
 export type CheckInStatus = "Checked in" | "Missed" | "Needs follow-up" | "Urgent";
+export type CheckInScheduleStatus = "On track" | "Due soon" | "Due now" | "Overdue";
 export type Language = "English" | "Mandarin" | "Malay" | "Tamil" | "Singlish/Dialect";
 export type SpeechModelMode = "demo metrics" | "offline embedding" | "validated model";
 export type ConversationCategoryId =
@@ -46,6 +47,21 @@ export interface Senior {
   promptFocus: string[];
   checkInFrequencyDays: number;
   baselineSpeechProfile: SpeechProfile;
+}
+
+export interface CheckInScheduleItem {
+  seniorId: string;
+  seniorName: string;
+  checkInFrequencyDays: number;
+  lastContactAt?: string | null;
+  lastContactKind: "call" | "check-in" | "none";
+  lastAttemptAt?: string | null;
+  lastAttemptStatus?: string | null;
+  nextDueAt: string;
+  status: CheckInScheduleStatus;
+  hoursUntilDue: number;
+  overdueHours: number;
+  recommendedAction: string;
 }
 
 export interface RiskAssessment {

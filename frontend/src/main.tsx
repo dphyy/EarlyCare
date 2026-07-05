@@ -21,7 +21,6 @@ import {
   PhoneCall,
   PlayCircle,
   RadioTower,
-  ShieldAlert,
   ShieldCheck,
   Stethoscope,
   Timer,
@@ -31,6 +30,7 @@ import {
 import {
   createElevenLabsSession,
   fetchCalls,
+  fetchSchedule,
   fetchScenarios,
   fetchSeniors,
   fetchSessions,
@@ -42,6 +42,7 @@ import {
 } from "./api";
 import type {
   CallRecord,
+  CheckInScheduleItem,
   CheckInSession,
   ConversationCategory,
   EscalationStep,
@@ -98,6 +99,10 @@ function RiskBadge({ level }: { level: RiskLevel }) {
   return <span className={`risk-badge risk-${level.toLowerCase()}`}>{level}</span>;
 }
 
+function ScheduleBadge({ status }: { status: CheckInScheduleItem["status"] }) {
+  return <span className={`schedule-badge schedule-${status.toLowerCase().replaceAll(" ", "-")}`}>{status}</span>;
+}
+
 function SectionHeading({
   eyebrow,
   title,
@@ -127,6 +132,13 @@ function cleanTranscriptText(text: string): string {
 
 function formatDate(value?: string | null): string {
   return value ? new Date(value).toLocaleString() : "Not completed";
+}
+
+function formatHours(value: number): string {
+  if (!Number.isFinite(value)) return "Not set";
+  if (Math.abs(value) < 0.1) return "now";
+  const rounded = Math.round(Math.abs(value));
+  return `${rounded} hour${rounded === 1 ? "" : "s"}`;
 }
 
 function highestRiskLevel(levels: RiskLevel[]): RiskLevel {
@@ -944,7 +956,7 @@ function ScenarioRunner({
   seniors: Senior[];
   selectedSeniorId: string;
   onSelectSenior: (id: string) => void;
-  onScenarioRun: (session: CheckInSession, tasks: VolunteerTask[]) => void;
+  onScenarioRun: (session: CheckInSession, tasks: VolunteerTask[]) => void | Promise<void>;
   onOpenDashboard: () => void;
 }) {
   const selectedScenario = scenarios.find((scenario) => scenario.seniorId === selectedSeniorId) ?? scenarios[0];
@@ -973,7 +985,7 @@ function ScenarioRunner({
         return;
       }
       setLastSession(response.session);
-      onScenarioRun(response.session, response.tasks);
+      await onScenarioRun(response.session, response.tasks);
       setStatus("Scenario saved. Review the result here or open Patient overview.");
     } finally {
       setIsRunning(false);
@@ -1094,6 +1106,7 @@ function OfficerDashboard({
   sessions,
   tasks,
   calls,
+  schedule,
   selectedSeniorId,
   setSelectedSeniorId,
   onStartCall,
@@ -1103,6 +1116,7 @@ function OfficerDashboard({
   sessions: CheckInSession[];
   tasks: VolunteerTask[];
   calls: CallRecord[];
+  schedule: CheckInScheduleItem[];
   selectedSeniorId: string;
   setSelectedSeniorId: (id: string) => void;
   onStartCall: (id: string) => void;
@@ -1114,6 +1128,7 @@ function OfficerDashboard({
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   const selectedCalls = calls.filter((call) => call.seniorId === selectedSenior.id);
   const selectedSessions = sessions.filter((session) => session.seniorId === selectedSenior.id);
+  const selectedSchedule = schedule.find((item) => item.seniorId === selectedSenior.id) ?? null;
   const selectedRecords = [
     ...selectedCalls.map((call) => ({ kind: "call" as const, date: call.completedAt, record: call })),
     ...selectedSessions.map((session) => ({ kind: "session" as const, date: session.completedAt ?? session.scheduledAt, record: session }))
@@ -1151,6 +1166,7 @@ function OfficerDashboard({
             const seniorRecords = [...calls, ...sessions].filter((record) => record.seniorId === senior.id);
             const seniorRisk = highestRiskLevel(seniorRecords.map((record) => record.riskLevel));
             const seniorOpenTasks = tasks.filter((task) => task.seniorId === senior.id && task.status !== "Closed").length;
+            const seniorSchedule = schedule.find((item) => item.seniorId === senior.id);
             return (
               <button
                 className={`senior-row ${senior.id === selectedSenior.id ? "active" : ""}`}
@@ -1165,7 +1181,7 @@ function OfficerDashboard({
                 </span>
                 <span className="senior-row-meta">
                   <RiskBadge level={seniorRisk} />
-                  {seniorOpenTasks ? <small>{seniorOpenTasks} task{seniorOpenTasks === 1 ? "" : "s"}</small> : <small>clear</small>}
+                  {seniorSchedule ? <ScheduleBadge status={seniorSchedule.status} /> : seniorOpenTasks ? <small>{seniorOpenTasks} task{seniorOpenTasks === 1 ? "" : "s"}</small> : <small>clear</small>}
                 </span>
               </button>
             );
@@ -1212,6 +1228,54 @@ function OfficerDashboard({
               {selectedSessions.length} check-ins
             </span>
           </div>
+        </section>
+
+        <section className={`schedule-panel schedule-panel-${selectedSchedule?.status.toLowerCase().replaceAll(" ", "-") ?? "none"}`}>
+          <SectionHeading
+            eyebrow="2-3 day cadence"
+            title="Check-in Schedule"
+            meta={selectedSchedule ? <ScheduleBadge status={selectedSchedule.status} /> : <span>Not scheduled</span>}
+          />
+          {selectedSchedule ? (
+            <>
+              <div className="schedule-grid">
+                <div>
+                  <span>Cadence</span>
+                  <strong>Every {selectedSchedule.checkInFrequencyDays} days</strong>
+                </div>
+                <div>
+                  <span>Next due</span>
+                  <strong>{formatDate(selectedSchedule.nextDueAt)}</strong>
+                  <small>
+                    {selectedSchedule.status === "Overdue"
+                      ? `${formatHours(selectedSchedule.overdueHours)} overdue`
+                      : selectedSchedule.status === "Due now"
+                        ? "due now"
+                        : `${formatHours(selectedSchedule.hoursUntilDue)} left`}
+                  </small>
+                </div>
+                <div>
+                  <span>Last contact</span>
+                  <strong>{selectedSchedule.lastContactAt ? formatDate(selectedSchedule.lastContactAt) : "No completed contact"}</strong>
+                  <small>{selectedSchedule.lastContactKind}</small>
+                </div>
+                <div>
+                  <span>Last attempt</span>
+                  <strong>{selectedSchedule.lastAttemptAt ? formatDate(selectedSchedule.lastAttemptAt) : "No attempt logged"}</strong>
+                  <small>{selectedSchedule.lastAttemptStatus ?? "none"}</small>
+                </div>
+              </div>
+              <div className="schedule-action-row">
+                <p>{selectedSchedule.recommendedAction}</p>
+                <button className="primary-action" onClick={() => onStartCall(selectedSenior.id)}>
+                  <PhoneCall size={18} />
+                  Start scheduled call
+                </button>
+              </div>
+            </>
+          ) : (
+            <p className="empty-state">No schedule is available for this senior.</p>
+          )}
         </section>
 
         <section className="volunteer-task-section priority-section">
@@ -1426,8 +1490,14 @@ function App() {
   const [loadedSessions, setLoadedSessions] = useState<CheckInSession[]>([]);
   const [loadedTasks, setLoadedTasks] = useState<VolunteerTask[]>([]);
   const [loadedCalls, setLoadedCalls] = useState<CallRecord[]>([]);
+  const [loadedSchedule, setLoadedSchedule] = useState<CheckInScheduleItem[]>([]);
   const [loadedScenarios, setLoadedScenarios] = useState<Scenario[]>([]);
   const [selectedSeniorId, setSelectedSeniorId] = useState("s-001");
+
+  const refreshSchedule = async () => {
+    const nextSchedule = await fetchSchedule();
+    setLoadedSchedule(nextSchedule);
+  };
 
   const refreshTasks = async () => {
     const nextTasks = await fetchVolunteerTasks();
@@ -1435,12 +1505,13 @@ function App() {
   };
 
   useEffect(() => {
-    void Promise.all([fetchSeniors(), fetchSessions(), fetchVolunteerTasks(), fetchCalls(), fetchScenarios()]).then(
-      ([nextSeniors, nextSessions, nextTasks, nextCalls, nextScenarios]) => {
+    void Promise.all([fetchSeniors(), fetchSessions(), fetchVolunteerTasks(), fetchCalls(), fetchSchedule(), fetchScenarios()]).then(
+      ([nextSeniors, nextSessions, nextTasks, nextCalls, nextSchedule, nextScenarios]) => {
         setLoadedSeniors(nextSeniors);
         setLoadedSessions(nextSessions);
         setLoadedTasks(nextTasks);
         setLoadedCalls(nextCalls);
+        setLoadedSchedule(nextSchedule);
         setLoadedScenarios(nextScenarios);
         setSelectedSeniorId(nextSeniors[0]?.id ?? "s-001");
       }
@@ -1453,7 +1524,7 @@ function App() {
 
   const urgentTasks = loadedTasks.filter((task) => task.priority === "Urgent" && task.status !== "Closed").length;
   const openTasks = loadedTasks.filter((task) => task.status !== "Closed").length;
-  const redRecords = [...loadedCalls, ...loadedSessions].filter((record) => record.riskLevel === "Red").length;
+  const dueNow = loadedSchedule.filter((item) => item.status === "Due now" || item.status === "Overdue").length;
 
   const handleTaskStatus = async (taskId: string, status: VolunteerTask["status"]) => {
     const updated = await updateVolunteerTask(taskId, status);
@@ -1521,7 +1592,7 @@ function App() {
         <div className="hero-stats">
           <StatCard label="Open tasks" value={`${openTasks}`} icon={<Bell size={20} />} />
           <StatCard label="Urgent" value={`${urgentTasks}`} icon={<AlertTriangle size={20} />} />
-          <StatCard label="Red records" value={`${redRecords}`} icon={<ShieldAlert size={20} />} />
+          <StatCard label="Due now" value={`${dueNow}`} icon={<CalendarClock size={20} />} />
           <StatCard label="Safety stance" value="No diagnosis" icon={<ShieldCheck size={20} />} />
         </div>
       </section>
@@ -1532,10 +1603,11 @@ function App() {
           seniors={loadedSeniors}
           selectedSeniorId={selectedSeniorId}
           onSelectSenior={setSelectedSeniorId}
-          onScenarioRun={(session, tasks) => {
+          onScenarioRun={async (session, tasks) => {
             setLoadedSessions((sessions) => [session, ...sessions.filter((item) => item.id !== session.id)]);
             setLoadedTasks(tasks);
             setSelectedSeniorId(session.seniorId);
+            await refreshSchedule();
           }}
           onOpenDashboard={() => setView("dashboard")}
         />
@@ -1548,6 +1620,7 @@ function App() {
             onSavedCall={async (call) => {
               setLoadedCalls((calls) => [call, ...calls.filter((item) => item.id !== call.id)]);
               await refreshTasks();
+              await refreshSchedule();
             }}
           />
         </ConversationProvider>
@@ -1557,6 +1630,7 @@ function App() {
           sessions={loadedSessions}
           tasks={loadedTasks}
           calls={loadedCalls}
+          schedule={loadedSchedule}
           selectedSeniorId={selectedSeniorId}
           setSelectedSeniorId={setSelectedSeniorId}
           onStartCall={(id) => {

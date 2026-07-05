@@ -2,7 +2,7 @@ import os
 import json
 import re
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import httpx
@@ -16,6 +16,7 @@ from app.data import CHECKINS, SCENARIOS, SENIORS, VOLUNTEER_TASKS
 from app.ml import assess_speech_deviation, extract_demo_embedding_note
 from app.models import (
     CallRecord,
+    CheckInScheduleItem,
     CheckInSession,
     ProviderResult,
     RiskAssessment,
@@ -134,6 +135,113 @@ def _save_tasks(tasks: list[VolunteerTask]) -> None:
 
 def _call_metadata_path(call_id: str) -> Path:
     return CALL_STORAGE_ROOT / call_id / "metadata.json"
+
+
+def _aware_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _load_calls() -> list[CallRecord]:
+    if not CALL_STORAGE_ROOT.exists():
+        return []
+    return [_load_call_record(path) for path in CALL_STORAGE_ROOT.glob("*/metadata.json")]
+
+
+def _latest_schedule_contact(
+    senior_id: str,
+    checkins: list[CheckInSession],
+    calls: list[CallRecord],
+) -> tuple[datetime | None, str]:
+    candidates: list[tuple[datetime, str]] = []
+    for call in calls:
+        if call.seniorId != senior_id:
+            continue
+        completed_at = _parse_iso(call.completedAt)
+        if completed_at:
+            candidates.append((_aware_datetime(completed_at), "call"))
+    for checkin in checkins:
+        if checkin.seniorId != senior_id or checkin.status == "Missed":
+            continue
+        contact_time = _parse_iso(checkin.completedAt or checkin.scheduledAt)
+        if contact_time and (checkin.completedAt or checkin.englishTranscript or checkin.originalTranscript):
+            candidates.append((_aware_datetime(contact_time), "check-in"))
+    if not candidates:
+        return None, "none"
+    return max(candidates, key=lambda item: item[0])
+
+
+def _latest_schedule_attempt(senior_id: str, checkins: list[CheckInSession], calls: list[CallRecord]) -> tuple[datetime | None, str | None]:
+    attempts: list[tuple[datetime, str]] = []
+    for call in calls:
+        if call.seniorId != senior_id:
+            continue
+        completed_at = _parse_iso(call.completedAt)
+        if completed_at:
+            attempts.append((_aware_datetime(completed_at), call.status))
+    for checkin in checkins:
+        if checkin.seniorId != senior_id:
+            continue
+        attempt_time = _parse_iso(checkin.completedAt or checkin.scheduledAt)
+        if attempt_time:
+            attempts.append((_aware_datetime(attempt_time), checkin.status))
+    if not attempts:
+        return None, None
+    return max(attempts, key=lambda item: item[0])
+
+
+def _schedule_status_for(next_due: datetime, now: datetime, has_contact: bool, latest_attempt_status: str | None) -> tuple[str, float, float]:
+    delta_hours = round((next_due - now).total_seconds() / 3600, 1)
+    overdue_hours = round(max(0, (now - next_due).total_seconds() / 3600), 1)
+    if not has_contact:
+        return ("Overdue" if latest_attempt_status == "Missed" else "Due now", delta_hours, overdue_hours)
+    if delta_hours > 24:
+        return "On track", delta_hours, overdue_hours
+    if delta_hours > 0:
+        return "Due soon", delta_hours, overdue_hours
+    if overdue_hours <= 6:
+        return "Due now", delta_hours, overdue_hours
+    return "Overdue", delta_hours, overdue_hours
+
+
+def _schedule_action_for(senior: Senior, status: str, hours_until_due: float) -> str:
+    if status == "Overdue":
+        return f"Retry the scheduled call now, notify {senior.caregiverContact}, then assign same-day volunteer follow-up if unanswered."
+    if status == "Due now":
+        return "Start the scheduled check-in now and retry once if there is no answer."
+    if status == "Due soon":
+        return f"Prepare the next scheduled call within {max(1, round(hours_until_due))} hours."
+    return "Continue routine cadence and keep the next scheduled check-in queued."
+
+
+def _build_schedule_items(now: datetime | None = None) -> list[CheckInScheduleItem]:
+    current = _aware_datetime(now or datetime.now(timezone.utc))
+    checkins = [_enrich_session(checkin) for checkin in _load_checkins()]
+    calls = [_enrich_call_record(call) for call in _load_calls()]
+    items: list[CheckInScheduleItem] = []
+    for senior in SENIORS:
+        last_contact_at, last_contact_kind = _latest_schedule_contact(senior.id, checkins, calls)
+        last_attempt_at, last_attempt_status = _latest_schedule_attempt(senior.id, checkins, calls)
+        next_due = last_contact_at + timedelta(days=senior.checkInFrequencyDays) if last_contact_at else current
+        status, hours_until_due, overdue_hours = _schedule_status_for(next_due, current, last_contact_at is not None, last_attempt_status)
+        items.append(
+            CheckInScheduleItem(
+                seniorId=senior.id,
+                seniorName=senior.name,
+                checkInFrequencyDays=senior.checkInFrequencyDays,
+                lastContactAt=last_contact_at.isoformat() if last_contact_at else None,
+                lastContactKind=last_contact_kind,  # type: ignore[arg-type]
+                lastAttemptAt=last_attempt_at.isoformat() if last_attempt_at else None,
+                lastAttemptStatus=last_attempt_status,
+                nextDueAt=next_due.isoformat(),
+                status=status,  # type: ignore[arg-type]
+                hoursUntilDue=hours_until_due,
+                overdueHours=overdue_hours,
+                recommendedAction=_schedule_action_for(senior, status, hours_until_due),
+            )
+        )
+    return sorted(items, key=lambda item: ({"Overdue": 0, "Due now": 1, "Due soon": 2, "On track": 3}[item.status], item.nextDueAt))
 
 
 def _transcript_to_text(messages: list[TranscriptMessage]) -> str:
@@ -813,6 +921,11 @@ def get_checkins() -> list[CheckInSession]:
     return sorted(records, key=lambda record: record.completedAt or record.scheduledAt, reverse=True)
 
 
+@app.get("/schedule", response_model=list[CheckInScheduleItem])
+def get_schedule() -> list[CheckInScheduleItem]:
+    return _build_schedule_items()
+
+
 @app.get("/scenarios", response_model=list[Scenario])
 def get_scenarios() -> list[Scenario]:
     return SCENARIOS
@@ -864,9 +977,7 @@ def run_scenario(scenario_id: str) -> ScenarioRunResponse:
 
 @app.get("/calls", response_model=list[CallRecord])
 def get_calls() -> list[CallRecord]:
-    if not CALL_STORAGE_ROOT.exists():
-        return []
-    records = [_enrich_call_record(_load_call_record(path)) for path in CALL_STORAGE_ROOT.glob("*/metadata.json")]
+    records = [_enrich_call_record(call) for call in _load_calls()]
     return sorted(records, key=lambda record: record.completedAt, reverse=True)
 
 

@@ -1,4 +1,4 @@
-import type { CheckInSession, Scenario, Senior, VolunteerTask } from "./types";
+import type { CheckInScheduleItem, CheckInSession, Scenario, Senior, VolunteerTask } from "./types";
 
 export const seniors: Senior[] = [
   {
@@ -356,6 +356,51 @@ export const sessions: CheckInSession[] = [
     },
     categories: [],
     escalationPlan: []
+  }
+];
+
+export const scheduleItems: CheckInScheduleItem[] = [
+  {
+    seniorId: "s-002",
+    seniorName: "Mr Raman Pillai",
+    checkInFrequencyDays: 3,
+    lastContactAt: null,
+    lastContactKind: "none",
+    lastAttemptAt: null,
+    lastAttemptStatus: null,
+    nextDueAt: "2026-07-05T10:00:00+08:00",
+    status: "Due now",
+    hoursUntilDue: 0,
+    overdueHours: 0,
+    recommendedAction: "Start the scheduled check-in now and retry once if there is no answer."
+  },
+  {
+    seniorId: "s-001",
+    seniorName: "Mdm Tan Bee Hoon",
+    checkInFrequencyDays: 2,
+    lastContactAt: "2026-07-04T09:00:00+08:00",
+    lastContactKind: "check-in",
+    lastAttemptAt: "2026-07-04T09:00:00+08:00",
+    lastAttemptStatus: "Urgent",
+    nextDueAt: "2026-07-06T09:00:00+08:00",
+    status: "Due soon",
+    hoursUntilDue: 23,
+    overdueHours: 0,
+    recommendedAction: "Prepare the next scheduled call within 23 hours."
+  },
+  {
+    seniorId: "s-003",
+    seniorName: "Encik Ahmad Rahman",
+    checkInFrequencyDays: 2,
+    lastContactAt: "2026-07-04T09:04:00+08:00",
+    lastContactKind: "check-in",
+    lastAttemptAt: "2026-07-04T09:04:00+08:00",
+    lastAttemptStatus: "Checked in",
+    nextDueAt: "2026-07-06T09:04:00+08:00",
+    status: "Due soon",
+    hoursUntilDue: 23.1,
+    overdueHours: 0,
+    recommendedAction: "Prepare the next scheduled call within 23 hours."
   }
 ];
 

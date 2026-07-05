@@ -17,6 +17,8 @@ ConversationCategoryId = Literal[
     "missed_checkin",
 ]
 EscalationStepStatus = Literal["Standby", "Triggered", "Complete"]
+CheckInScheduleStatus = Literal["On track", "Due soon", "Due now", "Overdue"]
+CheckInContactKind = Literal["call", "check-in", "none"]
 
 
 class SpeechProfile(BaseModel):
@@ -66,6 +68,21 @@ class Senior(BaseModel):
     promptFocus: list[str] = Field(default_factory=list)
     checkInFrequencyDays: int
     baselineSpeechProfile: SpeechProfile
+
+
+class CheckInScheduleItem(BaseModel):
+    seniorId: str
+    seniorName: str
+    checkInFrequencyDays: int
+    lastContactAt: str | None = None
+    lastContactKind: CheckInContactKind = "none"
+    lastAttemptAt: str | None = None
+    lastAttemptStatus: str | None = None
+    nextDueAt: str
+    status: CheckInScheduleStatus
+    hoursUntilDue: float
+    overdueHours: float
+    recommendedAction: str
 
 
 class Symptoms(BaseModel):

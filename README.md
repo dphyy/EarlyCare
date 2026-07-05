@@ -19,6 +19,7 @@ Older adults living alone may go days without anyone noticing a fall, head impac
 | Area | What EarlyCare Does |
 | --- | --- |
 | Scenario runner | Runs seven scripted demo paths: stable, missed check-in, Parkinson's watch, Post-Fall Amber, Post-Fall Red, chronic illness, and loneliness/wellbeing. |
+| Check-in schedule | Computes next due time, due/overdue status, last contact, and next action from each senior's 2-3 day cadence. |
 | Agents website call | Starts an ElevenLabs Agents-powered browser call from the EarlyCare website and lets the patient speak in a comfortable language. |
 | Full-call recording | Records patient microphone audio and ElevenLabs agent audio into one replayable `full-call.webm`. |
 | Patient overview | Shows historical check-ins, saved calls, translated transcripts, original recordings, categorized evidence, escalation trails, volunteer tasks, speech timing, and risk highlights. |
@@ -179,6 +180,7 @@ EarlyCare does not diagnose Parkinson's disease, concussion, stroke, or any othe
 
 - Replace heuristic speech timing estimates with validated audio-derived features.
 - Follow `docs/ml/implementation-plan.md` for speech-deviation model work and dataset validation.
+- Keep the schedule endpoint and Patient overview schedule panel aligned with the 2-3 day living-alone check-in workflow.
 - Improve audio/transcript alignment with provider word-level timestamps when available.
 - Validate risk categories with clinicians and labelled datasets before real-world deployment.
 - Add persistent database/object storage for multi-user demos.

@@ -365,6 +365,7 @@ h3 {
 
 .risk-badge,
 .priority,
+.schedule-badge,
 .live-dot {
   border-radius: 999px;
   display: inline-flex;
@@ -390,6 +391,26 @@ h3 {
 }
 
 .risk-red {
+  background: #ffe0dc;
+  color: #9c2619;
+}
+
+.schedule-on-track {
+  background: #dff2e4;
+  color: #216637;
+}
+
+.schedule-due-soon {
+  background: #e5edff;
+  color: #244b9a;
+}
+
+.schedule-due-now {
+  background: #fff0cc;
+  color: #8a5c00;
+}
+
+.schedule-overdue {
   background: #ffe0dc;
   color: #9c2619;
 }
@@ -780,6 +801,67 @@ h3 {
 
 .profile-handoff {
   margin: 16px 0;
+}
+
+.schedule-panel {
+  background: #f8faf5;
+  border: 1px solid #dfe5d8;
+  border-radius: 8px;
+  margin: 16px 0;
+  padding: 16px;
+}
+
+.schedule-panel-overdue {
+  border-color: #e39a92;
+}
+
+.schedule-panel-due-now {
+  border-color: #e0bd6a;
+}
+
+.schedule-panel-due-soon {
+  border-color: #bdcbef;
+}
+
+.schedule-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.schedule-grid div {
+  background: #ffffff;
+  border: 1px solid #dfe5d8;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.schedule-grid span,
+.schedule-grid small {
+  color: #667065;
+  font-size: 12px;
+}
+
+.schedule-grid strong {
+  color: #17201a;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.schedule-action-row {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+
+.schedule-action-row p {
+  color: #495549;
+  margin: 0;
 }
 
 .handoff-icon {
@@ -1369,6 +1451,7 @@ h3 {
   }
 
   .transcript-stack,
+  .schedule-grid,
   .speech-metric-grid {
     grid-template-columns: 1fr;
   }
@@ -1381,6 +1464,11 @@ h3 {
   .result-header,
   .handoff-card,
   .profile-handoff {
+    display: grid;
+  }
+
+  .schedule-action-row {
+    align-items: stretch;
     display: grid;
   }
 

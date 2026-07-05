@@ -32,6 +32,12 @@ def main_test() -> None:
             "mental-wellbeing",
         }.issubset(scenario_ids)
 
+        schedule = client.get("/schedule")
+        assert schedule.status_code == 200
+        schedule_payload = schedule.json()
+        assert len(schedule_payload) == 3
+        assert {item["status"] for item in schedule_payload}.issubset({"On track", "Due soon", "Due now", "Overdue"})
+
         red_run = client.post("/scenarios/post-fall-red/run")
         assert red_run.status_code == 200
         red_payload = red_run.json()
