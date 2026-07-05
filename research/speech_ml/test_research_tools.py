@@ -20,6 +20,7 @@ from research.speech_ml import (
     extract_embeddings,
     fetch_public_datasets,
     make_enrichment_payload,
+    make_experiment_payload,
     prepare_manifest,
     run_ready_experiments,
     run_experiment,
@@ -91,6 +92,16 @@ class ResearchToolTests(unittest.TestCase):
         )
 
         self.assertIn("--require-validated", result.stdout)
+
+    def test_make_experiment_payload_script_help_works_from_repo_root(self) -> None:
+        result = subprocess.run(
+            [sys.executable, "research/speech_ml/make_experiment_payload.py", "--help"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertIn("--audit-report", result.stdout)
 
     def test_dataset_registry_reports_fetch_manifest_readiness(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -641,6 +652,172 @@ class ResearchToolTests(unittest.TestCase):
             report = json.loads((artifacts / "model_artifact_audit.json").read_text())
             self.assertEqual(report["counts"]["validated_ready"], 1)
             self.assertTrue(report["experiments"][0]["validated_model_allowed"])
+
+    def test_make_experiment_payload_requires_audit_and_exports_offline_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            artifacts = root / "artifacts"
+            artifacts.mkdir()
+            prefix = "sample-run"
+            output_path = root / "payload.json"
+            (artifacts / f"{prefix}_embeddings.jsonl").write_text(
+                json.dumps(
+                    {
+                        "dataset": "sample",
+                        "speaker_id": "s-001",
+                        "label": "control",
+                        "task": "repeat_phrase",
+                        "embedding": [0.1, 0.2, 0.3],
+                        "speech_metrics": {"speechRate": 120},
+                        "provenance": {"model_name": "demo-standard-library"},
+                    }
+                )
+                + "\n"
+            )
+            with self.assertRaises(SystemExit) as raised:
+                make_experiment_payload.main(["--artifacts-dir", str(artifacts), "--experiment", prefix, "--output", str(output_path)])
+            self.assertIn("Audit report not found", str(raised.exception))
+
+            (artifacts / "model_artifact_audit.json").write_text(
+                json.dumps(
+                    {
+                        "experiments": [
+                            {
+                                "experiment": prefix,
+                                "release_status": "research-only",
+                                "validated_model_allowed": False,
+                                "offline_embedding_allowed": True,
+                                "blockers": ["release-gate checks missing"],
+                            }
+                        ]
+                    }
+                )
+                + "\n"
+            )
+
+            exit_code = make_experiment_payload.main(
+                ["--artifacts-dir", str(artifacts), "--experiment", prefix, "--output", str(output_path), "--speaker-id", "s-001"]
+            )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output_path.read_text())
+            self.assertEqual(payload["runtimeMode"], "offline embedding")
+            self.assertEqual(payload["modelName"], "demo-standard-library")
+            self.assertEqual(payload["provenance"]["artifact_release_status"], "research-only")
+            self.assertEqual(payload["provenance"]["artifact_audit"], str(artifacts / "model_artifact_audit.json"))
+
+    def test_make_experiment_payload_blocks_validated_mode_without_validated_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            artifacts = root / "artifacts"
+            artifacts.mkdir()
+            prefix = "sample-run"
+            output_path = root / "payload.json"
+            (artifacts / f"{prefix}_embeddings.jsonl").write_text(
+                json.dumps(
+                    {
+                        "dataset": "sample",
+                        "speaker_id": "s-001",
+                        "label": "control",
+                        "task": "repeat_phrase",
+                        "embedding": [0.1, 0.2],
+                        "speech_metrics": {"speechRate": 120, "embedding": [0.1, 0.2]},
+                        "provenance": {
+                            "model_name": "speech-watch-baseline",
+                            "model_version": "2026-07-05",
+                            "feature_extractor": "wavlm-base-plus",
+                        },
+                    }
+                )
+                + "\n"
+            )
+            (artifacts / f"{prefix}_model_card_gate.json").write_text(
+                json.dumps(
+                    {
+                        "datasetAccessReviewed": True,
+                        "speakerSplitVerified": True,
+                        "evaluationMetricsRecorded": True,
+                        "subgroupChecksReviewed": True,
+                        "failureModesDocumented": True,
+                        "uiCopyReviewed": True,
+                        "humanFollowUpActionDefined": True,
+                        "rollbackPathDocumented": True,
+                        "humanFollowUpAction": "Review the speech deviation with the call transcript and arrange human follow-up.",
+                    }
+                )
+                + "\n"
+            )
+            audit_path = artifacts / "model_artifact_audit.json"
+            audit_path.write_text(
+                json.dumps(
+                    {
+                        "experiments": [
+                            {
+                                "experiment": prefix,
+                                "release_status": "research-only",
+                                "validated_model_allowed": False,
+                                "offline_embedding_allowed": True,
+                                "blockers": ["release-gate checks missing"],
+                            }
+                        ]
+                    }
+                )
+                + "\n"
+            )
+
+            with self.assertRaises(SystemExit) as raised:
+                make_experiment_payload.main(
+                    [
+                        "--artifacts-dir",
+                        str(artifacts),
+                        "--experiment",
+                        prefix,
+                        "--output",
+                        str(output_path),
+                        "--runtime-mode",
+                        "validated model",
+                        "--model-version",
+                        "2026-07-05",
+                    ]
+                )
+            self.assertIn("Audit does not allow validated model", str(raised.exception))
+
+            audit_path.write_text(
+                json.dumps(
+                    {
+                        "experiments": [
+                            {
+                                "experiment": prefix,
+                                "release_status": "validated-ready",
+                                "validated_model_allowed": True,
+                                "offline_embedding_allowed": True,
+                                "blockers": [],
+                            }
+                        ]
+                    }
+                )
+                + "\n"
+            )
+            exit_code = make_experiment_payload.main(
+                [
+                    "--artifacts-dir",
+                    str(artifacts),
+                    "--experiment",
+                    prefix,
+                    "--output",
+                    str(output_path),
+                    "--runtime-mode",
+                    "validated model",
+                    "--model-version",
+                    "2026-07-05",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output_path.read_text())
+            self.assertEqual(payload["runtimeMode"], "validated model")
+            self.assertEqual(payload["artifactUri"], str(artifacts / f"{prefix}_baseline_model.json"))
+            self.assertEqual(payload["provenance"]["artifact_release_status"], "validated-ready")
 
     def test_prepare_manifest_infers_rows_from_audio_folders(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

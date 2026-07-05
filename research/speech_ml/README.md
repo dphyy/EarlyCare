@@ -43,6 +43,18 @@ python3 research/speech_ml/audit_model_artifacts.py \
 
 This writes `model_artifact_audit.md` and `model_artifact_audit.json`. A trained artifact remains research-only unless every model-card gate is complete and safe human follow-up wording is present.
 
+Create an audited app payload from an experiment:
+
+```bash
+python3 research/speech_ml/make_experiment_payload.py \
+  --artifacts-dir research/artifacts \
+  --experiment ready-uci-parkinson-speech \
+  --output research/artifacts/ready-uci-parkinson-speech_payload.json \
+  --speaker-id s-001
+```
+
+This refuses to run without `model_artifact_audit.json`. It also refuses `--runtime-mode "validated model"` unless the audit marks that experiment as validated-ready.
+
 ## Fetch Public Feature Datasets
 
 Download supported public feature-only datasets into ignored local folders:
@@ -141,8 +153,9 @@ Every run also writes `*_personal_baselines.json`, which estimates per-speaker n
 Convert one experiment row into the FastAPI payload accepted by `/calls/{call_id}/speech-enrichment`:
 
 ```bash
-python3 research/speech_ml/make_enrichment_payload.py \
-  --input research/artifacts/neurovoz-demo_embeddings.jsonl \
+python3 research/speech_ml/make_experiment_payload.py \
+  --artifacts-dir research/artifacts \
+  --experiment neurovoz-demo \
   --output research/artifacts/neurovoz-demo_payload.json \
   --speaker-id s-001
 ```

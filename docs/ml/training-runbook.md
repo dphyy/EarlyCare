@@ -67,6 +67,18 @@ python3 research/speech_ml/audit_model_artifacts.py \
 
 The audit writes `model_artifact_audit.md` and `model_artifact_audit.json`. Use `--require-validated` only for a release gate; it fails unless every selected experiment has passed the full model-card gate. Most hackathon/research runs should remain `research-only`.
 
+Create an audited app payload from an experiment:
+
+```bash
+python3 research/speech_ml/make_experiment_payload.py \
+  --artifacts-dir research/artifacts \
+  --experiment ready-uci-parkinson-speech \
+  --output research/artifacts/ready-uci-parkinson-speech_payload.json \
+  --speaker-id s-001
+```
+
+This refuses to run without `model_artifact_audit.json`. It also refuses `--runtime-mode "validated model"` unless the audit marks that experiment as validated-ready.
+
 For supported public feature-only datasets, start with the local fetcher:
 
 ```bash
@@ -143,8 +155,9 @@ Manual commands are still available when a step needs to be inspected separately
 Build a backend payload from one offline row when you want to attach experiment output to a saved call:
 
 ```bash
-python3 research/speech_ml/make_enrichment_payload.py \
-  --input research/artifacts/neurovoz-demo_embeddings.jsonl \
+python3 research/speech_ml/make_experiment_payload.py \
+  --artifacts-dir research/artifacts \
+  --experiment neurovoz-demo \
   --output research/artifacts/neurovoz-demo_payload.json \
   --speaker-id s-001
 ```
