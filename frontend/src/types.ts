@@ -90,6 +90,8 @@ export interface ServiceStatus {
   reachable: boolean;
   message: string;
   apiBaseUrl?: string;
+  storageStatus?: "ok" | "degraded";
+  storageWarnings?: string[];
 }
 
 export interface RiskAssessment {

@@ -51,6 +51,8 @@ const requiredUiHooks = [
   "Care operations",
   "Operations Queue",
   "Demo data",
+  "Storage warning",
+  "storageWarnings",
   "Open priority",
   "Refresh",
   "Copy handoff",

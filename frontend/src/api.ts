@@ -16,13 +16,25 @@ export async function fetchServiceStatus(): Promise<ServiceStatus> {
   try {
     const response = await fetch(`${API_BASE_URL}/health`);
     if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-    const payload = (await response.json()) as { product?: string; status?: string };
+    const payload = (await response.json()) as {
+      product?: string;
+      status?: string;
+      storage?: {
+        status?: "ok" | "degraded";
+        warnings?: string[];
+      };
+    };
+    const storageWarnings = payload.storage?.warnings ?? [];
     return {
       mode: "live",
       configured: true,
       reachable: true,
       apiBaseUrl: API_BASE_URL,
-      message: `${payload.product ?? "EarlyCare"} API connected.`
+      storageStatus: payload.storage?.status ?? "ok",
+      storageWarnings,
+      message: storageWarnings.length
+        ? `${payload.product ?? "EarlyCare"} API connected with storage warnings. ${storageWarnings[0]}`
+        : `${payload.product ?? "EarlyCare"} API connected.`
     };
   } catch {
     return {

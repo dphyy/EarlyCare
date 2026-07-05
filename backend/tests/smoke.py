@@ -18,6 +18,9 @@ def main_test() -> None:
         health = client.get("/health")
         assert health.status_code == 200
         assert health.json()["product"] == "EarlyCare"
+        assert health.json()["storage"]["status"] == "ok"
+        assert health.json()["storage"]["stateWritable"] is True
+        assert health.json()["storage"]["callsWritable"] is True
 
         scenarios = client.get("/scenarios")
         assert scenarios.status_code == 200

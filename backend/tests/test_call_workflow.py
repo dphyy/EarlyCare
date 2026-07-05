@@ -112,6 +112,43 @@ class CallWorkflowTests(unittest.TestCase):
                 main.CHECKINS_STATE_PATH = original_checkins_path
                 main.TASKS_STATE_PATH = original_tasks_path
 
+    def test_health_reports_storage_warnings_without_secret_values(self) -> None:
+        with TemporaryDirectory() as tmp:
+            original_state_root = main.STATE_STORAGE_ROOT
+            original_checkins_path = main.CHECKINS_STATE_PATH
+            original_tasks_path = main.TASKS_STATE_PATH
+            original_call_root = main.CALL_STORAGE_ROOT
+            state_root = Path(tmp) / "state"
+            call_root = Path(tmp) / "calls"
+            call_dir = call_root / "call-bad"
+            main.STATE_STORAGE_ROOT = state_root
+            main.CHECKINS_STATE_PATH = state_root / "checkins.json"
+            main.TASKS_STATE_PATH = state_root / "volunteer-tasks.json"
+            main.CALL_STORAGE_ROOT = call_root
+            try:
+                state_root.mkdir(parents=True)
+                call_dir.mkdir(parents=True)
+                (state_root / "checkins.json.corrupt-20260705T000000Z").write_text("{broken", encoding="utf-8")
+                (call_dir / "metadata.json.corrupt-20260705T000000Z").write_text("{broken", encoding="utf-8")
+
+                response = TestClient(main.app).get("/health")
+
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                self.assertEqual(payload["status"], "degraded")
+                self.assertEqual(payload["storage"]["status"], "degraded")
+                self.assertEqual(payload["storage"]["quarantinedStateFiles"], 1)
+                self.assertEqual(payload["storage"]["quarantinedCallMetadataFiles"], 1)
+                joined_warnings = " ".join(payload["storage"]["warnings"])
+                self.assertIn("quarantined state file", joined_warnings)
+                self.assertIn("quarantined call metadata file", joined_warnings)
+                self.assertNotIn("sk-", joined_warnings)
+            finally:
+                main.STATE_STORAGE_ROOT = original_state_root
+                main.CHECKINS_STATE_PATH = original_checkins_path
+                main.TASKS_STATE_PATH = original_tasks_path
+                main.CALL_STORAGE_ROOT = original_call_root
+
     def test_schedule_items_use_frequency_and_last_contact(self) -> None:
         with TemporaryDirectory() as tmp:
             original_state_root = main.STATE_STORAGE_ROOT

@@ -258,6 +258,42 @@ def _load_calls() -> list[CallRecord]:
     return calls
 
 
+def _probe_storage_writable(root: Path) -> bool:
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        probe_path = root / ".healthcheck"
+        _write_text_atomic(probe_path, "ok")
+        with suppress(OSError):
+            probe_path.unlink()
+        return True
+    except OSError:
+        return False
+
+
+def _storage_health() -> dict[str, object]:
+    state_corrupt_count = len(list(STATE_STORAGE_ROOT.glob("*.corrupt-*"))) if STATE_STORAGE_ROOT.exists() else 0
+    call_corrupt_count = len(list(CALL_STORAGE_ROOT.glob("*/metadata.json.corrupt-*"))) if CALL_STORAGE_ROOT.exists() else 0
+    state_writable = _probe_storage_writable(STATE_STORAGE_ROOT)
+    calls_writable = _probe_storage_writable(CALL_STORAGE_ROOT)
+    warnings: list[str] = []
+    if not state_writable:
+        warnings.append("State storage is not writable; check-in and task updates may not persist.")
+    if not calls_writable:
+        warnings.append("Call artifact storage is not writable; saved calls and audio may fail.")
+    if state_corrupt_count:
+        warnings.append(f"{state_corrupt_count} quarantined state file{'s' if state_corrupt_count != 1 else ''} need review.")
+    if call_corrupt_count:
+        warnings.append(f"{call_corrupt_count} quarantined call metadata file{'s' if call_corrupt_count != 1 else ''} need review.")
+    return {
+        "status": "degraded" if warnings else "ok",
+        "stateWritable": state_writable,
+        "callsWritable": calls_writable,
+        "quarantinedStateFiles": state_corrupt_count,
+        "quarantinedCallMetadataFiles": call_corrupt_count,
+        "warnings": warnings,
+    }
+
+
 def _latest_schedule_contact(
     senior_id: str,
     checkins: list[CheckInSession],
@@ -1524,8 +1560,9 @@ def _enrich_call_record(call: CallRecord) -> CallRecord:
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "product": "EarlyCare"}
+def health() -> dict[str, object]:
+    storage = _storage_health()
+    return {"status": "degraded" if storage["status"] == "degraded" else "ok", "product": "EarlyCare", "storage": storage}
 
 
 @app.get("/seniors", response_model=list[Senior])

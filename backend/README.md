@@ -115,6 +115,8 @@ API health check:
 curl http://127.0.0.1:8000/health
 ```
 
+The health response includes a non-secret `storage` section with local persistence status, writable checks, quarantined state-file counts, quarantined call-metadata counts, and operator warnings when recovered files need review.
+
 ## Environment Variables
 
 | Variable | Required For | Notes |
@@ -137,7 +139,7 @@ Never commit real `.env` files.
 
 | Endpoint | Description |
 | --- | --- |
-| `GET /health` | API health check. |
+| `GET /health` | API health check with local storage diagnostics. |
 | `GET /seniors` | Demo senior roster. |
 | `GET /senior-records` | Per-senior categorized record rollups. |
 | `GET /seniors/{senior_id}/record` | One senior's categorized record and timeline. |

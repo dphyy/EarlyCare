@@ -115,9 +115,10 @@ function StatCard({ label, value, icon, meta }: { label: string; value: string; 
 }
 
 function ServiceStatusIndicator({ status }: { status: ServiceStatus }) {
-  const label = status.mode === "live" ? "Live API" : status.mode === "checking" ? "Checking" : "Demo data";
+  const hasStorageWarnings = Boolean(status.storageWarnings?.length);
+  const label = status.mode === "live" && hasStorageWarnings ? "Storage warning" : status.mode === "live" ? "Live API" : status.mode === "checking" ? "Checking" : "Demo data";
   return (
-    <div className={`service-status service-${status.mode}`} aria-label={`Service status: ${status.message}`} title={status.message}>
+    <div className={`service-status service-${status.mode} ${hasStorageWarnings ? "service-warning" : ""}`} aria-label={`Service status: ${status.message}`} title={status.message}>
       <span className="service-dot" aria-hidden="true" />
       <strong>{label}</strong>
     </div>
@@ -1879,9 +1880,9 @@ function App() {
         </div>
       </section>
 
-      {serviceStatus.mode === "demo" ? (
-        <section className="service-banner">
-          <Activity size={18} />
+      {serviceStatus.mode === "demo" || serviceStatus.storageWarnings?.length ? (
+        <section className={`service-banner ${serviceStatus.storageWarnings?.length ? "service-warning-banner" : ""}`}>
+          {serviceStatus.storageWarnings?.length ? <AlertTriangle size={18} /> : <Activity size={18} />}
           <p>{serviceStatus.message}</p>
         </section>
       ) : null}
