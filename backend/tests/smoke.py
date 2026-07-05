@@ -54,6 +54,14 @@ def main_test() -> None:
         assert raman_plan["scheduleStatus"] in {"Due now", "Overdue"}
         assert any(question["id"] == "speech-watch" for question in raman_plan["questions"])
 
+        started = client.post("/checkins/start", params={"senior_id": "s-003"})
+        assert started.status_code == 200
+        assert started.json()["status"] == "In progress"
+
+        completed = client.post(f"/checkins/{started.json()['id']}/complete")
+        assert completed.status_code == 200
+        assert completed.json()["status"] == "Checked in"
+
         red_run = client.post("/scenarios/post-fall-red/run")
         assert red_run.status_code == 200
         red_payload = red_run.json()

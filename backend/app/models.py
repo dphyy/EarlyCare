@@ -154,7 +154,7 @@ class CheckInSession(BaseModel):
     scenarioName: str | None = None
     scheduledAt: str
     completedAt: str | None = None
-    status: Literal["Checked in", "Missed", "Needs follow-up", "Urgent"]
+    status: Literal["In progress", "Checked in", "Missed", "Needs follow-up", "Urgent"]
     language: Language
     riskLevel: RiskLevel
     summary: str
@@ -250,6 +250,13 @@ class MissedCheckInRequest(BaseModel):
     retryAt: str | None = None
     attemptCount: int = Field(default=2, ge=1, le=5)
     note: str | None = None
+
+
+class CompleteCheckInRequest(BaseModel):
+    completedAt: str | None = None
+    originalTranscript: str | None = None
+    englishTranscript: str | None = None
+    summary: str | None = None
 
 
 class ProviderResult(BaseModel):

@@ -1,5 +1,5 @@
 export type RiskLevel = "Green" | "Watch" | "Amber" | "Red";
-export type CheckInStatus = "Checked in" | "Missed" | "Needs follow-up" | "Urgent";
+export type CheckInStatus = "In progress" | "Checked in" | "Missed" | "Needs follow-up" | "Urgent";
 export type CheckInScheduleStatus = "On track" | "Due soon" | "Due now" | "Overdue";
 export type Language = "English" | "Mandarin" | "Malay" | "Tamil" | "Singlish/Dialect";
 export type SpeechModelMode = "demo metrics" | "offline embedding" | "validated model";

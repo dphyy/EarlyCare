@@ -20,6 +20,7 @@ from app.models import (
     CallRecord,
     CheckInScheduleItem,
     CheckInSession,
+    CompleteCheckInRequest,
     ConversationCategory,
     MissedCheckInRequest,
     ProviderResult,
@@ -999,6 +1000,98 @@ def _create_missed_checkin_session(request: MissedCheckInRequest) -> ScenarioRun
     return ScenarioRunResponse(session=session, tasks=tasks)
 
 
+def _create_started_checkin_session(senior_id: str) -> CheckInSession:
+    senior = get_senior(senior_id)
+    now = _now_iso()
+    symptoms = Symptoms()
+    assessment = _empty_assessment("Green", ["Scheduled check-in started."])
+    categories = build_conversation_categories("", symptoms, assessment, senior)
+    escalation_plan = build_escalation_plan(assessment, categories, senior)
+    session = CheckInSession(
+        id=f"checkin-{uuid4().hex[:10]}",
+        seniorId=senior.id,
+        scheduledAt=now,
+        completedAt=None,
+        status="In progress",
+        language=senior.preferredLanguage,
+        riskLevel="Green",
+        summary="Scheduled check-in started.",
+        recommendedAction="Complete the call after speaking with the senior, or log it as missed if unanswered.",
+        originalTranscript="",
+        englishTranscript="",
+        riskAssessment=assessment,
+        categories=categories,
+        escalationPlan=escalation_plan,
+    )
+    checkins = _load_checkins()
+    checkins.append(session)
+    _save_checkins(checkins)
+    return session
+
+
+def _completion_reasons(symptoms: Symptoms, transcript_present: bool) -> list[str]:
+    reasons = ["Completed scheduled check-in reviewed from transcript." if transcript_present else "Completed scheduled check-in recorded manually."]
+    if symptoms.fall or symptoms.headImpact or symptoms.whiplashOrJolt:
+        reasons.append("Fall, head impact, blow, or jolt mentioned.")
+    if symptoms.confusion or symptoms.vomiting or symptoms.slurredSpeech or symptoms.weakness or symptoms.numbness or symptoms.drowsinessOrUnwakeable or symptoms.worseningHeadache:
+        reasons.append("Post-impact danger signs mentioned.")
+    if symptoms.lowMood or symptoms.loneliness or symptoms.asksForHelp:
+        reasons.append("Wellbeing or help-request signal mentioned.")
+    if symptoms.chronicConcern or symptoms.medicationMissed or symptoms.poorIntake:
+        reasons.append("Chronic illness, medication, food, or water follow-up signal mentioned.")
+    if len(reasons) == 1:
+        reasons.append("No danger signs were recorded.")
+    return reasons
+
+
+def _complete_started_checkin_session(checkin_id: str, request: CompleteCheckInRequest | None) -> CheckInSession:
+    request = request or CompleteCheckInRequest()
+    checkins = _load_checkins()
+    for index, existing in enumerate(checkins):
+        if existing.id != checkin_id:
+            continue
+
+        senior = get_senior(existing.seniorId)
+        completed_at = request.completedAt or _now_iso()
+        default_transcript = "Patient completed the check-in and reported no immediate concern."
+        english_transcript = _clean_transcript_text(request.englishTranscript or existing.englishTranscript or default_transcript)
+        original_transcript = _clean_transcript_text(request.originalTranscript or existing.originalTranscript or english_transcript)
+        review_text = english_transcript or original_transcript
+        symptoms = detect_symptoms_from_text(review_text)
+        transcript_present = bool((request.englishTranscript or request.originalTranscript or existing.englishTranscript or existing.originalTranscript or "").strip())
+        assessment = assessment_from_symptoms(symptoms, "Green", _completion_reasons(symptoms, transcript_present))
+        categories = build_conversation_categories(review_text, symptoms, assessment, senior)
+        recommended_action = recommended_action_for(assessment, categories, senior)
+        escalation_plan = build_escalation_plan(assessment, categories, senior)
+        elevated_categories = [category.label for category in categories if category.severity != "Green"]
+        summary = request.summary or (
+            f"Completed scheduled check-in with follow-up signals: {', '.join(elevated_categories[:2])}."
+            if elevated_categories
+            else "Completed scheduled check-in with no concerning symptoms recorded."
+        )
+        completed = existing.model_copy(
+            update={
+                "completedAt": completed_at,
+                "status": _status_for_risk(assessment, symptoms),
+                "riskLevel": assessment.riskLevel,
+                "summary": summary,
+                "recommendedAction": recommended_action,
+                "originalTranscript": original_transcript,
+                "englishTranscript": english_transcript,
+                "riskAssessment": assessment,
+                "categories": categories,
+                "escalationPlan": escalation_plan,
+            }
+        )
+        checkins[index] = completed
+        _save_checkins(checkins)
+        if completed.riskLevel != "Green":
+            _upsert_task_for_session(completed, senior)
+        return completed
+
+    raise HTTPException(status_code=404, detail="Check-in not found")
+
+
 def _risk_schema() -> dict[str, object]:
     signal_schema = {
         "type": "object",
@@ -1385,26 +1478,7 @@ def get_call_audio(call_id: str) -> FileResponse:
 
 @app.post("/checkins/start", response_model=CheckInSession)
 def start_checkin(senior_id: str) -> CheckInSession:
-    senior = get_senior(senior_id)
-    return CheckInSession(
-        id=f"c-demo-{senior.id}",
-        seniorId=senior.id,
-        scheduledAt="2026-07-04T12:00:00+08:00",
-        status="Needs follow-up",
-        language=senior.preferredLanguage,
-        riskLevel="Watch",
-        summary="Demo check-in started.",
-        originalTranscript="",
-        englishTranscript="",
-        riskAssessment={
-            "speechDeviationScore": 0,
-            "parkinsonsWatchScore": 0,
-            "postFallConcernScore": 0,
-            "missedCheckInScore": 0,
-            "riskLevel": "Watch",
-            "reasons": ["Check-in in progress"],
-        },
-    )
+    return _create_started_checkin_session(senior_id)
 
 
 @app.post("/checkins/{checkin_id}/audio", response_model=ProviderResult)
@@ -1563,11 +1637,8 @@ def enrich_call_speech(call_id: str, request: SpeechEnrichmentRequest) -> CallRe
 
 
 @app.post("/checkins/{checkin_id}/complete", response_model=CheckInSession)
-def complete_checkin(checkin_id: str) -> CheckInSession:
-    for checkin in CHECKINS:
-        if checkin.id == checkin_id:
-            return checkin
-    raise HTTPException(status_code=404, detail="Demo check-in not found")
+def complete_checkin(checkin_id: str, request: CompleteCheckInRequest | None = None) -> CheckInSession:
+    return _complete_started_checkin_session(checkin_id, request)
 
 
 @app.post("/ml/speech-deviation")

@@ -156,6 +156,66 @@ class CallWorkflowTests(unittest.TestCase):
                 main.TASKS_STATE_PATH = original_tasks_path
                 main.CALL_STORAGE_ROOT = original_call_root
 
+    def test_start_and_complete_checkin_persist_state_schedule_and_task(self) -> None:
+        with TemporaryDirectory() as tmp:
+            original_state_root = main.STATE_STORAGE_ROOT
+            original_checkins_path = main.CHECKINS_STATE_PATH
+            original_tasks_path = main.TASKS_STATE_PATH
+            original_call_root = main.CALL_STORAGE_ROOT
+            state_root = Path(tmp) / "state"
+            main.STATE_STORAGE_ROOT = state_root
+            main.CHECKINS_STATE_PATH = state_root / "checkins.json"
+            main.TASKS_STATE_PATH = state_root / "volunteer-tasks.json"
+            main.CALL_STORAGE_ROOT = Path(tmp) / "calls"
+            try:
+                client = TestClient(main.app)
+                started_response = client.post("/checkins/start", params={"senior_id": "s-002"})
+
+                self.assertEqual(started_response.status_code, 200)
+                started = started_response.json()
+                self.assertTrue(started["id"].startswith("checkin-"))
+                self.assertEqual(started["status"], "In progress")
+                self.assertEqual(started["riskLevel"], "Green")
+
+                started_at = main._parse_iso(started["scheduledAt"])
+                assert started_at is not None
+                schedule = {item.seniorId: item for item in main._build_schedule_items(started_at)}
+                self.assertEqual(schedule["s-002"].lastAttemptStatus, "In progress")
+
+                completed_response = client.post(
+                    f"/checkins/{started['id']}/complete",
+                    json={
+                        "completedAt": "2026-07-05T10:30:00+08:00",
+                        "originalTranscript": "I fell and hit my head. I am confused and my left hand is weak.",
+                        "englishTranscript": "I fell and hit my head. I am confused and my left hand is weak.",
+                    },
+                )
+
+                self.assertEqual(completed_response.status_code, 200)
+                completed = completed_response.json()
+                self.assertEqual(completed["status"], "Urgent")
+                self.assertEqual(completed["riskLevel"], "Red")
+                self.assertTrue(any(category["id"] == "concussion_danger" and category["severity"] == "Red" for category in completed["categories"]))
+                self.assertTrue(any(step["id"] == "emergency-alert" and step["status"] == "Triggered" for step in completed["escalationPlan"]))
+
+                tasks = main._load_tasks()
+                task = next(task for task in tasks if task.sourceSessionId == completed["id"])
+                self.assertEqual(task.priority, "Urgent")
+                self.assertEqual(task.escalationStep, "emergency-alert")
+
+                stored = {checkin.id: checkin for checkin in main._load_checkins()}
+                self.assertEqual(stored[completed["id"]].status, "Urgent")
+                self.assertEqual(stored[completed["id"]].completedAt, "2026-07-05T10:30:00+08:00")
+
+                schedule = {item.seniorId: item for item in main._build_schedule_items(main._parse_iso("2026-07-05T10:31:00+08:00"))}
+                self.assertEqual(schedule["s-002"].lastAttemptStatus, "Urgent")
+                self.assertEqual(schedule["s-002"].lastContactKind, "check-in")
+            finally:
+                main.STATE_STORAGE_ROOT = original_state_root
+                main.CHECKINS_STATE_PATH = original_checkins_path
+                main.TASKS_STATE_PATH = original_tasks_path
+                main.CALL_STORAGE_ROOT = original_call_root
+
     def test_transcript_to_text_uses_patient_label(self) -> None:
         messages = [
             main.TranscriptMessage(role="Agent", text="Are you okay?", timestamp=None),
