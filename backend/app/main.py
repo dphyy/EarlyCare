@@ -408,6 +408,10 @@ def _record_event_categories(categories: list[ConversationCategory]) -> list[Con
     return [category for category in categories if _record_category_is_relevant(category)]
 
 
+def _is_history_checkin(checkin: CheckInSession) -> bool:
+    return checkin.status != "In progress"
+
+
 def _highest_risk(levels: list[str]) -> str:
     order = {"Green": 0, "Watch": 1, "Amber": 2, "Red": 3}
     if not levels:
@@ -418,7 +422,7 @@ def _highest_risk(levels: list[str]) -> str:
 def _build_record_events(senior_id: str, checkins: list[CheckInSession], calls: list[CallRecord]) -> list[SeniorRecordEvent]:
     events: list[SeniorRecordEvent] = []
     for checkin in checkins:
-        if checkin.seniorId != senior_id:
+        if checkin.seniorId != senior_id or not _is_history_checkin(checkin):
             continue
         events.append(
             SeniorRecordEvent(
@@ -1622,7 +1626,7 @@ def get_senior(senior_id: str) -> Senior:
 
 @app.get("/checkins", response_model=list[CheckInSession])
 def get_checkins() -> list[CheckInSession]:
-    records = [_enrich_session(checkin) for checkin in _load_checkins()]
+    records = [_enrich_session(checkin) for checkin in _load_checkins() if _is_history_checkin(checkin)]
     return sorted(records, key=lambda record: record.completedAt or record.scheduledAt, reverse=True)
 
 

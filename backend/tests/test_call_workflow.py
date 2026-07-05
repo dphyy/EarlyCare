@@ -617,6 +617,9 @@ class CallWorkflowTests(unittest.TestCase):
                 assert started_at is not None
                 schedule = {item.seniorId: item for item in main._build_schedule_items(started_at)}
                 self.assertEqual(schedule["s-002"].lastAttemptStatus, "In progress")
+                started_record = {record.seniorId: record for record in main._build_senior_records()}["s-002"]
+                self.assertEqual(started_record.totalRecords, 0)
+                self.assertFalse(any(checkin["id"] == started["id"] for checkin in client.get("/checkins").json()))
 
                 completed_response = client.post(
                     f"/checkins/{started['id']}/complete",
@@ -642,6 +645,10 @@ class CallWorkflowTests(unittest.TestCase):
                 stored = {checkin.id: checkin for checkin in main._load_checkins()}
                 self.assertEqual(stored[completed["id"]].status, "Urgent")
                 self.assertEqual(stored[completed["id"]].completedAt, "2026-07-05T10:30:00+08:00")
+                completed_record = {record.seniorId: record for record in main._build_senior_records()}["s-002"]
+                self.assertEqual(completed_record.totalRecords, 1)
+                self.assertEqual(completed_record.timeline[0].id, completed["id"])
+                self.assertTrue(any(checkin["id"] == completed["id"] for checkin in client.get("/checkins").json()))
 
                 schedule = {item.seniorId: item for item in main._build_schedule_items(main._parse_iso("2026-07-05T10:31:00+08:00"))}
                 self.assertEqual(schedule["s-002"].lastAttemptStatus, "Urgent")
