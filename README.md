@@ -8,7 +8,7 @@ EarlyCare is decision support, not diagnosis. It helps volunteers and officers n
 
 `PRODUCT_CONTEXT.md` is the current source of truth for product framing, source links, safety language, and demo scope. Older planning notes outside this repository may contain stale stroke/clinic framing.
 
-`docs/ml/implementation-plan.md` captures the current ML direction, dataset findings, and staged implementation plan.
+`docs/ml/implementation-plan.md` captures the current ML direction, and `docs/ml/training-runbook.md` explains dataset acquisition and offline training.
 
 ## Why It Matters
 

@@ -86,6 +86,7 @@ Speech ML can add support through slower response, large acute baseline deviatio
 | Data registry | Done | `docs/ml/dataset-registry.md` |
 | Feature extractor interface | Done | `backend/app/speech_features.py`, `backend/tests/test_speech_features.py` |
 | Offline embedding job | Done | `research/speech_ml/extract_embeddings.py`, `research/speech_ml/README.md` |
+| Offline baseline trainer | Done | `research/speech_ml/train_baseline.py`, `docs/ml/training-runbook.md` |
 | Evaluation harness | Done | `research/speech_ml/evaluate_baseline.py`, `research/speech_ml/metrics.md` |
 | App integration | Done | Saved calls store `speechModelProvenance`; `/calls/{call_id}/speech-enrichment` accepts offline embedding rows. |
 | Safety gate | Done | Validated enrichment requires `modelCard`; `pnpm safety:copy` blocks diagnosis-style UI and README copy. |
@@ -188,9 +189,10 @@ Steps:
 1. Finish the data registry and model-card template.
 2. Add deterministic feature-extractor tests around the current demo scoring.
 3. Add offline embedding extraction without touching live request latency.
-4. Evaluate Parkinson's speech datasets offline.
-5. Add optional model provenance to saved call records.
-6. Only then consider a model-backed `speechDeviationScore`.
+4. Train an offline baseline only after approved data is downloaded under `research/datasets/`.
+5. Evaluate Parkinson's speech datasets offline.
+6. Add optional model provenance to saved call records.
+7. Only then consider a model-backed `speechDeviationScore`.
 
 ## Next Goal Prompt
 

@@ -7,7 +7,7 @@ import unittest
 import wave
 from pathlib import Path
 
-from research.speech_ml import evaluate_baseline, extract_embeddings
+from research.speech_ml import evaluate_baseline, extract_embeddings, train_baseline
 
 
 def write_wav(path: Path, frequency: float) -> None:
@@ -107,6 +107,42 @@ class ResearchToolTests(unittest.TestCase):
             report = json.loads(output_path.read_text())
             self.assertEqual(report["status"], "insufficient-data")
             self.assertIn("Need at least two positive", report["reason"])
+
+    def test_train_baseline_writes_research_model_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            input_path = root / "embeddings.jsonl"
+            output_path = root / "model.json"
+            rows = [
+                {"dataset": "sample", "speaker_id": "pd-1", "label": "pd", "embedding": [1.0, 0.0]},
+                {"dataset": "sample", "speaker_id": "pd-2", "label": "pd", "embedding": [0.9, 0.1]},
+                {"dataset": "sample", "speaker_id": "ctl-1", "label": "control", "embedding": [0.0, 1.0]},
+                {"dataset": "sample", "speaker_id": "ctl-2", "label": "control", "embedding": [0.1, 0.9]},
+            ]
+            input_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+
+            exit_code = train_baseline.main(["--input", str(input_path), "--output", str(output_path)])
+
+            self.assertEqual(exit_code, 0)
+            model = json.loads(output_path.read_text())
+            self.assertEqual(model["status"], "ok")
+            self.assertEqual(model["model_type"], "speaker-centroid-baseline")
+            self.assertEqual(model["embedding_dimensions"], 2)
+            self.assertEqual(model["dataset_counts"]["sample"], {"positive_speakers": 2, "negative_speakers": 2})
+            self.assertIn("diagnosis", model["safety"]["excluded_use"])
+
+    def test_train_baseline_reports_insufficient_classes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            input_path = root / "embeddings.jsonl"
+            output_path = root / "model.json"
+            input_path.write_text(json.dumps({"dataset": "sample", "speaker_id": "pd-1", "label": "pd", "embedding": [1.0, 0.0]}) + "\n")
+
+            train_baseline.main(["--input", str(input_path), "--output", str(output_path)])
+
+            model = json.loads(output_path.read_text())
+            self.assertEqual(model["status"], "insufficient-data")
+            self.assertIn("positive and one negative", model["reason"])
 
 
 if __name__ == "__main__":

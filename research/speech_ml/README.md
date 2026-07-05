@@ -56,6 +56,19 @@ python3 research/speech_ml/extract_embeddings.py --model wav2vec2
 
 Those modes require optional `torch`, `transformers`, and `soundfile` packages in a separate research environment. Do not add those packages to the FastAPI runtime unless latency and deployment cost have been measured.
 
+## Train Baseline
+
+Train a small research-only baseline from extracted embeddings:
+
+```bash
+python3 research/speech_ml/train_baseline.py \
+  --input research/artifacts/sample_embeddings.jsonl \
+  --output research/artifacts/sample_baseline_model.json \
+  --positive-labels pd,parkinson,parkinsonian
+```
+
+This writes a centroid baseline artifact for offline review. It is not loaded by the live app and is not a validated model.
+
 ## Evaluate
 
 Run speaker-level evaluation:
