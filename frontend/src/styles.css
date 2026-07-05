@@ -116,6 +116,10 @@ nav {
   gap: 8px;
 }
 
+nav button {
+  white-space: nowrap;
+}
+
 .topbar-actions {
   align-items: center;
   display: flex;
@@ -962,20 +966,23 @@ h3 {
 }
 
 .senior-row {
-  align-items: center;
+  align-items: start;
   background: #fbfcf8;
   border: 1px solid #eef2e8;
   border-radius: 8px;
   color: inherit;
   cursor: pointer;
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) max-content;
   padding: 12px;
   text-align: left;
   width: 100%;
 }
 
 .senior-row-text {
+  display: grid;
+  gap: 5px;
   min-width: 0;
 }
 
@@ -990,6 +997,31 @@ h3 {
   flex: 0 0 auto;
   flex-direction: column;
   gap: 6px;
+}
+
+.senior-row-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.senior-row-detail span {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #dfe5d8;
+  border-radius: 999px;
+  color: #495549;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  gap: 5px;
+  min-height: 26px;
+  padding: 4px 7px;
+}
+
+.senior-row-detail svg {
+  color: #0b7685;
+  flex: 0 0 auto;
 }
 
 .senior-row strong,
@@ -1905,36 +1937,111 @@ h3 {
   padding: 8px 10px;
 }
 
-.patient-command-strip {
+.case-command-grid {
   background: #ffffff;
   border: 1px solid #d4dde4;
   border-radius: 8px;
   box-shadow: 0 10px 24px rgba(36, 52, 74, 0.05);
   display: grid;
-  gap: 8px;
+  gap: 10px;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  padding: 10px;
+  padding: 12px;
 }
 
-.patient-command-strip span {
-  align-items: center;
+.command-card {
+  align-items: start;
   background: #f8fafc;
   border: 1px solid #e1e8ee;
   border-radius: 8px;
   color: #344036;
-  display: inline-flex;
-  font-size: 13px;
-  font-weight: 750;
-  gap: 7px;
-  min-height: 38px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 38px minmax(0, 1fr);
+  min-height: 92px;
   min-width: 0;
-  overflow-wrap: anywhere;
-  padding: 8px 10px;
+  padding: 12px;
+  position: relative;
 }
 
-.patient-command-strip svg {
+.command-card::before {
+  background: #cbd7c2;
+  border-radius: 99px;
+  content: "";
+  height: 3px;
+  left: 12px;
+  position: absolute;
+  right: 12px;
+  top: 0;
+}
+
+.command-card span,
+.command-card small {
+  color: #667065;
+  display: block;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.command-card span {
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.command-card strong {
+  color: #17201a;
+  display: block;
+  font-size: 15px;
+  line-height: 1.2;
+  margin: 3px 0 4px;
+  overflow-wrap: anywhere;
+}
+
+.command-icon {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #dfe5d8;
+  border-radius: 8px;
   color: #0b7685;
-  flex: 0 0 auto;
+  display: grid;
+  height: 38px;
+  place-items: center;
+  width: 38px;
+}
+
+.command-green::before {
+  background: #67a56f;
+}
+
+.command-watch::before {
+  background: #6b87d6;
+}
+
+.command-amber::before {
+  background: #d7a53d;
+}
+
+.command-red::before {
+  background: #df6d5f;
+}
+
+.command-red {
+  background: #fff8f6;
+  border-color: #eca19a;
+}
+
+.command-amber {
+  background: #fffaf0;
+  border-color: #e5c979;
+}
+
+.command-watch {
+  background: #f5f8ff;
+  border-color: #bdcbef;
+}
+
+.command-green {
+  background: #f4fbf2;
+  border-color: #b8d6b4;
 }
 
 .operator-workbench {
@@ -2688,7 +2795,7 @@ h3 {
   .schedule-grid,
   .speech-metric-grid,
   .contact-route-grid,
-  .patient-command-strip,
+  .case-command-grid,
   .operator-workbench,
   .decision-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2823,7 +2930,7 @@ h3 {
   .schedule-grid,
   .speech-metric-grid,
   .contact-route-grid,
-  .patient-command-strip,
+  .case-command-grid,
   .task-lane-grid,
   .queue-pressure-strip,
   .pressure-segments {
@@ -2844,7 +2951,7 @@ h3 {
     align-items: flex-start;
     display: grid;
     gap: 8px;
-    min-height: 128px;
+    min-height: 96px;
   }
 
   .hero-stats .stat-icon {
@@ -2864,8 +2971,8 @@ h3 {
   }
 
   .hero-band {
-    padding-bottom: 18px;
-    padding-top: 18px;
+    padding-bottom: 14px;
+    padding-top: 14px;
   }
 
   .hero-copy p {
@@ -2892,10 +2999,13 @@ h3 {
 
   .senior-row {
     align-items: flex-start;
+    grid-template-columns: 1fr;
   }
 
   .senior-row-meta {
     align-items: flex-start;
+    flex-direction: row;
+    flex-wrap: wrap;
   }
 
   .profile-actions {
@@ -2948,5 +3058,32 @@ h3 {
 
   .result-actions {
     display: grid;
+  }
+
+  nav {
+    display: grid;
+    gap: 6px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  nav button {
+    font-size: 12px;
+    gap: 6px;
+    justify-content: center;
+    min-height: 40px;
+    padding: 8px 6px;
+  }
+
+  .brand-mark {
+    height: 38px;
+    width: 38px;
+  }
+
+  .brand strong {
+    font-size: 18px;
+  }
+
+  .command-card {
+    min-height: 84px;
   }
 }

@@ -3,7 +3,6 @@ import { createRoot } from "react-dom/client";
 import {
   Activity,
   AlertTriangle,
-  ArrowRight,
   Bell,
   Brain,
   CalendarClock,
@@ -78,6 +77,7 @@ type AppView = "demo" | "call" | "dashboard";
 type ScenarioTone = { label: string; risk: RiskLevel; detail: string };
 type RosterFilter = "all" | "due" | "tasks" | "risk";
 type TaskLane = VolunteerTask["status"];
+type CommandTone = "green" | "watch" | "amber" | "red" | "neutral";
 
 const AgentsCall = lazy(() => import("./AgentsCall"));
 
@@ -138,6 +138,39 @@ function RiskBadge({ level }: { level: RiskLevel }) {
 
 function ScheduleBadge({ status }: { status: CheckInScheduleItem["status"] }) {
   return <span className={`schedule-badge schedule-${status.toLowerCase().replaceAll(" ", "-")}`}>{status}</span>;
+}
+
+function scheduleToneFor(status?: CheckInScheduleItem["status"] | null): CommandTone {
+  if (status === "Overdue") return "red";
+  if (status === "Due now") return "amber";
+  if (status === "Due soon") return "watch";
+  if (status === "On track") return "green";
+  return "neutral";
+}
+
+function CommandCard({
+  icon,
+  label,
+  value,
+  meta,
+  tone = "neutral"
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  meta: string;
+  tone?: CommandTone;
+}) {
+  return (
+    <article className={`command-card command-${tone}`}>
+      <div className="command-icon">{icon}</div>
+      <div>
+        <span>{label}</span>
+        <strong>{value}</strong>
+        <small>{meta}</small>
+      </div>
+    </article>
+  );
 }
 
 function SectionHeading({
@@ -1127,6 +1160,7 @@ function OfficerDashboard({
   const latestRecordKind = selectedRecords[0]?.kind === "call" ? "Agents call" : selectedRecords[0]?.kind === "session" ? "Check-in" : "No record";
   const latestRecordTime = selectedRecords[0]?.date ? formatDate(selectedRecords[0].date) : "No check-in yet";
   const nextAction = selectedOpenTasks[0]?.recommendedAction ?? latestRecord?.recommendedAction ?? "Continue routine scheduled check-ins.";
+  const topElevatedCategory = sortByRisk((latestRecord?.categories ?? []).filter((category) => category.severity !== "Green"))[0] ?? null;
   const [scheduleLogStatus, setScheduleLogStatus] = useState("");
   const [handoffCopyStatus, setHandoffCopyStatus] = useState("");
   const [isLoggingAnswered, setIsLoggingAnswered] = useState(false);
@@ -1308,6 +1342,22 @@ function OfficerDashboard({
                   <small>
                     {senior.age} · {senior.addressZone} · {senior.preferredLanguage}
                   </small>
+                  <span className="senior-row-detail">
+                    <span>
+                      <CalendarClock size={13} />
+                      {seniorSchedule
+                        ? seniorSchedule.status === "Overdue"
+                          ? `${formatHours(seniorSchedule.overdueHours)} overdue`
+                          : seniorSchedule.status === "Due now"
+                            ? "due now"
+                            : `${formatHours(seniorSchedule.hoursUntilDue)} left`
+                        : "no cadence"}
+                    </span>
+                    <span>
+                      <Bell size={13} />
+                      {openTaskCount ? `${openTaskCount} open` : "clear"}
+                    </span>
+                  </span>
                 </span>
                 <span className="senior-row-meta">
                   <RiskBadge level={risk} />
@@ -1410,23 +1460,35 @@ function OfficerDashboard({
           </div>
         </section>
 
-        <section className="patient-command-strip" aria-label="Selected patient command summary">
-          <span>
-            <Clock3 size={16} />
-            {selectedSchedule ? `${selectedSchedule.status} · ${scheduleTimingSummary}` : "No active cadence"}
-          </span>
-          <span>
-            <Gauge size={16} />
-            Highest risk {highestRisk}
-          </span>
-          <span>
-            <History size={16} />
-            {selectedRecords.length} record{selectedRecords.length === 1 ? "" : "s"}
-          </span>
-          <span>
-            <ArrowRight size={16} />
-            {selectedOpenTasks.length ? selectedOpenTasks[0].assignedTo : "Routine monitoring"}
-          </span>
+        <section className="case-command-grid" aria-label="Selected senior command summary">
+          <CommandCard
+            icon={<Clock3 size={18} />}
+            label="Cadence"
+            value={selectedSchedule?.status ?? "Not scheduled"}
+            meta={selectedSchedule ? `${scheduleTimingSummary}; next ${formatShortDate(selectedSchedule.nextDueAt)}` : "No active 2-3 day route"}
+            tone={scheduleToneFor(selectedSchedule?.status)}
+          />
+          <CommandCard
+            icon={<Gauge size={18} />}
+            label="Risk focus"
+            value={topElevatedCategory?.label ?? `Highest risk ${highestRisk}`}
+            meta={topElevatedCategory?.recommendedAction ?? selectedSenior.promptFocus.slice(0, 2).join(", ")}
+            tone={highestRisk.toLowerCase() as CommandTone}
+          />
+          <CommandCard
+            icon={<UsersRound size={18} />}
+            label="Care route"
+            value={selectedOpenTasks[0]?.assignedTo ?? selectedSenior.caregiverContact}
+            meta={selectedSenior.neighborContact ?? "Neighbour not listed"}
+            tone={selectedOpenTasks.length ? "amber" : "green"}
+          />
+          <CommandCard
+            icon={<History size={18} />}
+            label="Record"
+            value={`${selectedRecords.length} record${selectedRecords.length === 1 ? "" : "s"}`}
+            meta={`${latestRecordKind}; ${latestRecordTime}`}
+            tone="neutral"
+          />
         </section>
 
         <div className="operator-workbench">
