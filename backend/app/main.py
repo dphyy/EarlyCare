@@ -40,6 +40,13 @@ from app.risk import (
     recommended_action_for,
     risk_signals_from_categories,
 )
+from app.speech_features import (
+    DemoSpeechFeatureExtractor,
+    SpeechFeatureInput,
+    estimated_utterance_seconds,
+    parse_iso,
+    word_count,
+)
 
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -80,13 +87,7 @@ class ElevenLabsSessionResponse(BaseModel):
 
 
 def _parse_iso(timestamp: str | None) -> datetime | None:
-    if not timestamp:
-        return None
-    try:
-        normalized = timestamp.replace("Z", "+00:00")
-        return datetime.fromisoformat(normalized)
-    except ValueError:
-        return None
+    return parse_iso(timestamp)
 
 
 def _relative_seconds(timestamp: str | None, started_at: str) -> float | None:
@@ -149,12 +150,11 @@ def _clean_messages(messages: list[TranscriptMessage]) -> list[TranscriptMessage
 
 
 def _word_count(text: str) -> int:
-    return max(1, len(re.findall(r"\w+|[\u4e00-\u9fff]", text)))
+    return word_count(text)
 
 
 def _estimated_utterance_seconds(text: str) -> float:
-    words = _word_count(re.sub(r"^(Agent|Patient):\s*", "", text))
-    return round(min(12, max(0.9, words / 2.4)), 3)
+    return estimated_utterance_seconds(text)
 
 
 def _estimate_current_speech_profile(
@@ -162,69 +162,16 @@ def _estimate_current_speech_profile(
     started_at: str,
     completed_at: str,
     segments: list[TranscriptSegment] | None = None,
+    audio_path: Path | None = None,
 ) -> SpeechProfile | None:
-    senior_messages = [message for message in messages if message.role == "Senior" and message.text.strip()]
-    timed_segments = [
-        segment
-        for segment in segments or []
-        if segment.startTimeSeconds is not None and segment.endTimeSeconds is not None and (segment.originalText or segment.text).strip()
-        and (segment.role in (None, "Patient") or segment.speaker in (None, "Patient") or (segment.originalText or segment.text).startswith("Patient:"))
-    ]
-    if not senior_messages and not timed_segments:
-        return None
-
-    call_start = _parse_iso(started_at)
-    call_end = _parse_iso(completed_at)
-    duration_seconds = (call_end - call_start).total_seconds() if call_start and call_end else 0
-
-    if timed_segments:
-        segment_words = sum(_word_count(segment.originalText or segment.text) for segment in timed_segments)
-        spoken_seconds = sum(max(0.1, (segment.endTimeSeconds or 0) - (segment.startTimeSeconds or 0)) for segment in timed_segments)
-        speech_rate = round(segment_words / max(spoken_seconds / 60, 0.25), 1)
-        segment_starts = sorted(segment.startTimeSeconds for segment in timed_segments if segment.startTimeSeconds is not None)
-        pause_values = [
-            max(0, (timed_segments[index].startTimeSeconds or 0) - (timed_segments[index - 1].endTimeSeconds or 0)) * 1000
-            for index in range(1, len(timed_segments))
-        ]
-    else:
-        words = sum(_word_count(message.text) for message in senior_messages)
-        speech_rate = round(words / max(duration_seconds / 60, 0.25), 1) if duration_seconds > 0 else 0
-        segment_starts = []
-        pause_values = []
-
-    latency_values: list[float] = []
-    previous_senior_at: datetime | None = None
-    previous_agent_at: datetime | None = None
-    for message in messages:
-        timestamp = _parse_iso(message.timestamp)
-        if not timestamp:
-            continue
-        if message.role == "Agent":
-            previous_agent_at = timestamp
-        elif message.role == "Senior":
-            if previous_senior_at and not timed_segments:
-                pause_values.append(max(0, (timestamp - previous_senior_at).total_seconds() * 1000))
-            if previous_agent_at:
-                latency_values.append(max(0, (timestamp - previous_agent_at).total_seconds() * 1000))
-                previous_agent_at = None
-            previous_senior_at = timestamp
-
-    avg_pause_ms = round(sum(pause_values) / len(pause_values), 1) if pause_values else 0
-    response_latency_ms = round(sum(latency_values) / len(latency_values), 1) if latency_values else 0
-    repeat_phrase = "today i am safe at home and i can ask for help"
-    combined = " ".join(message.text.lower() for message in senior_messages)
-    phrase_accuracy = 0.96 if repeat_phrase in combined else 0
-    if not phrase_accuracy and timed_segments:
-        segment_text = " ".join((segment.englishText or segment.originalText or segment.text).lower() for segment in timed_segments)
-        phrase_accuracy = 0.96 if repeat_phrase in segment_text else 0
-
-    return SpeechProfile(
-        speechRate=speech_rate,
-        avgPauseMs=avg_pause_ms,
-        responseLatencyMs=response_latency_ms,
-        pitchVariability=round(min(1, len(set(segment_starts)) / 20), 2) if segment_starts else 0,
-        phraseAccuracy=phrase_accuracy,
-        updatedAt=completed_at or _now_iso(),
+    return DemoSpeechFeatureExtractor().extract(
+        SpeechFeatureInput(
+            audio_path=audio_path,
+            messages=messages,
+            started_at=started_at,
+            completed_at=completed_at or _now_iso(),
+            segments=segments,
+        )
     )
 
 
@@ -936,7 +883,7 @@ async def save_call(
     if not risk_signals:
         risk_signals = risk_signals_from_categories(categories)
     audio_url = f"/calls/{call_id}/audio" if audio_file_path else None
-    current_speech_profile = _estimate_current_speech_profile(messages, startedAt, completedAt, translation.segments)
+    current_speech_profile = _estimate_current_speech_profile(messages, startedAt, completedAt, translation.segments, audio_path)
 
     (call_dir / "transcript-original.json").write_text(json.dumps([message.model_dump() for message in messages], indent=2))
     (call_dir / "transcript-english.txt").write_text(english_transcript)

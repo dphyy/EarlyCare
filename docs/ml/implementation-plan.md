@@ -1,8 +1,8 @@
 # EarlyCare Speech ML Implementation Plan
 
-**Goal:** Add a validated speech-deviation pipeline that supports earlier human follow-up for seniors living alone without claiming diagnosis.
+**Goal:** Add an optional, validated speech-deviation pipeline that supports earlier human follow-up for seniors living alone without claiming diagnosis.
 
-**Architecture:** Keep the production app rule-first and safety-first. Use speech ML as a personal-baseline anomaly signal, then combine it with missed check-ins, fall/head-impact reports, concussion danger signs, Parkinson's watch markers, and care-team escalation rules.
+**Architecture:** Keep the production app rule-first and safety-first. The core product works through scheduled check-ins, missed-call handling, structured conversation, and human escalation. Speech ML is a personal-baseline anomaly signal layered on top of that workflow, then combined with fall/head-impact reports, concussion danger signs, Parkinson's watch markers, and care-team escalation rules.
 
 **Tech Stack:** FastAPI, Pydantic, local file storage for the hackathon demo, optional offline Python research jobs using PyTorch/Transformers, MERaLiON SpeechEncoder or WavLM/wav2vec-style embeddings, and the existing React Patient overview.
 
@@ -10,17 +10,20 @@
 
 ## Decision
 
-EarlyCare does need ML, but not as a direct "Parkinson's detector" or "concussion detector" in the current product.
+EarlyCare does not need ML for the core MVP. The compulsory use case is regular living-alone senior check-ins plus escalation when someone misses a call or says something concerning.
+
+ML is still useful as a differentiator, but not as a direct "Parkinson's detector" or "concussion detector" in the current product.
 
 The better approach is:
 
-- Use ML for **speech deviation from a senior's own stable baseline**.
+- Use rules, structured check-in prompts, and volunteer/caregiver escalation as the foundation.
+- Use ML only for **speech deviation from a senior's own stable baseline**.
 - Treat Parkinson's as a **watch pattern** across repeated calls, not a single-call diagnosis.
 - Treat concussion as **symptom-led triage after a fall, head impact, blow, jolt, or whiplash-like event**. Speech change can strengthen concern, but it should not be the primary concussion detector.
 - Keep Red alerts rule-led: fall/head impact plus danger signs such as confusion, repeated vomiting, slurred speech, weakness, numbness, unusual behaviour, worsening headache, or inability to wake.
 - Build an offline dataset and evaluation harness before any model affects user-facing risk levels.
 
-This matches the current codebase. `backend/app/ml.py` already scores demo speech metrics and compares them with `SpeechProfile.embedding`; `backend/app/risk.py` already keeps symptom, category, and escalation logic separate from diagnosis.
+This matches the current codebase. `backend/app/ml.py` scores demo speech metrics and compares them with `SpeechProfile.embedding`; `backend/app/risk.py` keeps symptom, category, and escalation logic separate from diagnosis.
 
 ## Dataset Findings
 
@@ -95,7 +98,7 @@ Steps:
 **Files:**
 
 - Create: `backend/app/speech_features.py`
-- Modify: `backend/app/ml.py`
+- Modify: `backend/app/main.py`
 - Test: `backend/tests/test_speech_features.py`
 
 Steps:

@@ -38,6 +38,8 @@ backend/.env.*
 # Local storage and generated call artifacts
 backend/storage/
 backend/storage/**
+research/datasets/
+research/artifacts/
 *.webm
 *.wav
 *.mp3
