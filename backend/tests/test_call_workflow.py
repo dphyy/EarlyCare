@@ -262,6 +262,148 @@ class CallWorkflowTests(unittest.TestCase):
                 main.TASKS_STATE_PATH = original_tasks_path
                 main.CALL_STORAGE_ROOT = original_call_root
 
+    def test_missing_call_follow_up_task_is_repaired_for_task_list_records_and_queue(self) -> None:
+        with TemporaryDirectory() as tmp:
+            original_state_root = main.STATE_STORAGE_ROOT
+            original_checkins_path = main.CHECKINS_STATE_PATH
+            original_tasks_path = main.TASKS_STATE_PATH
+            original_call_root = main.CALL_STORAGE_ROOT
+            state_root = Path(tmp) / "state"
+            call_root = Path(tmp) / "calls"
+            call_dir = call_root / "call-red"
+            main.STATE_STORAGE_ROOT = state_root
+            main.CHECKINS_STATE_PATH = state_root / "checkins.json"
+            main.TASKS_STATE_PATH = state_root / "volunteer-tasks.json"
+            main.CALL_STORAGE_ROOT = call_root
+            try:
+                state_root.mkdir(parents=True)
+                call_dir.mkdir(parents=True)
+                main.CHECKINS_STATE_PATH.write_text("[]", encoding="utf-8")
+                main.TASKS_STATE_PATH.write_text("[]", encoding="utf-8")
+                call = main.CallRecord(
+                    id="call-red",
+                    seniorId="s-001",
+                    seniorName="Mdm Tan Bee Hoon",
+                    startedAt="2026-07-04T10:00:00+08:00",
+                    completedAt="2026-07-04T10:05:00+08:00",
+                    status="Complete",
+                    riskLevel="Red",
+                    originalTranscript="Patient: I fell and feel confused.",
+                    englishTranscript="Patient: I fell and feel confused.",
+                    transcriptMessages=[TranscriptMessage(role="Senior", text="I fell and feel confused.", timestamp="2026-07-04T10:01:00+08:00")],
+                    translationProvider="test",
+                    translationFallbackUsed=False,
+                    audioAvailable=False,
+                    riskAssessment=RiskAssessment(
+                        speechDeviationScore=0,
+                        parkinsonsWatchScore=0,
+                        postFallConcernScore=100,
+                        missedCheckInScore=0,
+                        riskLevel="Red",
+                        reasons=["Confusion after fall"],
+                    ),
+                    recommendedAction="Call caregiver and coordinate urgent medical assessment.",
+                    categories=[
+                        main.ConversationCategory(
+                            id="concussion_danger",
+                            label="Possible concussion danger signs",
+                            severity="Red",
+                            evidence=["Confusion reported."],
+                            recommendedAction="Escalate for urgent assessment.",
+                        )
+                    ],
+                )
+                (call_dir / "metadata.json").write_text(call.model_dump_json(indent=2), encoding="utf-8")
+
+                tasks = TestClient(main.app).get("/volunteer-tasks").json()
+                repaired_task = next(task for task in tasks if task.get("sourceCallId") == "call-red")
+                self.assertEqual(repaired_task["priority"], "Urgent")
+                self.assertEqual(repaired_task["escalationStep"], "emergency-alert")
+
+                records = {record.seniorId: record for record in main._build_senior_records()}
+                self.assertEqual(records["s-001"].openTaskCount, 1)
+                queue = main._build_operations_queue()
+                self.assertEqual(queue[0].taskId, "task-call-red")
+                self.assertEqual(queue[0].priority, "Emergency")
+            finally:
+                main.STATE_STORAGE_ROOT = original_state_root
+                main.CHECKINS_STATE_PATH = original_checkins_path
+                main.TASKS_STATE_PATH = original_tasks_path
+                main.CALL_STORAGE_ROOT = original_call_root
+
+    def test_closed_call_follow_up_task_is_not_reopened_by_repair(self) -> None:
+        with TemporaryDirectory() as tmp:
+            original_state_root = main.STATE_STORAGE_ROOT
+            original_checkins_path = main.CHECKINS_STATE_PATH
+            original_tasks_path = main.TASKS_STATE_PATH
+            original_call_root = main.CALL_STORAGE_ROOT
+            state_root = Path(tmp) / "state"
+            call_root = Path(tmp) / "calls"
+            call_dir = call_root / "call-closed"
+            main.STATE_STORAGE_ROOT = state_root
+            main.CHECKINS_STATE_PATH = state_root / "checkins.json"
+            main.TASKS_STATE_PATH = state_root / "volunteer-tasks.json"
+            main.CALL_STORAGE_ROOT = call_root
+            try:
+                state_root.mkdir(parents=True)
+                call_dir.mkdir(parents=True)
+                main.CHECKINS_STATE_PATH.write_text("[]", encoding="utf-8")
+                main.TASKS_STATE_PATH.write_text(
+                    json.dumps(
+                        [
+                            {
+                                "id": "task-call-closed",
+                                "seniorId": "s-001",
+                                "priority": "Urgent",
+                                "reason": "Previously handled.",
+                                "recommendedAction": "No further action.",
+                                "assignedTo": "Community response team",
+                                "status": "Closed",
+                                "createdAt": "2026-07-04T10:05:00+08:00",
+                                "sourceCallId": "call-closed",
+                                "escalationStep": "emergency-alert",
+                            }
+                        ]
+                    ),
+                    encoding="utf-8",
+                )
+                call = main.CallRecord(
+                    id="call-closed",
+                    seniorId="s-001",
+                    seniorName="Mdm Tan Bee Hoon",
+                    startedAt="2026-07-04T10:00:00+08:00",
+                    completedAt="2026-07-04T10:05:00+08:00",
+                    status="Complete",
+                    riskLevel="Red",
+                    originalTranscript="Patient: I fell and feel confused.",
+                    englishTranscript="Patient: I fell and feel confused.",
+                    transcriptMessages=[TranscriptMessage(role="Senior", text="I fell and feel confused.", timestamp="2026-07-04T10:01:00+08:00")],
+                    translationProvider="test",
+                    translationFallbackUsed=False,
+                    audioAvailable=False,
+                    riskAssessment=RiskAssessment(
+                        speechDeviationScore=0,
+                        parkinsonsWatchScore=0,
+                        postFallConcernScore=100,
+                        missedCheckInScore=0,
+                        riskLevel="Red",
+                        reasons=["Confusion after fall"],
+                    ),
+                    recommendedAction="Call caregiver and coordinate urgent medical assessment.",
+                    categories=[],
+                )
+                (call_dir / "metadata.json").write_text(call.model_dump_json(indent=2), encoding="utf-8")
+
+                tasks = main._repair_missing_follow_up_tasks()
+
+                self.assertEqual(len([task for task in tasks if task.sourceCallId == "call-closed"]), 1)
+                self.assertEqual(tasks[0].status, "Closed")
+            finally:
+                main.STATE_STORAGE_ROOT = original_state_root
+                main.CHECKINS_STATE_PATH = original_checkins_path
+                main.TASKS_STATE_PATH = original_tasks_path
+                main.CALL_STORAGE_ROOT = original_call_root
+
     def test_record_missed_checkin_persists_session_task_and_schedule_attempt(self) -> None:
         with TemporaryDirectory() as tmp:
             original_state_root = main.STATE_STORAGE_ROOT

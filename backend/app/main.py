@@ -498,7 +498,7 @@ def _aggregate_record_categories(events: list[SeniorRecordEvent]) -> list[Senior
 def _build_senior_records() -> list[SeniorRecord]:
     checkins = [_enrich_session(checkin) for checkin in _load_checkins()]
     calls = [_enrich_call_record(call) for call in _load_calls()]
-    tasks = _load_tasks()
+    tasks = _repair_missing_follow_up_tasks(checkins, calls)
     records: list[SeniorRecord] = []
     for senior in SENIORS:
         events = _build_record_events(senior.id, checkins, calls)
@@ -552,7 +552,7 @@ def _build_operations_queue() -> list[OperationsQueueItem]:
     schedules = {item.seniorId: item for item in _build_schedule_items()}
     records = {record.seniorId: record for record in _build_senior_records()}
     tasks_by_senior: dict[str, list[VolunteerTask]] = {}
-    for task in _load_tasks():
+    for task in _repair_missing_follow_up_tasks():
         tasks_by_senior.setdefault(task.seniorId, []).append(task)
 
     priority_order = {"Emergency": 0, "Today": 1, "Due": 2, "Routine": 3}
@@ -1125,12 +1125,8 @@ def _task_reason(session: CheckInSession) -> str:
     return session.summary
 
 
-def _upsert_task_for_session(session: CheckInSession, senior: Senior) -> list[VolunteerTask]:
-    if session.riskLevel == "Green":
-        return _load_tasks()
-
-    tasks = _load_tasks()
-    task = VolunteerTask(
+def _task_for_session(session: CheckInSession, senior: Senior) -> VolunteerTask:
+    return VolunteerTask(
         id=f"task-{session.id}",
         seniorId=senior.id,
         priority=_task_priority(session.riskLevel),  # type: ignore[arg-type]
@@ -1142,17 +1138,10 @@ def _upsert_task_for_session(session: CheckInSession, senior: Senior) -> list[Vo
         sourceSessionId=session.id,
         escalationStep="volunteer-social-task" if session.riskLevel != "Red" else "emergency-alert",
     )
-    tasks = [existing for existing in tasks if existing.id != task.id and existing.sourceSessionId != session.id]
-    tasks.append(task)
-    _save_tasks(tasks)
-    return tasks
 
 
-def _upsert_task_for_call(call: CallRecord, senior: Senior) -> list[VolunteerTask]:
-    if call.riskLevel == "Green":
-        return _load_tasks()
-    tasks = _load_tasks()
-    task = VolunteerTask(
+def _task_for_call(call: CallRecord, senior: Senior) -> VolunteerTask:
+    return VolunteerTask(
         id=f"task-{call.id}",
         seniorId=senior.id,
         priority=_task_priority(call.riskLevel),  # type: ignore[arg-type]
@@ -1164,9 +1153,55 @@ def _upsert_task_for_call(call: CallRecord, senior: Senior) -> list[VolunteerTas
         sourceCallId=call.id,
         escalationStep="volunteer-social-task" if call.riskLevel != "Red" else "emergency-alert",
     )
+
+
+def _upsert_task_for_session(session: CheckInSession, senior: Senior) -> list[VolunteerTask]:
+    if session.riskLevel == "Green":
+        return _load_tasks()
+
+    tasks = _load_tasks()
+    task = _task_for_session(session, senior)
+    tasks = [existing for existing in tasks if existing.id != task.id and existing.sourceSessionId != session.id]
+    tasks.append(task)
+    _save_tasks(tasks)
+    return tasks
+
+
+def _upsert_task_for_call(call: CallRecord, senior: Senior) -> list[VolunteerTask]:
+    if call.riskLevel == "Green":
+        return _load_tasks()
+    tasks = _load_tasks()
+    task = _task_for_call(call, senior)
     tasks = [existing for existing in tasks if existing.id != task.id and existing.sourceCallId != call.id]
     tasks.append(task)
     _save_tasks(tasks)
+    return tasks
+
+
+def _repair_missing_follow_up_tasks(checkins: list[CheckInSession] | None = None, calls: list[CallRecord] | None = None) -> list[VolunteerTask]:
+    checkins = checkins if checkins is not None else [_enrich_session(checkin) for checkin in _load_checkins()]
+    calls = calls if calls is not None else [_enrich_call_record(call) for call in _load_calls()]
+    tasks = _load_tasks()
+    existing_session_sources = {task.sourceSessionId for task in tasks if task.sourceSessionId}
+    existing_call_sources = {task.sourceCallId for task in tasks if task.sourceCallId}
+    repaired = False
+
+    for session in checkins:
+        if session.riskLevel == "Green" or session.id in existing_session_sources:
+            continue
+        tasks.append(_task_for_session(session, get_senior(session.seniorId)))
+        existing_session_sources.add(session.id)
+        repaired = True
+
+    for call in calls:
+        if call.riskLevel == "Green" or call.id in existing_call_sources:
+            continue
+        tasks.append(_task_for_call(call, get_senior(call.seniorId)))
+        existing_call_sources.add(call.id)
+        repaired = True
+
+    if repaired:
+        _save_tasks(tasks)
     return tasks
 
 
@@ -1889,7 +1924,7 @@ def speech_deviation(request: SpeechDeviationRequest) -> dict[str, object]:
 
 @app.get("/volunteer-tasks", response_model=list[VolunteerTask])
 def get_volunteer_tasks() -> list[VolunteerTask]:
-    return sorted(_load_tasks(), key=lambda task: task.createdAt, reverse=True)
+    return sorted(_repair_missing_follow_up_tasks(), key=lambda task: task.createdAt, reverse=True)
 
 
 @app.patch("/volunteer-tasks/{task_id}", response_model=VolunteerTask)
