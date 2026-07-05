@@ -72,6 +72,7 @@ CALL_STORAGE_ROOT = BACKEND_ROOT / "storage" / "calls"
 STATE_STORAGE_ROOT = BACKEND_ROOT / "storage" / "state"
 CHECKINS_STATE_PATH = STATE_STORAGE_ROOT / "checkins.json"
 TASKS_STATE_PATH = STATE_STORAGE_ROOT / "volunteer-tasks.json"
+ACTIVE_CHECKIN_ATTEMPT_WINDOW = timedelta(hours=2)
 app = FastAPI(title="EarlyCare API", version="0.1.0")
 StateRecord = TypeVar("StateRecord", bound=BaseModel)
 
@@ -323,8 +324,13 @@ def _latest_schedule_contact(
     return max(candidates, key=lambda item: item[0])
 
 
-def _latest_schedule_attempt(senior_id: str, checkins: list[CheckInSession], calls: list[CallRecord]) -> tuple[datetime | None, str | None]:
+def _is_stale_active_checkin(checkin: CheckInSession, attempt_time: datetime, now: datetime) -> bool:
+    return checkin.status == "In progress" and now - attempt_time > ACTIVE_CHECKIN_ATTEMPT_WINDOW
+
+
+def _latest_schedule_attempt(senior_id: str, checkins: list[CheckInSession], calls: list[CallRecord], now: datetime) -> tuple[datetime | None, str | None]:
     attempts: list[tuple[datetime, str]] = []
+    current = _aware_datetime(now)
     for call in calls:
         if call.seniorId != senior_id:
             continue
@@ -335,8 +341,12 @@ def _latest_schedule_attempt(senior_id: str, checkins: list[CheckInSession], cal
         if checkin.seniorId != senior_id:
             continue
         attempt_time = _parse_iso(checkin.completedAt or checkin.scheduledAt)
-        if attempt_time:
-            attempts.append((_aware_datetime(attempt_time), checkin.status))
+        if not attempt_time:
+            continue
+        aware_attempt_time = _aware_datetime(attempt_time)
+        if _is_stale_active_checkin(checkin, aware_attempt_time, current):
+            continue
+        attempts.append((aware_attempt_time, checkin.status))
     if not attempts:
         return None, None
     return max(attempts, key=lambda item: item[0])
@@ -373,7 +383,7 @@ def _build_schedule_items(now: datetime | None = None) -> list[CheckInScheduleIt
     items: list[CheckInScheduleItem] = []
     for senior in SENIORS:
         last_contact_at, last_contact_kind = _latest_schedule_contact(senior.id, checkins, calls)
-        last_attempt_at, last_attempt_status = _latest_schedule_attempt(senior.id, checkins, calls)
+        last_attempt_at, last_attempt_status = _latest_schedule_attempt(senior.id, checkins, calls, current)
         next_due = last_contact_at + timedelta(days=senior.checkInFrequencyDays) if last_contact_at else current
         status, hours_until_due, overdue_hours = _schedule_status_for(next_due, current, last_contact_at is not None, last_attempt_status)
         items.append(

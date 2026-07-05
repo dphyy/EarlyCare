@@ -145,8 +145,9 @@ Never commit real `.env` files.
 | `GET /seniors/{senior_id}/record` | One senior's categorized record and timeline. |
 | `GET /call-plans` | Personalized next-call plans for the roster. |
 | `GET /seniors/{senior_id}/call-plan` | One senior's next-call plan. |
+| `GET /schedule` | Per-senior 2-3 day cadence state; fresh in-progress attempts stay visible, while abandoned active attempts older than two hours are ignored for live schedule status. |
 | `GET /operations-queue` | Ranked care-ops queue combining schedule urgency, senior risk, and open volunteer tasks. |
-| `GET /checkins` | Historical completed or missed check-in records, including persisted scenario runs; in-progress attempts stay visible through schedule state. |
+| `GET /checkins` | Historical completed or missed check-in records, including persisted scenario runs; fresh in-progress attempts stay visible through schedule state. |
 | `POST /checkins/start` | Start and persist a scheduled check-in attempt for a senior. |
 | `POST /checkins/{checkin_id}/complete` | Complete a started check-in, categorize transcript evidence, update schedule state, and create a follow-up task when risk is elevated. |
 | `POST /checkins/missed` | Record a missed scheduled check-in attempt, persist the missed session, and create/update the volunteer follow-up task. |

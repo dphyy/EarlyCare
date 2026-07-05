@@ -1,6 +1,7 @@
 import unittest
 import json
 from contextlib import redirect_stdout
+from datetime import timedelta
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -617,6 +618,10 @@ class CallWorkflowTests(unittest.TestCase):
                 assert started_at is not None
                 schedule = {item.seniorId: item for item in main._build_schedule_items(started_at)}
                 self.assertEqual(schedule["s-002"].lastAttemptStatus, "In progress")
+                stale_schedule = {item.seniorId: item for item in main._build_schedule_items(started_at + main.ACTIVE_CHECKIN_ATTEMPT_WINDOW + timedelta(minutes=1))}
+                self.assertEqual(stale_schedule["s-002"].status, "Due now")
+                self.assertIsNone(stale_schedule["s-002"].lastAttemptAt)
+                self.assertIsNone(stale_schedule["s-002"].lastAttemptStatus)
                 started_record = {record.seniorId: record for record in main._build_senior_records()}["s-002"]
                 self.assertEqual(started_record.totalRecords, 0)
                 self.assertFalse(any(checkin["id"] == started["id"] for checkin in client.get("/checkins").json()))
