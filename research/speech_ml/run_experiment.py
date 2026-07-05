@@ -78,6 +78,8 @@ def artifact_paths(output_dir: Path, slug: str) -> dict[str, Path]:
         "evaluation": output_dir / f"{slug}_eval.json",
         "model": output_dir / f"{slug}_baseline_model.json",
         "report": output_dir / f"{slug}_experiment.md",
+        "model_card": output_dir / f"{slug}_model_card.md",
+        "model_card_gate": output_dir / f"{slug}_model_card_gate.json",
     }
 
 
@@ -182,6 +184,205 @@ def subgroup_report_lines(metrics: dict[str, object]) -> list[str]:
     return lines or ["- Not available"]
 
 
+def metric_value(metrics: dict[str, object], key: str) -> object:
+    value = metrics.get(key)
+    return value if value is not None else ""
+
+
+def subgroup_table_lines(metrics: dict[str, object]) -> list[str]:
+    subgroups = metrics.get("subgroups")
+    if not isinstance(subgroups, dict):
+        return ["| None | Not available | Review required |"]
+
+    rows: list[str] = []
+    for field in ["dataset", "task", "language", "source_type"]:
+        groups = subgroups.get(field)
+        if not isinstance(groups, dict):
+            continue
+        for name, values in sorted(groups.items()):
+            if not isinstance(values, dict):
+                continue
+            result = (
+                f"speakers={values.get('speakers')}; "
+                f"balanced_accuracy={values.get('balanced_accuracy')}; "
+                f"sensitivity={values.get('sensitivity')}; "
+                f"specificity={values.get('specificity')}"
+            )
+            rows.append(f"| {field}: {name} | {result} | Manual review required before validation. |")
+    return rows or ["| None | Not available | Review required |"]
+
+
+def release_gate(args: argparse.Namespace, evaluation: dict[str, object]) -> dict[str, object]:
+    metrics = evaluation.get("metrics") if isinstance(evaluation.get("metrics"), dict) else {}
+    split = evaluation.get("split") if isinstance(evaluation.get("split"), dict) else {}
+    return {
+        "datasetAccessReviewed": False,
+        "speakerSplitVerified": evaluation.get("status") == "ok" and split.get("speaker_leakage") is False,
+        "evaluationMetricsRecorded": bool(metrics),
+        "subgroupChecksReviewed": False,
+        "failureModesDocumented": False,
+        "uiCopyReviewed": False,
+        "humanFollowUpActionDefined": False,
+        "rollbackPathDocumented": False,
+        "humanFollowUpAction": None,
+    }
+
+
+def write_json(path: Path, payload: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n")
+
+
+def write_model_card(
+    card_path: Path,
+    args: argparse.Namespace,
+    paths: dict[str, Path],
+    summary: dict[str, object],
+    evaluation: dict[str, object],
+    model: dict[str, object],
+    gate: dict[str, object],
+) -> None:
+    metrics = evaluation.get("metrics") if isinstance(evaluation.get("metrics"), dict) else {}
+    input_mode = "raw-audio manifest" if args.manifest else "feature table"
+    input_label = args.manifest if args.manifest else args.feature_table
+    model_label = args.model if args.manifest else "feature-table-zscore"
+    split = evaluation.get("split") if isinstance(evaluation.get("split"), dict) else {}
+    card_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        f"# EarlyCare Speech Model Card Draft: {args.experiment_name}",
+        "",
+        "This is an auto-generated draft from an offline research experiment. It is not a validated production model card.",
+        "",
+        "## Model Summary",
+        "",
+        f"- Model name: {model.get('model_type') or model_label}",
+        "- Version: draft",
+        "- Owner: EarlyCare research team",
+        f"- Date: {utc_now()}",
+        "- Runtime mode: `offline embedding`",
+        f"- Feature extractor: {model_label}",
+        f"- Downstream model: {model.get('model_type') or 'speaker-centroid-baseline'}",
+        f"- Experiment report: `{paths['report']}`",
+        f"- Release-gate JSON: `{paths['model_card_gate']}`",
+        "",
+        "## Intended Use",
+        "",
+        "- Intended EarlyCare use: offline speech-deviation research and Parkinson's watch validation only.",
+        "- Supported decision-support category: possible speech baseline change for human follow-up.",
+        "- Human follow-up action: not defined yet.",
+        "- Expected users: EarlyCare team reviewing research artifacts.",
+        "- Expected setting: local offline research, not live emergency routing.",
+        "",
+        "## Excluded Use",
+        "",
+        "- Do not use this model to diagnose Parkinson's disease.",
+        "- Do not use this model to diagnose concussion or traumatic brain injury.",
+        "- Do not use this model for emergency dispatch without human review.",
+        "- Do not use this model outside the languages, tasks, age ranges, and recording conditions evaluated below.",
+        "",
+        "## Dataset Provenance",
+        "",
+        "| Dataset | Version / Date | Access Terms | Labels | Language | Task Types | Participants | Raw Audio | Used For |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    datasets = summary["datasets"] if isinstance(summary.get("datasets"), Counter) else Counter()
+    labels = ", ".join(f"{key}={value}" for key, value in sorted(summary["labels"].items())) if isinstance(summary.get("labels"), Counter) else "unknown"
+    tasks = ", ".join(f"{key}={value}" for key, value in sorted(summary["tasks"].items())) if isinstance(summary.get("tasks"), Counter) else "unknown"
+    for dataset, count in sorted(datasets.items()):
+        lines.append(f"| {dataset} | draft | Review required | {labels} | See subgroup checks | {tasks} | speakers={summary['speakers']} | {input_mode == 'raw-audio manifest'} | {input_mode}; rows={count} |")
+
+    lines.extend(
+        [
+            "",
+            "## Consent And Privacy",
+            "",
+            "- Consent basis: review required.",
+            "- Data-use restrictions: review required.",
+            "- Personal data handling: keep local under ignored research folders.",
+            "- Retention period: review required.",
+            "- Storage location: local `research/datasets/` and `research/artifacts/` only.",
+            "- Derived artifacts created: embeddings/features, evaluation report, baseline model, experiment report, model-card draft.",
+            "",
+            "## Preprocessing",
+            "",
+            f"- Input mode: {input_mode}",
+            f"- Input: `{input_label}`",
+            f"- Feature extractor: {model_label}",
+            "- Audio format: review raw dataset metadata when using audio.",
+            "- Resampling: extractor-specific.",
+            "- Voice activity detection: not applied by default demo scripts.",
+            "- Noise handling: not applied by default demo scripts.",
+            "- Transcript dependency: optional; task-specific.",
+            "- Segment selection: all reviewed rows.",
+            "- Exclusions: unresolved `needs-review` rows blocked unless explicitly overridden.",
+            "",
+            "## Evaluation",
+            "",
+            f"- Speaker-level split verified: {gate['speakerSplitVerified']}",
+            f"- Split mode: {split.get('mode')}",
+            f"- Speaker leakage: {split.get('speaker_leakage')}",
+            "",
+            "| Metric | Value | Notes |",
+            "| --- | --- | --- |",
+            f"| ROC-AUC | {metric_value(metrics, 'roc_auc')} | Offline research only. |",
+            f"| Balanced accuracy | {metric_value(metrics, 'balanced_accuracy')} | Speaker-level test split. |",
+            f"| Sensitivity | {metric_value(metrics, 'sensitivity')} | Research metric, not diagnosis. |",
+            f"| Specificity | {metric_value(metrics, 'specificity')} | Research metric, not diagnosis. |",
+            f"| Calibration | {metrics.get('calibration', {}) if metrics else ''} | Brier score when available. |",
+            f"| False-positive review | {len(metrics.get('false_positives', [])) if metrics else ''} | Inspect evaluation JSON. |",
+            f"| False-negative review | {len(metrics.get('false_negatives', [])) if metrics else ''} | Inspect evaluation JSON. |",
+            "",
+            "## Subgroup Checks",
+            "",
+            "| Subgroup | Result | Risk |",
+            "| --- | --- | --- |",
+            *subgroup_table_lines(metrics),
+            "",
+            "## Thresholds",
+            "",
+            "- Green threshold: not set.",
+            "- Watch threshold: not set.",
+            "- Amber threshold: not set.",
+            "- Red threshold: not set.",
+            "- Rationale: review required.",
+            "- Calibration dataset: review required.",
+            "",
+            "## Known Failure Modes",
+            "",
+            "- Background noise: review required.",
+            "- Poor microphone: review required.",
+            "- Code-switching: review required.",
+            "- Dialect/accent mismatch: review required.",
+            "- Illness unrelated to target condition: review required.",
+            "- Medication state: review required.",
+            "- Fatigue, mood, dehydration, or anxiety: review required.",
+            "- Missing personal baseline: review required.",
+            "",
+            "## Product Copy",
+            "",
+            "Approved labels: speech deviation; possible Parkinson's speech watch; possible post-head-impact concern; baseline change; follow-up recommended.",
+            "",
+            "Blocked labels: Parkinson's detected; concussion detected; disease diagnosis; medical certainty; emergency confirmed.",
+            "",
+            "## Release Gate",
+            "",
+            f"- [{'x' if gate['datasetAccessReviewed'] else ' '}] Dataset access and terms reviewed.",
+            f"- [{'x' if gate['speakerSplitVerified'] else ' '}] Speaker-level split verified.",
+            f"- [{'x' if gate['evaluationMetricsRecorded'] else ' '}] Evaluation metrics recorded.",
+            f"- [{'x' if gate['subgroupChecksReviewed'] else ' '}] Subgroup checks reviewed.",
+            f"- [{'x' if gate['failureModesDocumented'] else ' '}] Failure modes documented.",
+            f"- [{'x' if gate['uiCopyReviewed'] else ' '}] UI copy reviewed for no-diagnosis language.",
+            f"- [{'x' if gate['humanFollowUpActionDefined'] else ' '}] Human follow-up action defined.",
+            f"- [{'x' if gate['rollbackPathDocumented'] else ' '}] Rollback path documented.",
+            "",
+            "## API Gate",
+            "",
+            "`validated model` enrichment remains blocked until the release-gate JSON has every required field reviewed and true, including a human follow-up action.",
+        ]
+    )
+    card_path.write_text("\n".join(lines) + "\n")
+
+
 def write_report(
     report_path: Path,
     args: argparse.Namespace,
@@ -211,6 +412,8 @@ def write_report(
         f"- Embeddings: `{paths['embeddings']}`",
         f"- Evaluation: `{paths['evaluation']}`",
         f"- Baseline model: `{paths['model']}`",
+        f"- Model card draft: `{paths['model_card']}`",
+        f"- Model card gate JSON: `{paths['model_card_gate']}`",
         "",
         "## Manifest Summary",
         "",
@@ -341,8 +544,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     evaluation = read_json(paths["evaluation"])
     model = read_json(paths["model"])
+    gate = release_gate(args, evaluation)
+    write_json(paths["model_card_gate"], gate)
+    write_model_card(paths["model_card"], args, paths, summary, evaluation, model, gate)
     write_report(paths["report"], args, paths, summary, evaluation, model)
     print(f"wrote experiment report to {paths['report']}")
+    print(f"wrote model card draft to {paths['model_card']}")
     return 0
 
 

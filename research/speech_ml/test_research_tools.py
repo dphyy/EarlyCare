@@ -138,14 +138,23 @@ class ResearchToolTests(unittest.TestCase):
             evaluation_path = output_dir / "demo-run_eval.json"
             model_path = output_dir / "demo-run_baseline_model.json"
             report_path = output_dir / "demo-run_experiment.md"
+            model_card_path = output_dir / "demo-run_model_card.md"
+            model_card_gate_path = output_dir / "demo-run_model_card_gate.json"
             self.assertTrue(embeddings_path.exists())
             self.assertEqual(len(embeddings_path.read_text().splitlines()), 4)
             self.assertEqual(json.loads(evaluation_path.read_text())["status"], "ok")
             self.assertEqual(json.loads(model_path.read_text())["status"], "ok")
+            gate = json.loads(model_card_gate_path.read_text())
+            self.assertTrue(gate["speakerSplitVerified"])
+            self.assertTrue(gate["evaluationMetricsRecorded"])
+            self.assertFalse(gate["datasetAccessReviewed"])
+            self.assertFalse(gate["humanFollowUpActionDefined"])
+            self.assertIn("Release Gate", model_card_path.read_text())
             report = report_path.read_text()
             self.assertIn("offline research only", report)
             self.assertIn("Rows needing review: 0", report)
             self.assertIn("Subgroup Checks", report)
+            self.assertIn("Model card draft", report)
 
     def test_run_experiment_refuses_unreviewed_manifest_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -213,14 +222,18 @@ class ResearchToolTests(unittest.TestCase):
             report_path = output_dir / "feature-run_experiment.md"
             evaluation_path = output_dir / "feature-run_eval.json"
             model_path = output_dir / "feature-run_baseline_model.json"
+            model_card_path = output_dir / "feature-run_model_card.md"
+            model_card_gate_path = output_dir / "feature-run_model_card_gate.json"
             self.assertEqual(json.loads(evaluation_path.read_text())["status"], "ok")
             self.assertEqual(json.loads(model_path.read_text())["status"], "ok")
+            self.assertFalse(json.loads(model_card_gate_path.read_text())["subgroupChecksReviewed"])
             first_row = json.loads(rows_path.read_text().splitlines()[0])
             self.assertEqual(first_row["provenance"]["source_type"], "feature_table")
             report = report_path.read_text()
             self.assertIn("Input mode: feature table", report)
             self.assertIn("Model: `feature-table-zscore`", report)
             self.assertIn("Source Type", report)
+            self.assertIn("feature table", model_card_path.read_text())
 
     def test_convert_feature_table_writes_evaluable_jsonl(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

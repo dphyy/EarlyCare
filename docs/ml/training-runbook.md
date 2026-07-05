@@ -76,7 +76,7 @@ python3 research/speech_ml/run_experiment.py \
   --model demo
 ```
 
-The runner writes embeddings, a speaker-level evaluation JSON file, a baseline model artifact, and a markdown experiment report. It refuses `needs-review` manifest rows unless `--allow-review-rows` is explicitly passed.
+The runner writes embeddings, a speaker-level evaluation JSON file, a baseline model artifact, a markdown experiment report, a draft model card, and a conservative `model_card_gate.json`. It refuses `needs-review` manifest rows unless `--allow-review-rows` is explicitly passed.
 
 Manual commands are still available when a step needs to be inspected separately.
 
@@ -91,7 +91,7 @@ python3 research/speech_ml/run_experiment.py \
   --language Turkish
 ```
 
-This writes feature rows, a speaker-level evaluation JSON file, a baseline model artifact, and a markdown report. Manual commands are still available when a step needs to be inspected separately:
+This writes feature rows, a speaker-level evaluation JSON file, a baseline model artifact, a markdown report, and a model-card draft. Manual commands are still available when a step needs to be inspected separately:
 
 ```bash
 python3 research/speech_ml/convert_feature_table.py \

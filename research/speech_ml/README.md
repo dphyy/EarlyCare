@@ -54,6 +54,7 @@ python3 research/speech_ml/run_experiment.py \
 ```
 
 The runner refuses manifests with `review_status=needs-review` unless `--allow-review-rows` is explicitly passed.
+It also writes a draft model card and conservative `model_card_gate.json`; human-review fields stay false until they are manually reviewed.
 
 ## Convert Feature Tables
 
@@ -68,7 +69,7 @@ python3 research/speech_ml/run_experiment.py \
   --language Turkish
 ```
 
-The runner writes z-scored numeric feature vectors using `source_type=feature_table` provenance, then evaluates and trains through the same speaker-level baseline flow. Keep results labelled as feature-table experiments.
+The runner writes z-scored numeric feature vectors using `source_type=feature_table` provenance, then evaluates and trains through the same speaker-level baseline flow. Keep results labelled as feature-table experiments, and do not flip the model-card gate to validated without manual review.
 
 ## Extract Embeddings
 
