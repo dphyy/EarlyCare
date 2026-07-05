@@ -449,6 +449,11 @@ h3 {
   color: #8a5c00;
 }
 
+.priority-watch {
+  background: #e9efff;
+  color: #284b93;
+}
+
 .priority-urgent {
   background: #ffe0dc;
   color: #9c2619;
@@ -860,6 +865,84 @@ h3 {
 }
 
 .schedule-action-row p {
+  color: #495549;
+  margin: 0;
+}
+
+.call-plan-panel {
+  background: #f8faf5;
+  border: 1px solid #dfe5d8;
+  border-radius: 8px;
+  margin: 16px 0;
+  padding: 16px;
+}
+
+.call-plan-opening {
+  background: #ffffff;
+  border: 1px solid #dfe5d8;
+  border-radius: 8px;
+  display: grid;
+  gap: 5px;
+  margin-bottom: 12px;
+  padding: 12px;
+}
+
+.call-plan-opening span {
+  color: #667065;
+  font-size: 12px;
+}
+
+.call-plan-opening strong {
+  color: #17201a;
+  line-height: 1.35;
+}
+
+.call-plan-question-list {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.call-plan-question {
+  background: #ffffff;
+  border: 1px solid #dfe5d8;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.call-plan-question div {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.call-plan-question strong {
+  color: #17201a;
+  overflow-wrap: anywhere;
+}
+
+.call-plan-question p {
+  color: #243029;
+  margin: 0;
+}
+
+.call-plan-question small {
+  color: #667065;
+}
+
+.call-plan-footer {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+
+.call-plan-footer p {
   color: #495549;
   margin: 0;
 }
@@ -1550,6 +1633,7 @@ h3 {
   }
 
   .transcript-stack,
+  .call-plan-question-list,
   .record-category-grid,
   .record-summary-grid,
   .schedule-grid,
@@ -1569,6 +1653,11 @@ h3 {
   }
 
   .schedule-action-row {
+    align-items: stretch;
+    display: grid;
+  }
+
+  .call-plan-footer {
     align-items: stretch;
     display: grid;
   }

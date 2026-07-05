@@ -33,10 +33,12 @@ const requiredUiHooks = [
   "CategoryList",
   "EscalationTrail",
   "SeniorRecordPanel",
+  "CallPlanPanel",
   "updateVolunteerTask",
   "Check-In History",
   "Check-in Schedule",
   "Categorized History",
+  "Next Call Plan",
   "Demo baseline scoring",
   "SpeechProvenanceSummary",
   "offline embedding",
@@ -47,8 +49,8 @@ const requiredUiHooks = [
 const missingScenarios = requiredScenarioIds.filter((id) => !dataSource.includes(`id: "${id}"`));
 const missingCategories = requiredCategoryIds.filter((id) => !typeSource.includes(`"${id}"`));
 const missingHooks = requiredUiHooks.filter((hook) => !mainSource.includes(hook));
-const missingTypes = ["CheckInScheduleItem", "SeniorRecord", "SpeechModelProvenance", "speechModelProvenance"].filter((hook) => !typeSource.includes(hook));
-const missingApiHooks = ["fetchSchedule", "fetchSeniorRecords"].filter((hook) => !mainSource.includes(hook));
+const missingTypes = ["CallPlan", "CheckInScheduleItem", "SeniorRecord", "SpeechModelProvenance", "speechModelProvenance"].filter((hook) => !typeSource.includes(hook));
+const missingApiHooks = ["fetchCallPlans", "fetchSchedule", "fetchSeniorRecords"].filter((hook) => !mainSource.includes(hook));
 
 if (missingScenarios.length || missingCategories.length || missingHooks.length || missingTypes.length || missingApiHooks.length) {
   console.error(

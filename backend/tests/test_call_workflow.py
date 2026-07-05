@@ -68,6 +68,37 @@ class CallWorkflowTests(unittest.TestCase):
                 main.TASKS_STATE_PATH = original_tasks_path
                 main.CALL_STORAGE_ROOT = original_call_root
 
+    def test_call_plan_uses_schedule_profile_and_record_history(self) -> None:
+        with TemporaryDirectory() as tmp:
+            original_state_root = main.STATE_STORAGE_ROOT
+            original_checkins_path = main.CHECKINS_STATE_PATH
+            original_tasks_path = main.TASKS_STATE_PATH
+            original_call_root = main.CALL_STORAGE_ROOT
+            state_root = Path(tmp) / "state"
+            main.STATE_STORAGE_ROOT = state_root
+            main.CHECKINS_STATE_PATH = state_root / "checkins.json"
+            main.TASKS_STATE_PATH = state_root / "volunteer-tasks.json"
+            main.CALL_STORAGE_ROOT = Path(tmp) / "calls"
+            try:
+                plans = {plan.seniorId: plan for plan in main._build_call_plans()}
+
+                tan_questions = {question.id: question for question in plans["s-001"].questions}
+                self.assertEqual(tan_questions["concussion-danger"].priority, "Urgent")
+                self.assertIn("Daughter: Mei Ling", plans["s-001"].escalationReminder)
+
+                raman_questions = {question.id: question for question in plans["s-002"].questions}
+                self.assertEqual(plans["s-002"].scheduleStatus, "Due now")
+                self.assertIn("speech-watch", raman_questions)
+                self.assertIn("contact-reliability", raman_questions)
+
+                ahmad_questions = {question.id: question for question in plans["s-003"].questions}
+                self.assertIn("ckd-hydration", ahmad_questions)
+            finally:
+                main.STATE_STORAGE_ROOT = original_state_root
+                main.CHECKINS_STATE_PATH = original_checkins_path
+                main.TASKS_STATE_PATH = original_tasks_path
+                main.CALL_STORAGE_ROOT = original_call_root
+
     def test_transcript_to_text_uses_patient_label(self) -> None:
         messages = [
             main.TranscriptMessage(role="Agent", text="Are you okay?", timestamp=None),

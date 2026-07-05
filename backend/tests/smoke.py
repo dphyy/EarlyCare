@@ -46,6 +46,14 @@ def main_test() -> None:
         assert tan_record["highestRiskLevel"] == "Red"
         assert any(category["id"] == "concussion_danger" for category in tan_record["categories"])
 
+        call_plans = client.get("/call-plans")
+        assert call_plans.status_code == 200
+        call_plan_payload = call_plans.json()
+        assert len(call_plan_payload) == 3
+        raman_plan = next(plan for plan in call_plan_payload if plan["seniorId"] == "s-002")
+        assert raman_plan["scheduleStatus"] in {"Due now", "Overdue"}
+        assert any(question["id"] == "speech-watch" for question in raman_plan["questions"])
+
         red_run = client.post("/scenarios/post-fall-red/run")
         assert red_run.status_code == 200
         red_payload = red_run.json()
@@ -70,6 +78,10 @@ def main_test() -> None:
         senior_record = client.get(f"/seniors/{missed_payload['session']['seniorId']}/record")
         assert senior_record.status_code == 200
         assert any(event["id"] == missed_payload["session"]["id"] for event in senior_record.json()["timeline"])
+
+        call_plan = client.get(f"/seniors/{missed_payload['session']['seniorId']}/call-plan")
+        assert call_plan.status_code == 200
+        assert any(question["id"] == "contact-reliability" for question in call_plan.json()["questions"])
 
     print("backend smoke ok")
 

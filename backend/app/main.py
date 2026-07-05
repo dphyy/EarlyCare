@@ -15,6 +15,8 @@ from dotenv import load_dotenv
 from app.data import CHECKINS, SCENARIOS, SENIORS, VOLUNTEER_TASKS
 from app.ml import assess_speech_deviation, extract_demo_embedding_note
 from app.models import (
+    CallPlan,
+    CallPlanQuestion,
     CallRecord,
     CheckInScheduleItem,
     CheckInSession,
@@ -371,6 +373,175 @@ def _build_senior_records() -> list[SeniorRecord]:
             )
         )
     return records
+
+
+def _add_call_plan_question(
+    questions: list[CallPlanQuestion],
+    seen: set[str],
+    question_id: str,
+    priority: str,
+    topic: str,
+    prompt: str,
+    rationale: str,
+) -> None:
+    if question_id in seen:
+        return
+    seen.add(question_id)
+    questions.append(
+        CallPlanQuestion(
+            id=question_id,
+            priority=priority,  # type: ignore[arg-type]
+            topic=topic,
+            prompt=prompt,
+            rationale=rationale,
+        )
+    )
+
+
+def _condition_text(senior: Senior) -> str:
+    return ", ".join(senior.knownConditions) if senior.knownConditions else "no listed long-term condition"
+
+
+def _build_call_plan_for_senior(senior: Senior, schedule: CheckInScheduleItem, record: SeniorRecord) -> CallPlan:
+    questions: list[CallPlanQuestion] = []
+    seen: set[str] = set()
+    record_categories = {category.id: category for category in record.categories}
+    focus_text = " ".join(senior.promptFocus + senior.knownConditions).lower()
+
+    _add_call_plan_question(
+        questions,
+        seen,
+        "basic-wellbeing",
+        "Routine",
+        "Basic wellbeing",
+        "How are you feeling today compared with our last check-in?",
+        "Start with a broad wellbeing question before symptom-specific prompts.",
+    )
+    _add_call_plan_question(
+        questions,
+        seen,
+        "fall-head-impact",
+        "Watch" if "fall_head_impact" in record_categories or "fall" in focus_text else "Routine",
+        "Falls / head impact / jolts",
+        "Since the last call, did you fall, bump your head, have a body jolt, or feel whiplash?",
+        "Falls and jolts are core EarlyCare risk checks for seniors living alone.",
+    )
+    _add_call_plan_question(
+        questions,
+        seen,
+        "concussion-danger",
+        "Urgent" if "concussion_danger" in record_categories else "Routine",
+        "Possible concussion danger signs",
+        "Any worsening headache, vomiting, confusion, slurred speech, weakness, numbness, unusual behaviour, or trouble waking?",
+        "These are danger signs after a fall, head impact, blow, or jolt and should trigger human escalation.",
+    )
+    _add_call_plan_question(
+        questions,
+        seen,
+        "food-water-medication",
+        "Watch" if "medication_food_water" in record_categories else "Routine",
+        "Medication / food / water",
+        "Have you eaten, drunk enough water, and taken your medication today?",
+        "Food, water, and medication status are basic check-in anchors.",
+    )
+
+    if "parkinson" in focus_text or "speech" in focus_text or "parkinsons_watch" in record_categories:
+        _add_call_plan_question(
+            questions,
+            seen,
+            "speech-watch",
+            "Watch",
+            "Speech watch",
+            "Please say pa-ta-ka three times, then repeat: Today I am safe at home and I can ask for help.",
+            "Repeated speech prompts help compare pace, pauses, and phrase clarity against the senior's baseline.",
+        )
+
+    if "ckd" in focus_text or "kidney" in focus_text or "chronic_illness" in record_categories:
+        _add_call_plan_question(
+            questions,
+            seen,
+            "ckd-hydration",
+            "Watch",
+            "CKD / hydration",
+            "Have you had enough water today, and is there any swelling, dizziness, or appointment concern?",
+            "CKD and hydration concerns are listed in this senior profile or history.",
+        )
+
+    if "diabetes" in focus_text:
+        _add_call_plan_question(
+            questions,
+            seen,
+            "diabetes-food-medicine",
+            "Watch",
+            "Diabetes routine",
+            "Did you eat today and take your diabetes medicine as planned?",
+            "Diabetes check-ins should confirm food and medication together.",
+        )
+
+    if "blood pressure" in focus_text or "hypertension" in focus_text:
+        _add_call_plan_question(
+            questions,
+            seen,
+            "blood-pressure",
+            "Watch",
+            "Blood pressure",
+            "Did you take your blood pressure medicine, and do you feel dizzy, weak, or unusually tired?",
+            "Blood pressure or hypertension is listed in the senior profile.",
+        )
+
+    if "social_isolation" in record_categories or "mental_wellbeing" in record_categories or "loneliness" in focus_text:
+        _add_call_plan_question(
+            questions,
+            seen,
+            "mood-loneliness",
+            "Watch",
+            "Mood / loneliness",
+            "How has your mood been, and would you like a befriender call, neighbour check-in, or volunteer visit this week?",
+            "The senior record or prompt focus includes loneliness, low mood, or a help request.",
+        )
+
+    if schedule.status in {"Due now", "Overdue"} or "missed_checkin" in record_categories:
+        _add_call_plan_question(
+            questions,
+            seen,
+            "contact-reliability",
+            "Watch" if schedule.status == "Due now" else "Urgent",
+            "Contact reliability",
+            "If we cannot reach you next time, should we call your caregiver or listed neighbour first?",
+            "Due, overdue, or missed check-ins need a clear human contact path.",
+        )
+
+    priority_order = {"Urgent": 0, "Watch": 1, "Routine": 2}
+    questions = sorted(questions, key=lambda question: (priority_order[question.priority], question.topic))[:8]
+    opening_status = "overdue" if schedule.status == "Overdue" else "due now" if schedule.status == "Due now" else "scheduled"
+    return CallPlan(
+        seniorId=senior.id,
+        seniorName=senior.name,
+        preferredLanguage=senior.preferredLanguage,
+        generatedAt=_now_iso(),
+        scheduleStatus=schedule.status,
+        openingScript=(
+            f"Hello {senior.name}, this is EarlyCare. This is your {opening_status} "
+            f"{senior.checkInFrequencyDays}-day wellbeing check-in. Are you safe to talk now?"
+        ),
+        questions=questions,
+        escalationReminder=(
+            f"Use {senior.caregiverContact}"
+            f"{f' and {senior.neighborContact}' if senior.neighborContact else ''} for follow-up. "
+            "For red danger signs after a fall, head impact, blow, or jolt, escalate for urgent human help."
+        ),
+    )
+
+
+def _build_call_plans() -> list[CallPlan]:
+    schedules = {item.seniorId: item for item in _build_schedule_items()}
+    records = {record.seniorId: record for record in _build_senior_records()}
+    plans: list[CallPlan] = []
+    for senior in SENIORS:
+        schedule = schedules[senior.id]
+        record = records[senior.id]
+        plans.append(_build_call_plan_for_senior(senior, schedule, record))
+    return plans
 
 
 def _transcript_to_text(messages: list[TranscriptMessage]) -> str:
@@ -1061,6 +1232,19 @@ def get_senior_record(senior_id: str) -> SeniorRecord:
         if record.seniorId == senior_id:
             return record
     raise HTTPException(status_code=404, detail="Senior record not found")
+
+
+@app.get("/call-plans", response_model=list[CallPlan])
+def get_call_plans() -> list[CallPlan]:
+    return _build_call_plans()
+
+
+@app.get("/seniors/{senior_id}/call-plan", response_model=CallPlan)
+def get_call_plan(senior_id: str) -> CallPlan:
+    for plan in _build_call_plans():
+        if plan.seniorId == senior_id:
+            return plan
+    raise HTTPException(status_code=404, detail="Call plan not found")
 
 
 @app.get("/schedule", response_model=list[CheckInScheduleItem])

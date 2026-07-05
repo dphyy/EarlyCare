@@ -139,6 +139,8 @@ Never commit real `.env` files.
 | `GET /seniors` | Demo senior roster. |
 | `GET /senior-records` | Per-senior categorized record rollups. |
 | `GET /seniors/{senior_id}/record` | One senior's categorized record and timeline. |
+| `GET /call-plans` | Personalized next-call plans for the roster. |
+| `GET /seniors/{senior_id}/call-plan` | One senior's next-call plan. |
 | `GET /checkins` | Historical check-in records, including persisted scenario runs. |
 | `GET /scenarios` | Scripted demo scenarios. |
 | `POST /scenarios/{scenario_id}/run` | Run and persist a scripted scenario. |

@@ -30,6 +30,7 @@ import {
 import {
   createElevenLabsSession,
   fetchCalls,
+  fetchCallPlans,
   fetchSchedule,
   fetchScenarios,
   fetchSeniors,
@@ -43,6 +44,7 @@ import {
 } from "./api";
 import type {
   CallRecord,
+  CallPlan,
   CheckInScheduleItem,
   CheckInSession,
   ConversationCategory,
@@ -276,16 +278,22 @@ function createAgentAudioBuffer(audioContext: AudioContext, base64Audio: string,
   throw new Error(`Unsupported agent audio format: ${format}`);
 }
 
-function multilingualAgentPrompt(senior: Senior): string {
+function multilingualAgentPrompt(senior: Senior, callPlan?: CallPlan | null): string {
+  const plannedQuestions = callPlan?.questions.length
+    ? `Next-call plan questions: ${callPlan.questions.map((question, index) => `${index + 1}. ${question.prompt}`).join(" ")}`
+    : "Use the general EarlyCare check-in question set.";
   return [
     `You are EarlyCare calling ${senior.name} for a routine wellbeing check-in.`,
     `The patient profile says their preferred language is ${senior.preferredLanguage}, but they may speak English, Mandarin, Malay, Tamil, Singlish, or a mix.`,
     "The live call transcript must stay in the original spoken language. Do not translate the patient's message before responding.",
     "For each agent reply, use the language or dialect that the patient used the most in their immediately previous response. If the patient code-switches, follow the dominant language from that one previous response.",
     "If the patient asks to speak Chinese or any other language, switch immediately.",
-    "Ask concise turn-by-turn questions about falls, head impact, headache, dizziness, vomiting, confusion, weakness, speech difficulty, food and water, and whether they can ask for help.",
+    callPlan ? `Opening script: ${callPlan.openingScript}` : "",
+    plannedQuestions,
+    callPlan ? `Escalation reminder: ${callPlan.escalationReminder}` : "",
+    "Ask concise turn-by-turn questions. Do not ask several safety questions in one long block.",
     "Do not add bracketed emotional cues such as [concerned] or [happy]."
-  ].join(" ");
+  ].filter(Boolean).join(" ");
 }
 
 function nextReplyLanguageInstruction(patientText: string): string {
@@ -676,11 +684,13 @@ function SpeechTimingPanel({ senior, call, calls }: { senior: Senior; call: Call
 
 function AgentsCall({
   seniors,
+  callPlan,
   selectedSeniorId,
   onSelectSenior,
   onSavedCall
 }: {
   seniors: Senior[];
+  callPlan?: CallPlan | null;
   selectedSeniorId: string;
   onSelectSenior: (id: string) => void;
   onSavedCall: (call: CallRecord) => void | Promise<void>;
@@ -705,7 +715,7 @@ function AgentsCall({
     onConnect: () => {
       setCallState("In call");
       setCallMessage("Agent connected. Waiting for the first check-in question...");
-      conversation.sendContextualUpdate(multilingualAgentPrompt(selectedSenior));
+      conversation.sendContextualUpdate(multilingualAgentPrompt(selectedSenior, callPlan));
       window.setTimeout(() => {
         const hasAgentMessage = transcriptRef.current.some((line) => line.role === "Agent");
         if (!hasAgentMessage) {
@@ -716,9 +726,13 @@ function AgentsCall({
               "Continue in the patient's dominant language or dialect from their previous response.",
               `Known conditions: ${selectedSenior.knownConditions.join(", ") || "none listed"}.`,
               `Focus areas: ${selectedSenior.promptFocus.join(", ") || "basic wellbeing"}.`,
-              "Ask for consent, then cover wellbeing, falls, head impact, whiplash or jolts, headache, dizziness, vomiting, confusion, weakness, numbness, slurred speech, food, water, medication, loneliness, and the repeat phrase.",
+              callPlan ? `Opening script: ${callPlan.openingScript}.` : "Ask for consent before continuing.",
+              callPlan?.questions.length
+                ? `Ask these planned questions one by one: ${callPlan.questions.map((question) => question.prompt).join(" ")}`
+                : "Cover wellbeing, falls, head impact, whiplash or jolts, headache, dizziness, vomiting, confusion, weakness, numbness, slurred speech, food, water, medication, loneliness, and the repeat phrase.",
+              callPlan ? `Escalation reminder: ${callPlan.escalationReminder}.` : "",
               "Do not diagnose. Escalate only as follow-up guidance."
-            ].join(" ")
+            ].filter(Boolean).join(" ")
           );
           setCallMessage("Agent was silent, so EarlyCare nudged the session to begin.");
         }
@@ -838,6 +852,9 @@ function AgentsCall({
           known_conditions: selectedSenior.knownConditions.join(", "),
           check_in_reason: `Scheduled ${selectedSenior.checkInFrequencyDays}-day living-alone wellbeing check-in`,
           prompt_focus: selectedSenior.promptFocus.join(", "),
+          next_call_opening: callPlan?.openingScript ?? "",
+          next_call_questions: callPlan?.questions.map((question) => question.prompt).join(" | ") ?? "",
+          escalation_reminder: callPlan?.escalationReminder ?? "",
           repeat_phrase: "Today I am safe at home and I can ask for help."
         }
       });
@@ -1187,6 +1204,47 @@ function SeniorRecordPanel({ record }: { record: SeniorRecord | null }) {
   );
 }
 
+function CallPlanPanel({ callPlan, onStartCall }: { callPlan: CallPlan | null; onStartCall: () => void }) {
+  return (
+    <section className="call-plan-panel">
+      <SectionHeading
+        eyebrow="Personalized prompts"
+        title="Next Call Plan"
+        meta={callPlan ? <ScheduleBadge status={callPlan.scheduleStatus} /> : <span>No plan</span>}
+      />
+      {callPlan ? (
+        <>
+          <div className="call-plan-opening">
+            <span>Opening</span>
+            <strong>{callPlan.openingScript}</strong>
+          </div>
+          <div className="call-plan-question-list">
+            {callPlan.questions.map((question) => (
+              <article className="call-plan-question" key={question.id}>
+                <div>
+                  <span className={`priority priority-${question.priority.toLowerCase()}`}>{question.priority}</span>
+                  <strong>{question.topic}</strong>
+                </div>
+                <p>{question.prompt}</p>
+                <small>{question.rationale}</small>
+              </article>
+            ))}
+          </div>
+          <div className="call-plan-footer">
+            <p>{callPlan.escalationReminder}</p>
+            <button className="primary-action" onClick={onStartCall}>
+              <PhoneCall size={18} />
+              Use plan in call
+            </button>
+          </div>
+        </>
+      ) : (
+        <p className="empty-state">No personalized call plan is available for this senior.</p>
+      )}
+    </section>
+  );
+}
+
 function OfficerDashboard({
   seniors,
   sessions,
@@ -1194,6 +1252,7 @@ function OfficerDashboard({
   calls,
   schedule,
   records,
+  callPlans,
   selectedSeniorId,
   setSelectedSeniorId,
   onStartCall,
@@ -1205,6 +1264,7 @@ function OfficerDashboard({
   calls: CallRecord[];
   schedule: CheckInScheduleItem[];
   records: SeniorRecord[];
+  callPlans: CallPlan[];
   selectedSeniorId: string;
   setSelectedSeniorId: (id: string) => void;
   onStartCall: (id: string) => void;
@@ -1218,6 +1278,7 @@ function OfficerDashboard({
   const selectedSessions = sessions.filter((session) => session.seniorId === selectedSenior.id);
   const selectedSchedule = schedule.find((item) => item.seniorId === selectedSenior.id) ?? null;
   const selectedSeniorRecord = records.find((record) => record.seniorId === selectedSenior.id) ?? null;
+  const selectedCallPlan = callPlans.find((plan) => plan.seniorId === selectedSenior.id) ?? null;
   const selectedRecords = [
     ...selectedCalls.map((call) => ({ kind: "call" as const, date: call.completedAt, record: call })),
     ...selectedSessions.map((session) => ({ kind: "session" as const, date: session.completedAt ?? session.scheduledAt, record: session }))
@@ -1366,6 +1427,8 @@ function OfficerDashboard({
             <p className="empty-state">No schedule is available for this senior.</p>
           )}
         </section>
+
+        <CallPlanPanel callPlan={selectedCallPlan} onStartCall={() => onStartCall(selectedSenior.id)} />
 
         <SeniorRecordPanel record={selectedSeniorRecord} />
 
@@ -1584,6 +1647,7 @@ function App() {
   const [loadedSchedule, setLoadedSchedule] = useState<CheckInScheduleItem[]>([]);
   const [loadedScenarios, setLoadedScenarios] = useState<Scenario[]>([]);
   const [loadedSeniorRecords, setLoadedSeniorRecords] = useState<SeniorRecord[]>([]);
+  const [loadedCallPlans, setLoadedCallPlans] = useState<CallPlan[]>([]);
   const [selectedSeniorId, setSelectedSeniorId] = useState("s-001");
 
   const refreshSchedule = async () => {
@@ -1601,9 +1665,14 @@ function App() {
     setLoadedSeniorRecords(nextRecords);
   };
 
+  const refreshCallPlans = async () => {
+    const nextPlans = await fetchCallPlans();
+    setLoadedCallPlans(nextPlans);
+  };
+
   useEffect(() => {
-    void Promise.all([fetchSeniors(), fetchSessions(), fetchVolunteerTasks(), fetchCalls(), fetchSchedule(), fetchScenarios(), fetchSeniorRecords()]).then(
-      ([nextSeniors, nextSessions, nextTasks, nextCalls, nextSchedule, nextScenarios, nextRecords]) => {
+    void Promise.all([fetchSeniors(), fetchSessions(), fetchVolunteerTasks(), fetchCalls(), fetchSchedule(), fetchScenarios(), fetchSeniorRecords(), fetchCallPlans()]).then(
+      ([nextSeniors, nextSessions, nextTasks, nextCalls, nextSchedule, nextScenarios, nextRecords, nextCallPlans]) => {
         setLoadedSeniors(nextSeniors);
         setLoadedSessions(nextSessions);
         setLoadedTasks(nextTasks);
@@ -1611,6 +1680,7 @@ function App() {
         setLoadedSchedule(nextSchedule);
         setLoadedScenarios(nextScenarios);
         setLoadedSeniorRecords(nextRecords);
+        setLoadedCallPlans(nextCallPlans);
         setSelectedSeniorId(nextSeniors[0]?.id ?? "s-001");
       }
     );
@@ -1629,6 +1699,7 @@ function App() {
     if (updated) {
       setLoadedTasks((tasks) => tasks.map((task) => (task.id === updated.id ? updated : task)));
       await refreshSeniorRecords();
+      await refreshCallPlans();
       return;
     }
     setLoadedTasks((tasks) => tasks.map((task) => (task.id === taskId ? { ...task, status } : task)));
@@ -1708,6 +1779,7 @@ function App() {
             setSelectedSeniorId(session.seniorId);
             await refreshSchedule();
             await refreshSeniorRecords();
+            await refreshCallPlans();
           }}
           onOpenDashboard={() => setView("dashboard")}
         />
@@ -1717,11 +1789,13 @@ function App() {
             seniors={loadedSeniors}
             selectedSeniorId={selectedSeniorId}
             onSelectSenior={setSelectedSeniorId}
+            callPlan={loadedCallPlans.find((plan) => plan.seniorId === selectedSeniorId) ?? null}
             onSavedCall={async (call) => {
               setLoadedCalls((calls) => [call, ...calls.filter((item) => item.id !== call.id)]);
               await refreshTasks();
               await refreshSchedule();
               await refreshSeniorRecords();
+              await refreshCallPlans();
             }}
           />
         </ConversationProvider>
@@ -1733,6 +1807,7 @@ function App() {
           calls={loadedCalls}
           schedule={loadedSchedule}
           records={loadedSeniorRecords}
+          callPlans={loadedCallPlans}
           selectedSeniorId={selectedSeniorId}
           setSelectedSeniorId={setSelectedSeniorId}
           onStartCall={(id) => {

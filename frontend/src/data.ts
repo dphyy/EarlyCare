@@ -1,4 +1,4 @@
-import type { CheckInScheduleItem, CheckInSession, Scenario, Senior, SeniorRecord, VolunteerTask } from "./types";
+import type { CallPlan, CheckInScheduleItem, CheckInSession, Scenario, Senior, SeniorRecord, VolunteerTask } from "./types";
 
 export const seniors: Senior[] = [
   {
@@ -537,5 +537,104 @@ export const seniorRecords: SeniorRecord[] = [
         ]
       }
     ]
+  }
+];
+
+export const callPlans: CallPlan[] = [
+  {
+    seniorId: "s-001",
+    seniorName: "Mdm Tan Bee Hoon",
+    preferredLanguage: "Mandarin",
+    generatedAt: "2026-07-05T10:00:00+08:00",
+    scheduleStatus: "Due soon",
+    openingScript: "Hello Mdm Tan Bee Hoon, this is EarlyCare. This is your scheduled 2-day wellbeing check-in. Are you safe to talk now?",
+    questions: [
+      {
+        id: "concussion-danger",
+        priority: "Urgent",
+        topic: "Possible concussion danger signs",
+        prompt: "Any worsening headache, vomiting, confusion, slurred speech, weakness, numbness, unusual behaviour, or trouble waking?",
+        rationale: "Previous record includes fall/head-impact danger signs."
+      },
+      {
+        id: "fall-head-impact",
+        priority: "Watch",
+        topic: "Falls / head impact / jolts",
+        prompt: "Since the last call, did you fall, bump your head, have a body jolt, or feel whiplash?",
+        rationale: "Fall risk is listed in this senior profile."
+      },
+      {
+        id: "blood-pressure",
+        priority: "Watch",
+        topic: "Blood pressure",
+        prompt: "Did you take your blood pressure medicine, and do you feel dizzy, weak, or unusually tired?",
+        rationale: "High blood pressure is listed in this senior profile."
+      }
+    ],
+    escalationReminder: "Use Daughter: Mei Ling and Neighbour: Mr Lee, unit 08-112 for follow-up. For red danger signs after a fall, head impact, blow, or jolt, escalate for urgent human help."
+  },
+  {
+    seniorId: "s-002",
+    seniorName: "Mr Raman Pillai",
+    preferredLanguage: "Tamil",
+    generatedAt: "2026-07-05T10:00:00+08:00",
+    scheduleStatus: "Due now",
+    openingScript: "Hello Mr Raman Pillai, this is EarlyCare. This is your due now 3-day wellbeing check-in. Are you safe to talk now?",
+    questions: [
+      {
+        id: "contact-reliability",
+        priority: "Watch",
+        topic: "Contact reliability",
+        prompt: "If we cannot reach you next time, should we call your caregiver or listed neighbour first?",
+        rationale: "This check-in is due now."
+      },
+      {
+        id: "speech-watch",
+        priority: "Watch",
+        topic: "Speech watch",
+        prompt: "Please say pa-ta-ka three times, then repeat: Today I am safe at home and I can ask for help.",
+        rationale: "Speech pace and phrase clarity are part of this senior's prompt focus."
+      },
+      {
+        id: "mood-loneliness",
+        priority: "Watch",
+        topic: "Mood / loneliness",
+        prompt: "How has your mood been, and would you like a befriender call, neighbour check-in, or volunteer visit this week?",
+        rationale: "The profile includes loneliness and living-alone context."
+      }
+    ],
+    escalationReminder: "Use Nephew: Arjun and Neighbour: Mdm Koh, unit 05-241 for follow-up. For red danger signs after a fall, head impact, blow, or jolt, escalate for urgent human help."
+  },
+  {
+    seniorId: "s-003",
+    seniorName: "Encik Ahmad Rahman",
+    preferredLanguage: "Malay",
+    generatedAt: "2026-07-05T10:00:00+08:00",
+    scheduleStatus: "Due soon",
+    openingScript: "Hello Encik Ahmad Rahman, this is EarlyCare. This is your scheduled 2-day wellbeing check-in. Are you safe to talk now?",
+    questions: [
+      {
+        id: "ckd-hydration",
+        priority: "Watch",
+        topic: "CKD / hydration",
+        prompt: "Have you had enough water today, and is there any swelling, dizziness, or appointment concern?",
+        rationale: "CKD and hydration reminders are listed in this senior profile."
+      },
+      {
+        id: "blood-pressure",
+        priority: "Watch",
+        topic: "Blood pressure",
+        prompt: "Did you take your blood pressure medicine, and do you feel dizzy, weak, or unusually tired?",
+        rationale: "Hypertension is listed in this senior profile."
+      },
+      {
+        id: "food-water-medication",
+        priority: "Routine",
+        topic: "Medication / food / water",
+        prompt: "Have you eaten, drunk enough water, and taken your medication today?",
+        rationale: "Food, water, and medication status are basic check-in anchors."
+      }
+    ],
+    escalationReminder: "Use Son: Hafiz and Neighbour: Encik Salleh, unit 03-018 for follow-up. For red danger signs after a fall, head impact, blow, or jolt, escalate for urgent human help."
   }
 ];

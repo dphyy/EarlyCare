@@ -3,6 +3,7 @@ export type CheckInStatus = "Checked in" | "Missed" | "Needs follow-up" | "Urgen
 export type CheckInScheduleStatus = "On track" | "Due soon" | "Due now" | "Overdue";
 export type Language = "English" | "Mandarin" | "Malay" | "Tamil" | "Singlish/Dialect";
 export type SpeechModelMode = "demo metrics" | "offline embedding" | "validated model";
+export type CallPlanPriority = "Routine" | "Watch" | "Urgent";
 export type ConversationCategoryId =
   | "mental_wellbeing"
   | "fall_head_impact"
@@ -154,6 +155,25 @@ export interface SeniorRecord {
   latestRecordAt?: string | null;
   categories: SeniorRecordCategory[];
   timeline: SeniorRecordEvent[];
+}
+
+export interface CallPlanQuestion {
+  id: string;
+  priority: CallPlanPriority;
+  topic: string;
+  prompt: string;
+  rationale: string;
+}
+
+export interface CallPlan {
+  seniorId: string;
+  seniorName: string;
+  preferredLanguage: Language;
+  generatedAt: string;
+  scheduleStatus: CheckInScheduleStatus;
+  openingScript: string;
+  questions: CallPlanQuestion[];
+  escalationReminder: string;
 }
 
 export interface TranscriptMessage {

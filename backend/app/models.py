@@ -20,6 +20,7 @@ EscalationStepStatus = Literal["Standby", "Triggered", "Complete"]
 CheckInScheduleStatus = Literal["On track", "Due soon", "Due now", "Overdue"]
 CheckInContactKind = Literal["call", "check-in", "none"]
 SeniorRecordSource = Literal["call", "check-in"]
+CallPlanPriority = Literal["Routine", "Watch", "Urgent"]
 
 
 class SpeechProfile(BaseModel):
@@ -202,6 +203,25 @@ class SeniorRecord(BaseModel):
     latestRecordAt: str | None = None
     categories: list[SeniorRecordCategory] = Field(default_factory=list)
     timeline: list[SeniorRecordEvent] = Field(default_factory=list)
+
+
+class CallPlanQuestion(BaseModel):
+    id: str
+    priority: CallPlanPriority
+    topic: str
+    prompt: str
+    rationale: str
+
+
+class CallPlan(BaseModel):
+    seniorId: str
+    seniorName: str
+    preferredLanguage: Language
+    generatedAt: str
+    scheduleStatus: CheckInScheduleStatus
+    openingScript: str
+    questions: list[CallPlanQuestion] = Field(default_factory=list)
+    escalationReminder: str
 
 
 class SpeechDeviationRequest(BaseModel):
