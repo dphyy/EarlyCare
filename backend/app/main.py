@@ -1,5 +1,6 @@
 import os
 import json
+import mimetypes
 import re
 from pathlib import Path
 from datetime import datetime, timezone
@@ -36,6 +37,16 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 CALL_STORAGE_ROOT = BACKEND_ROOT / "storage" / "calls"
 app = FastAPI(title="EarlyCare API", version="0.1.0")
+SUPPORTED_AUDIO_EXTENSIONS = {".mp3", ".ogg", ".wav", ".webm"}
+CONTENT_TYPE_AUDIO_EXTENSIONS = {
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/ogg": ".ogg",
+    "audio/wav": ".wav",
+    "audio/wave": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/webm": ".webm",
+}
 
 app.add_middleware(
     CORSMiddleware,
@@ -90,6 +101,14 @@ def _now_iso() -> str:
 
 def _call_metadata_path(call_id: str) -> Path:
     return CALL_STORAGE_ROOT / call_id / "metadata.json"
+
+
+def _audio_upload_extension(audio: UploadFile) -> str:
+    suffix = Path(audio.filename or "").suffix.lower()
+    if suffix in SUPPORTED_AUDIO_EXTENSIONS:
+        return suffix
+    content_type = (audio.content_type or "").split(";")[0].lower()
+    return CONTENT_TYPE_AUDIO_EXTENSIONS.get(content_type, ".wav")
 
 
 def _transcript_to_text(messages: list[TranscriptMessage]) -> str:
@@ -231,6 +250,22 @@ def _role_labeled_english_transcript(messages: list[TranscriptMessage], language
     for index, message in enumerate(spoken_messages):
         sentence_index = min(len(fallback_sentences) - 1, round(index * (len(fallback_sentences) - 1) / max(1, len(spoken_messages) - 1)))
         mapped_lines.append(f"{_display_role(message.role)}: {fallback_sentences[sentence_index]}")
+    return "\n".join(mapped_lines)
+
+
+def _role_labeled_original_transcript(messages: list[TranscriptMessage], fallback_transcript: str) -> str:
+    if not messages:
+        return _clean_transcript_text(fallback_transcript)
+
+    source_sentences = _split_sentences(re.sub(r"<Speaker\d+>:\s*", " ", fallback_transcript))
+    spoken_messages = [message for message in messages if message.role != "System" and message.text.strip()]
+    if not source_sentences or not spoken_messages:
+        return _transcript_to_text(messages)
+
+    mapped_lines: list[str] = []
+    for index, message in enumerate(spoken_messages):
+        sentence_index = min(len(source_sentences) - 1, round(index * (len(source_sentences) - 1) / max(1, len(spoken_messages) - 1)))
+        mapped_lines.append(f"{_display_role(message.role)}: {source_sentences[sentence_index]}")
     return "\n".join(mapped_lines)
 
 
@@ -598,12 +633,17 @@ def get_call(call_id: str) -> CallRecord:
 
 @app.get("/calls/{call_id}/audio")
 def get_call_audio(call_id: str) -> FileResponse:
-    audio_path = CALL_STORAGE_ROOT / call_id / "full-call.webm"
-    if not audio_path.exists():
-        audio_path = CALL_STORAGE_ROOT / call_id / "mic-audio.webm"
-    if not audio_path.exists():
+    call_dir = CALL_STORAGE_ROOT / call_id
+    audio_path = next(
+        (candidate for candidate in [*(call_dir.glob("full-call.*")), call_dir / "mic-audio.webm"] if candidate.exists()),
+        None,
+    )
+    if audio_path is None:
         raise HTTPException(status_code=404, detail="Audio recording not found")
-    return FileResponse(audio_path, media_type="audio/webm", filename=f"{call_id}-{audio_path.name}")
+    media_type = mimetypes.guess_type(audio_path.name)[0] or "application/octet-stream"
+    if audio_path.suffix.lower() == ".wav":
+        media_type = "audio/wav"
+    return FileResponse(audio_path, media_type=media_type, filename=f"{call_id}-{audio_path.name}")
 
 
 @app.post("/checkins/start", response_model=CheckInSession)
@@ -697,22 +737,35 @@ async def save_call(
     audio_file_path: str | None = None
     audio_path: Path | None = None
     if audio is not None:
-        audio_path = call_dir / "full-call.webm"
+        audio_path = call_dir / f"full-call{_audio_upload_extension(audio)}"
         audio_path.write_bytes(await audio.read())
         audio_file_path = str(audio_path)
 
     dialogue_transcript = _transcript_to_text(messages)
     translation = transcribe_with_fallback(senior.preferredLanguage, dialogue_transcript, audio_path)
-    original_transcript = _clean_transcript_text(dialogue_transcript or translation.transcript)
-    english_transcript = _clean_transcript_text(
-        _role_labeled_english_transcript(messages, senior.preferredLanguage, translation.translation or original_transcript)
-    )
+    if translation.fallbackUsed:
+        original_transcript = _clean_transcript_text(dialogue_transcript or translation.transcript)
+        english_transcript = _clean_transcript_text(
+            _role_labeled_english_transcript(messages, senior.preferredLanguage, translation.translation or original_transcript)
+        )
+    else:
+        original_transcript = _clean_transcript_text(_role_labeled_original_transcript(messages, translation.transcript or dialogue_transcript))
+        english_transcript = _clean_transcript_text(translation.translation or translation.transcript or original_transcript)
     for segment in translation.segments:
         segment.text = _clean_transcript_text(segment.text)
         segment.originalText = _clean_transcript_text(segment.originalText or segment.text)
         segment.englishText = _clean_transcript_text(segment.englishText or segment.text)
     translation.segments = _sync_english_segments(translation.segments, original_transcript, english_transcript)
-    role_segments = _role_segments_from_messages(messages, startedAt, english_transcript)
+    needs_role_support = translation.fallbackUsed or not any(
+        segment.role == "Patient" or segment.speaker == "Patient" or (segment.englishText or segment.text).startswith("Patient:")
+        for segment in translation.segments
+    )
+    role_source_transcript = (
+        english_transcript
+        if translation.fallbackUsed
+        else _role_labeled_english_transcript(messages, senior.preferredLanguage, english_transcript)
+    )
+    role_segments = _role_segments_from_messages(messages, startedAt, role_source_transcript) if needs_role_support else []
     if role_segments:
         translation.segments = role_segments
     elif not any(segment.startTimeSeconds is not None for segment in translation.segments):

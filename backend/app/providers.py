@@ -1,5 +1,6 @@
 import base64
 import html
+import mimetypes
 import os
 import re
 from pathlib import Path
@@ -15,6 +16,11 @@ MERALION_ASR_URL = "http://meralion.org:8010/audio/transcription"
 MERALION_TRANSLATION_URL = "http://meralion.org:8010/audio/translation"
 ELEVENLABS_STT_URL = "https://api.elevenlabs.io/v1/speech-to-text"
 BRACKET_CUE_RE = re.compile(r"\s*\[[^\]\r\n]{1,40}\]\s*")
+MERALION_AUDIO_MIME_TYPES = {
+    ".mp3": "audio/mpeg",
+    ".ogg": "audio/ogg",
+    ".wav": "audio/wav",
+}
 
 
 def clean_transcript_text(text: str) -> str:
@@ -164,6 +170,14 @@ def _audio_base64(audio_path: Path) -> str:
     return base64.b64encode(audio_path.read_bytes()).decode("ascii")
 
 
+def _audio_data_url(audio_path: Path) -> str:
+    suffix = audio_path.suffix.lower()
+    mime_type = MERALION_AUDIO_MIME_TYPES.get(suffix)
+    if mime_type is None:
+        raise RuntimeError(f"MERaLiON requires mp3, wav, or ogg audio; received {suffix or 'unknown'}")
+    return f"data:{mime_type};base64,{_audio_base64(audio_path)}"
+
+
 def _auth_headers(api_key: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {api_key}", "X-API-Key": api_key, "Content-Type": "application/json"}
 
@@ -178,15 +192,13 @@ class MeralionProvider:
         if not api_key or audio_path is None:
             raise RuntimeError("MERaLiON credentials or audio file not configured")
 
-        audio_url = _audio_base64(audio_path)
+        audio_url = _audio_data_url(audio_path)
         response = httpx.post(
             endpoint,
             headers=_auth_headers(api_key),
             json={
                 "audio_url": audio_url,
-                "return_timestamps": True,
                 "return_diarization": True,
-                "boundary_mode": "sequential",
             },
             timeout=90,
         )
@@ -207,7 +219,6 @@ class MeralionProvider:
                 json={
                     "audio_url": audio_url,
                     "translation_params": {
-                        "source_language": language,
                         "target_language": "English",
                     },
                 },
@@ -246,11 +257,14 @@ class ElevenLabsSpeechToTextProvider:
             raise RuntimeError("ElevenLabs API key or audio file not configured")
 
         with audio_path.open("rb") as audio_file:
+            mime_type = mimetypes.guess_type(audio_path.name)[0] or "application/octet-stream"
+            if audio_path.suffix.lower() == ".wav":
+                mime_type = "audio/wav"
             response = httpx.post(
                 ELEVENLABS_STT_URL,
                 headers={"xi-api-key": api_key},
                 data={"model_id": os.getenv("ELEVENLABS_STT_MODEL", "scribe_v1")},
-                files={"file": (audio_path.name, audio_file, "audio/webm")},
+                files={"file": (audio_path.name, audio_file, mime_type)},
                 timeout=90,
             )
         response.raise_for_status()

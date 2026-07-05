@@ -1,7 +1,10 @@
 import unittest
 from pathlib import Path
 import json
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
+
+from fastapi.testclient import TestClient
 
 from app import main, providers
 from app.models import ProviderResult, TranscriptSegment
@@ -93,6 +96,91 @@ class CallWorkflowTests(unittest.TestCase):
         self.assertEqual(calls, ["meralion", "elevenlabs"])
         self.assertEqual(result.provider, "elevenlabs-stt")
 
+    def test_meralion_asr_sends_data_url_without_boundary_mode(self) -> None:
+        asr_response = Mock()
+        asr_response.raise_for_status.return_value = None
+        asr_response.json.return_value = {"choices": [{"message": {"content": "I am okay."}}]}
+
+        with TemporaryDirectory() as temp_dir:
+            audio_path = Path(temp_dir) / "full-call.wav"
+            audio_path.write_bytes(b"audio bytes")
+            with patch.dict(providers.os.environ, {"MERALION_API_KEY": "test-key"}), patch.object(providers.httpx, "post", return_value=asr_response) as post:
+                result = providers.MeralionProvider().transcribe("English", "fallback hint", audio_path)
+
+        request_json = post.call_args.kwargs["json"]
+        self.assertEqual(result.provider, "meralion")
+        self.assertTrue(request_json["audio_url"].startswith("data:audio/wav;base64,"))
+        self.assertEqual(request_json["return_diarization"], True)
+        self.assertNotIn("boundary_mode", request_json)
+        self.assertNotIn("return_timestamps", request_json)
+
+    def test_meralion_translation_sends_target_language_only(self) -> None:
+        asr_response = Mock()
+        asr_response.raise_for_status.return_value = None
+        asr_response.json.return_value = {"choices": [{"message": {"content": "我跌倒了"}}]}
+        translation_response = Mock()
+        translation_response.raise_for_status.return_value = None
+        translation_response.json.return_value = {"choices": [{"message": {"content": "I fell down."}}]}
+
+        with TemporaryDirectory() as temp_dir:
+            audio_path = Path(temp_dir) / "full-call.wav"
+            audio_path.write_bytes(b"audio bytes")
+            with patch.dict(providers.os.environ, {"MERALION_API_KEY": "test-key"}), patch.object(
+                providers.httpx, "post", side_effect=[asr_response, translation_response]
+            ) as post:
+                result = providers.MeralionProvider().transcribe("Mandarin", "fallback hint", audio_path)
+
+        translation_json = post.call_args_list[1].kwargs["json"]
+        self.assertEqual(result.provider, "meralion-audio-translation")
+        self.assertTrue(translation_json["audio_url"].startswith("data:audio/wav;base64,"))
+        self.assertEqual(translation_json["translation_params"], {"target_language": "English"})
+        self.assertNotIn("source_language", translation_json["translation_params"])
+
+    def test_save_call_prefers_meralion_audio_transcripts_for_patient_overview(self) -> None:
+        messages = [
+            {"role": "Agent", "text": "Live agent text", "timestamp": "2026-07-04T10:00:00+08:00"},
+            {"role": "Senior", "text": "Live senior text", "timestamp": "2026-07-04T10:00:05+08:00"},
+        ]
+        meralion_result = ProviderResult(
+            provider="meralion-audio-translation",
+            language="Mandarin",
+            transcript="MERaLiON original transcript.",
+            translation="MERaLiON English transcript.",
+            confidence=0.86,
+            fallbackUsed=False,
+            segments=[TranscriptSegment(text="MERaLiON original transcript.", originalText="MERaLiON original transcript.", englishText="MERaLiON English transcript.")],
+        )
+
+        with TemporaryDirectory() as temp_dir:
+            with (
+                patch.object(main, "CALL_STORAGE_ROOT", Path(temp_dir)),
+                patch.object(main, "transcribe_with_fallback", return_value=meralion_result) as transcribe,
+                patch.object(main, "_openai_risk_review", return_value=main._manual_risk_review()),
+            ):
+                client = TestClient(main.app)
+                response = client.post(
+                    "/calls",
+                    data={
+                        "seniorId": "s-001",
+                        "status": "Complete",
+                        "startedAt": "2026-07-04T10:00:00+08:00",
+                        "completedAt": "2026-07-04T10:01:00+08:00",
+                        "transcriptMessages": json.dumps(messages),
+                        "agentAudioCaptured": "true",
+                    },
+                    files={"audio": ("full-call.wav", b"audio bytes", "audio/wav")},
+                )
+
+        self.assertEqual(response.status_code, 200)
+        call = response.json()["call"]
+        transcribe.assert_called_once()
+        self.assertEqual(call["originalTranscript"], "Agent: MERaLiON original transcript.\nPatient: MERaLiON original transcript.")
+        self.assertEqual(call["englishTranscript"], "MERaLiON English transcript.")
+        self.assertEqual(call["transcriptMessages"][0]["text"], "Live agent text")
+        self.assertEqual(call["translationProvider"], "meralion-audio-translation")
+        self.assertFalse(call["translationFallbackUsed"])
+        self.assertTrue(call["audioFilePath"].endswith("full-call.wav"))
+
     def test_speech_timing_estimate_uses_message_timestamps(self) -> None:
         messages = [
             main.TranscriptMessage(role="Agent", text="How are you?", timestamp="2026-07-04T10:00:00+08:00"),
@@ -160,6 +248,17 @@ class CallWorkflowTests(unittest.TestCase):
             transcript = main._role_labeled_english_transcript(messages, "Mandarin", "How are you? I almost fell.")
 
         self.assertEqual(transcript, "Agent: How are you?\nPatient: I almost fell.")
+
+    def test_role_labeled_original_transcript_replaces_meralion_speaker_tags(self) -> None:
+        messages = [
+            main.TranscriptMessage(role="Agent", text="How are you?", timestamp=None),
+            main.TranscriptMessage(role="Senior", text="不错。", timestamp=None),
+        ]
+
+        transcript = main._role_labeled_original_transcript(messages, "<Speaker1>: 您今天感觉怎么样？ <Speaker2>: 今天不错。")
+
+        self.assertEqual(transcript, "Agent: 您今天感觉怎么样？\nPatient: 今天不错。")
+        self.assertNotIn("<Speaker", transcript)
 
     def test_role_segments_estimate_patient_start_before_transcript_event_time(self) -> None:
         messages = [

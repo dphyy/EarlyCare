@@ -23,6 +23,13 @@ const riskOrder: Record<RiskLevel, number> = { Green: 0, Watch: 1, Amber: 2, Red
 type AppView = "call" | "dashboard";
 type CallState = "Ready" | "Connecting" | "In call" | "Saving" | "Analysing" | "Complete" | "Failed";
 type AgentAudioFormat = "pcm_8000" | "pcm_16000" | "pcm_22050" | "pcm_24000" | "pcm_44100" | "pcm_48000" | "ulaw_8000";
+interface WavRecorder {
+  chunks: Float32Array[];
+  input: AudioNode;
+  processor: ScriptProcessorNode;
+  silentOutput: GainNode;
+  sampleRate: number;
+}
 
 function StatCard({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
   return (
@@ -47,19 +54,64 @@ function cleanTranscriptText(text: string): string {
     .trim();
 }
 
-function stopRecorder(recorder: MediaRecorder | null): Promise<Blob | null> {
-  return new Promise((resolve) => {
-    if (!recorder || recorder.state === "inactive") {
-      resolve(null);
-      return;
+function writeAscii(view: DataView, offset: number, text: string) {
+  for (let index = 0; index < text.length; index += 1) {
+    view.setUint8(offset + index, text.charCodeAt(index));
+  }
+}
+
+function encodeWav(chunks: Float32Array[], sampleRate: number): Blob | null {
+  const sampleCount = chunks.reduce((total, chunk) => total + chunk.length, 0);
+  if (!sampleCount) return null;
+
+  const buffer = new ArrayBuffer(44 + sampleCount * 2);
+  const view = new DataView(buffer);
+  writeAscii(view, 0, "RIFF");
+  view.setUint32(4, 36 + sampleCount * 2, true);
+  writeAscii(view, 8, "WAVE");
+  writeAscii(view, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeAscii(view, 36, "data");
+  view.setUint32(40, sampleCount * 2, true);
+
+  let offset = 44;
+  chunks.forEach((chunk) => {
+    for (let index = 0; index < chunk.length; index += 1) {
+      const sample = Math.max(-1, Math.min(1, chunk[index]));
+      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+      offset += 2;
     }
-    const chunks: BlobPart[] = [];
-    recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) chunks.push(event.data);
-    };
-    recorder.onstop = () => resolve(chunks.length ? new Blob(chunks, { type: "audio/webm" }) : null);
-    recorder.stop();
   });
+  return new Blob([view], { type: "audio/wav" });
+}
+
+function createWavRecorder(audioContext: AudioContext, input: AudioNode): WavRecorder {
+  const processor = audioContext.createScriptProcessor(4096, 1, 1);
+  const silentOutput = audioContext.createGain();
+  const chunks: Float32Array[] = [];
+  silentOutput.gain.value = 0;
+  processor.onaudioprocess = (event) => {
+    chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+  };
+  input.connect(processor);
+  processor.connect(silentOutput);
+  silentOutput.connect(audioContext.destination);
+  return { chunks, input, processor, silentOutput, sampleRate: audioContext.sampleRate };
+}
+
+function stopRecorder(recorder: WavRecorder | null): Promise<Blob | null> {
+  if (!recorder) return Promise.resolve(null);
+  recorder.processor.onaudioprocess = null;
+  recorder.input.disconnect(recorder.processor);
+  recorder.processor.disconnect();
+  recorder.silentOutput.disconnect();
+  return Promise.resolve(encodeWav(recorder.chunks, recorder.sampleRate));
 }
 
 function base64ToArrayBuffer(base64Audio: string): ArrayBuffer {
@@ -432,10 +484,10 @@ function AgentsCall({
   const [debugMessage, setDebugMessage] = useState("");
   const [transcriptMessages, setTranscriptMessages] = useState<TranscriptMessage[]>([]);
   const [startedAt, setStartedAt] = useState<string | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recorderRef = useRef<WavRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const mixedDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const recordingInputRef = useRef<GainNode | null>(null);
   const agentAudioFormatRef = useRef<AgentAudioFormat>("pcm_16000");
   const agentPlaybackTimeRef = useRef(0);
   const agentAudioCapturedRef = useRef(false);
@@ -479,13 +531,13 @@ function AgentsCall({
     },
     onAudio: (base64Audio) => {
       const audioContext = audioContextRef.current;
-      const destination = mixedDestinationRef.current;
-      if (!audioContext || !destination) return;
+      const recordingInput = recordingInputRef.current;
+      if (!audioContext || !recordingInput) return;
       try {
         const audioBuffer = createAgentAudioBuffer(audioContext, base64Audio, agentAudioFormatRef.current);
         const source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
-        source.connect(destination);
+        source.connect(recordingInput);
         const startAt = Math.max(audioContext.currentTime, agentPlaybackTimeRef.current);
         source.start(startAt);
         agentPlaybackTimeRef.current = startAt + audioBuffer.duration;
@@ -526,18 +578,15 @@ function AgentsCall({
       const AudioContextConstructor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!AudioContextConstructor) throw new Error("Browser audio recording is not supported.");
       const audioContext = new AudioContextConstructor();
-      const destination = audioContext.createMediaStreamDestination();
-      audioContext.createMediaStreamSource(stream).connect(destination);
+      const recordingInput = audioContext.createGain();
+      audioContext.createMediaStreamSource(stream).connect(recordingInput);
       audioContextRef.current = audioContext;
-      mixedDestinationRef.current = destination;
+      recordingInputRef.current = recordingInput;
       agentPlaybackTimeRef.current = audioContext.currentTime;
       agentAudioCapturedRef.current = false;
       agentAudioWarningShownRef.current = false;
       agentAudioFormatRef.current = "pcm_16000";
-      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
-      const recorder = new MediaRecorder(destination.stream, { mimeType });
-      recorder.start();
-      recorderRef.current = recorder;
+      recorderRef.current = createWavRecorder(audioContext, recordingInput);
 
       const session = await createElevenLabsSession({
         seniorId: selectedSenior.id,
@@ -598,8 +647,8 @@ function AgentsCall({
     formData.append("agentAudioCaptured", String(agentAudioCapturedRef.current));
     audioContextRef.current?.close();
     audioContextRef.current = null;
-    mixedDestinationRef.current = null;
-    if (audioBlob) formData.append("audio", audioBlob, "full-call.webm");
+    recordingInputRef.current = null;
+    if (audioBlob) formData.append("audio", audioBlob, "full-call.wav");
 
     setCallState("Analysing");
     const saved = await saveCall(formData);
