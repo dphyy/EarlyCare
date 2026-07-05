@@ -1,5 +1,5 @@
-import { callPlans, scenarios, scheduleItems, seniorRecords, seniors, sessions, volunteerTasks } from "./data";
-import type { CallPlan, CallRecord, CheckInScheduleItem, CheckInSession, Scenario, ScenarioRunResponse, Senior, SeniorRecord, SpeechModelMode, SpeechProfile, VolunteerTask } from "./types";
+import { callPlans, operationQueueItems, scenarios, scheduleItems, seniorRecords, seniors, sessions, volunteerTasks } from "./data";
+import type { CallPlan, CallRecord, CheckInScheduleItem, CheckInSession, OperationsQueueItem, Scenario, ScenarioRunResponse, Senior, SeniorRecord, SpeechModelMode, SpeechProfile, VolunteerTask } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string | undefined;
 
@@ -25,6 +25,10 @@ export function fetchSessions(): Promise<CheckInSession[]> {
 
 export function fetchSchedule(): Promise<CheckInScheduleItem[]> {
   return getJson<CheckInScheduleItem[]>("/schedule", scheduleItems);
+}
+
+export function fetchOperationsQueue(): Promise<OperationsQueueItem[]> {
+  return getJson<OperationsQueueItem[]>("/operations-queue", operationQueueItems);
 }
 
 export function fetchSeniorRecords(): Promise<SeniorRecord[]> {

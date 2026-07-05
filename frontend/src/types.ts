@@ -4,6 +4,7 @@ export type CheckInScheduleStatus = "On track" | "Due soon" | "Due now" | "Overd
 export type Language = "English" | "Mandarin" | "Malay" | "Tamil" | "Singlish/Dialect";
 export type SpeechModelMode = "demo metrics" | "offline embedding" | "validated model";
 export type CallPlanPriority = "Routine" | "Watch" | "Urgent";
+export type OperationsQueuePriority = "Emergency" | "Today" | "Due" | "Routine";
 export type ConversationCategoryId =
   | "mental_wellbeing"
   | "fall_head_impact"
@@ -63,6 +64,23 @@ export interface CheckInScheduleItem {
   hoursUntilDue: number;
   overdueHours: number;
   recommendedAction: string;
+}
+
+export interface OperationsQueueItem {
+  seniorId: string;
+  seniorName: string;
+  priority: OperationsQueuePriority;
+  reason: string;
+  recommendedAction: string;
+  scheduleStatus: CheckInScheduleStatus;
+  riskLevel: RiskLevel;
+  openTaskCount: number;
+  nextDueAt: string;
+  dueInHours: number;
+  lastContactAt?: string | null;
+  assignedTo?: string | null;
+  taskId?: string | null;
+  queueRank: number;
 }
 
 export interface RiskAssessment {

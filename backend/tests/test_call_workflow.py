@@ -17,6 +17,16 @@ class CallWorkflowTests(unittest.TestCase):
     def test_clean_transcript_text_removes_bracket_cues(self) -> None:
         self.assertEqual(providers.clean_transcript_text("Agent: [happy] hello [concerned] there"), "Agent: hello there")
 
+    def test_cors_origins_cover_vite_fallback_ports_and_env_override(self) -> None:
+        with patch.dict(main.os.environ, {}, clear=True):
+            origins = main._cors_origins()
+            self.assertIn("http://localhost:5173", origins)
+            self.assertIn("http://localhost:5174", origins)
+            self.assertIn("http://127.0.0.1:5175", origins)
+
+        with patch.dict(main.os.environ, {"FRONTEND_ORIGINS": "http://example.test, http://localhost:3000"}):
+            self.assertEqual(main._cors_origins(), ["http://example.test", "http://localhost:3000"])
+
     def test_schedule_items_use_frequency_and_last_contact(self) -> None:
         with TemporaryDirectory() as tmp:
             original_state_root = main.STATE_STORAGE_ROOT
@@ -96,6 +106,34 @@ class CallWorkflowTests(unittest.TestCase):
 
                 ahmad_questions = {question.id: question for question in plans["s-003"].questions}
                 self.assertIn("ckd-hydration", ahmad_questions)
+            finally:
+                main.STATE_STORAGE_ROOT = original_state_root
+                main.CHECKINS_STATE_PATH = original_checkins_path
+                main.TASKS_STATE_PATH = original_tasks_path
+                main.CALL_STORAGE_ROOT = original_call_root
+
+    def test_operations_queue_ranks_emergency_tasks_before_due_calls(self) -> None:
+        with TemporaryDirectory() as tmp:
+            original_state_root = main.STATE_STORAGE_ROOT
+            original_checkins_path = main.CHECKINS_STATE_PATH
+            original_tasks_path = main.TASKS_STATE_PATH
+            original_call_root = main.CALL_STORAGE_ROOT
+            state_root = Path(tmp) / "state"
+            main.STATE_STORAGE_ROOT = state_root
+            main.CHECKINS_STATE_PATH = state_root / "checkins.json"
+            main.TASKS_STATE_PATH = state_root / "volunteer-tasks.json"
+            main.CALL_STORAGE_ROOT = Path(tmp) / "calls"
+            try:
+                queue = main._build_operations_queue()
+
+                self.assertEqual([item.queueRank for item in queue], [1, 2, 3])
+                self.assertEqual(queue[0].seniorId, "s-001")
+                self.assertEqual(queue[0].priority, "Emergency")
+                self.assertEqual(queue[0].taskId, "t-001")
+                self.assertEqual(queue[1].seniorId, "s-002")
+                self.assertEqual(queue[1].priority, "Today")
+                self.assertEqual(queue[2].seniorId, "s-003")
+                self.assertEqual(queue[2].priority, "Due")
             finally:
                 main.STATE_STORAGE_ROOT = original_state_root
                 main.CHECKINS_STATE_PATH = original_checkins_path

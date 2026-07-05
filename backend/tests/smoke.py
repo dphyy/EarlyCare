@@ -38,6 +38,14 @@ def main_test() -> None:
         assert len(schedule_payload) == 3
         assert {item["status"] for item in schedule_payload}.issubset({"On track", "Due soon", "Due now", "Overdue"})
 
+        queue = client.get("/operations-queue")
+        assert queue.status_code == 200
+        queue_payload = queue.json()
+        assert len(queue_payload) == 3
+        assert [item["queueRank"] for item in queue_payload] == [1, 2, 3]
+        assert queue_payload[0]["seniorId"] == "s-001"
+        assert queue_payload[0]["priority"] == "Emergency"
+
         records = client.get("/senior-records")
         assert records.status_code == 200
         records_payload = records.json()

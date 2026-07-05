@@ -1079,6 +1079,7 @@ h3 {
 }
 
 .detail-panel > .profile-handoff,
+.detail-panel > .operations-queue-panel,
 .detail-panel > .schedule-panel,
 .detail-panel > .call-plan-panel,
 .detail-panel > .record-panel,
@@ -1088,6 +1089,119 @@ h3 {
 .detail-panel > .history-section,
 .detail-panel > .saved-calls {
   margin-top: 0;
+}
+
+.operations-queue-panel {
+  background: #ffffff;
+  border: 1px solid #dfe5d8;
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
+  padding: 16px;
+}
+
+.queue-list {
+  display: grid;
+  gap: 10px;
+}
+
+.queue-card {
+  align-items: stretch;
+  background: #fbfcf8;
+  border: 1px solid #dfe5d8;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 38px minmax(0, 1fr) minmax(170px, 0.24fr);
+  min-width: 0;
+  padding: 12px;
+}
+
+.queue-card.active {
+  box-shadow: inset 4px 0 0 #16453f;
+}
+
+.queue-emergency {
+  background: #fff5f3;
+  border-color: #eca19a;
+}
+
+.queue-today {
+  background: #fffaf0;
+  border-color: #e5c979;
+}
+
+.queue-due {
+  background: #f5f8ff;
+  border-color: #bdcbef;
+}
+
+.queue-rank {
+  align-items: center;
+  background: #edf3e7;
+  border-radius: 999px;
+  color: #16453f;
+  display: grid;
+  font-size: 13px;
+  font-weight: 900;
+  height: 30px;
+  place-items: center;
+  width: 30px;
+}
+
+.queue-card-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.queue-card-header strong {
+  color: #17201a;
+  display: block;
+  font-size: 16px;
+  line-height: 1.25;
+}
+
+.queue-badges,
+.queue-meta {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.queue-card p {
+  color: #344036;
+  margin: 8px 0 0;
+}
+
+.queue-meta {
+  margin-top: 10px;
+}
+
+.queue-meta span {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(216, 223, 208, 0.9);
+  border-radius: 999px;
+  color: #495549;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 5px;
+  min-height: 28px;
+  padding: 4px 8px;
+}
+
+.queue-actions {
+  align-content: center;
+  display: grid;
+  gap: 8px;
+}
+
+.queue-actions .primary-action,
+.queue-actions .secondary-action {
+  min-height: 40px;
+  padding: 8px 10px;
 }
 
 .schedule-panel {
@@ -1986,6 +2100,15 @@ h3 {
     display: grid;
   }
 
+  .queue-card {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .queue-actions {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .schedule-action-row {
     align-items: stretch;
     display: grid;
@@ -2112,9 +2235,23 @@ h3 {
   }
 
   .profile-actions .primary-action,
+  .queue-actions .primary-action,
+  .queue-actions .secondary-action,
   .schedule-actions button,
   .call-plan-footer .primary-action {
     width: 100%;
+  }
+
+  .queue-card-header {
+    display: grid;
+  }
+
+  .queue-badges {
+    justify-content: flex-start;
+  }
+
+  .queue-actions {
+    grid-template-columns: 1fr;
   }
 
   .task-actions {

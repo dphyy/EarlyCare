@@ -20,6 +20,7 @@ Older adults living alone may go days without anyone noticing a fall, head impac
 | --- | --- |
 | Scenario runner | Runs seven scripted demo paths: stable, missed check-in, Parkinson's watch, Post-Fall Amber, Post-Fall Red, chronic illness, and loneliness/wellbeing. |
 | Check-in schedule | Computes next due time, due/overdue status, last contact, and next action from each senior's 2-3 day cadence. |
+| Operations queue | Ranks who to contact first from schedule status, senior risk, and open volunteer work. |
 | Schedule action logging | Records answered or missed scheduled check-ins from Patient overview, then updates the schedule, senior record, escalation trail, and volunteer task list. |
 | Senior record | Rolls check-ins and saved calls into a per-senior categorized history for repeated fall, concussion, speech-watch, chronic illness, missed-call, and wellbeing signals. |
 | Next call plan | Turns the schedule, senior profile, and categorized history into personalized questions for the next voice check-in. |
@@ -98,6 +99,7 @@ GOOGLE_TRANSLATE_API_KEY=
 GOOGLE_TRANSLATE_URL=https://translation.googleapis.com/language/translate/v2
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
+FRONTEND_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174
 ```
 
 Never commit real `.env` files.
@@ -142,7 +144,7 @@ Open the Vite URL, usually `http://localhost:5173`.
 1. Open **Demo runner**.
 2. Run one of the seven scripted scenarios.
 3. Open **Patient overview**.
-4. Review the categorized senior record, next-call plan, historical check-ins, risk scores, escalation steps, transcripts, and volunteer tasks.
+4. Review the operations queue, categorized senior record, next-call plan, historical check-ins, risk scores, escalation steps, transcripts, and volunteer tasks.
 5. Acknowledge or close a task to confirm PATCH-backed status persistence.
 
 ### Live Agents Call Demo

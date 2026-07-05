@@ -21,6 +21,7 @@ CheckInScheduleStatus = Literal["On track", "Due soon", "Due now", "Overdue"]
 CheckInContactKind = Literal["call", "check-in", "none"]
 SeniorRecordSource = Literal["call", "check-in"]
 CallPlanPriority = Literal["Routine", "Watch", "Urgent"]
+OperationsQueuePriority = Literal["Emergency", "Today", "Due", "Routine"]
 
 
 class SpeechProfile(BaseModel):
@@ -85,6 +86,23 @@ class CheckInScheduleItem(BaseModel):
     hoursUntilDue: float
     overdueHours: float
     recommendedAction: str
+
+
+class OperationsQueueItem(BaseModel):
+    seniorId: str
+    seniorName: str
+    priority: OperationsQueuePriority
+    reason: str
+    recommendedAction: str
+    scheduleStatus: CheckInScheduleStatus
+    riskLevel: RiskLevel
+    openTaskCount: int
+    nextDueAt: str
+    dueInHours: float
+    lastContactAt: str | None = None
+    assignedTo: str | None = None
+    taskId: str | None = None
+    queueRank: int
 
 
 class Symptoms(BaseModel):

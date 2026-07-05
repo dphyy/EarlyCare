@@ -23,6 +23,7 @@ from app.models import (
     CompleteCheckInRequest,
     ConversationCategory,
     MissedCheckInRequest,
+    OperationsQueueItem,
     ProviderResult,
     RiskAssessment,
     RiskSignal,
@@ -69,9 +70,23 @@ CHECKINS_STATE_PATH = STATE_STORAGE_ROOT / "checkins.json"
 TASKS_STATE_PATH = STATE_STORAGE_ROOT / "volunteer-tasks.json"
 app = FastAPI(title="EarlyCare API", version="0.1.0")
 
+
+def _cors_origins() -> list[str]:
+    configured = os.getenv("FRONTEND_ORIGINS")
+    if configured:
+        return [origin.strip() for origin in configured.split(",") if origin.strip()]
+    return [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "http://localhost:5175",
+        "http://127.0.0.1:5175",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -375,6 +390,85 @@ def _build_senior_records() -> list[SeniorRecord]:
             )
         )
     return records
+
+
+def _highest_priority_task(tasks: list[VolunteerTask]) -> VolunteerTask | None:
+    priority_order = {"Urgent": 0, "Today": 1, "Routine": 2}
+    open_tasks = [task for task in tasks if task.status != "Closed"]
+    if not open_tasks:
+        return None
+    return sorted(open_tasks, key=lambda task: (priority_order[task.priority], _record_sort_time(task.createdAt)))[0]
+
+
+def _queue_priority(schedule: CheckInScheduleItem, record: SeniorRecord, task: VolunteerTask | None) -> str:
+    if record.highestRiskLevel == "Red" or (task is not None and task.priority == "Urgent"):
+        return "Emergency"
+    if schedule.status in {"Overdue", "Due now"} or record.highestRiskLevel in {"Amber", "Watch"} or (task is not None and task.priority == "Today"):
+        return "Today"
+    if schedule.status == "Due soon":
+        return "Due"
+    return "Routine"
+
+
+def _queue_reason(schedule: CheckInScheduleItem, record: SeniorRecord, task: VolunteerTask | None) -> str:
+    if task:
+        return task.reason
+    if schedule.status in {"Overdue", "Due now", "Due soon"}:
+        return schedule.recommendedAction
+    if record.timeline:
+        return record.timeline[0].summary
+    return "Routine scheduled check-in queued."
+
+
+def _build_operations_queue() -> list[OperationsQueueItem]:
+    schedules = {item.seniorId: item for item in _build_schedule_items()}
+    records = {record.seniorId: record for record in _build_senior_records()}
+    tasks_by_senior: dict[str, list[VolunteerTask]] = {}
+    for task in _load_tasks():
+        tasks_by_senior.setdefault(task.seniorId, []).append(task)
+
+    priority_order = {"Emergency": 0, "Today": 1, "Due": 2, "Routine": 3}
+    schedule_order = {"Overdue": 0, "Due now": 1, "Due soon": 2, "On track": 3}
+    risk_order = {"Red": 0, "Amber": 1, "Watch": 2, "Green": 3}
+    queue: list[OperationsQueueItem] = []
+
+    for senior in SENIORS:
+        schedule = schedules[senior.id]
+        record = records[senior.id]
+        task = _highest_priority_task(tasks_by_senior.get(senior.id, []))
+        priority = _queue_priority(schedule, record, task)
+        reason = _queue_reason(schedule, record, task)
+        queue.append(
+            OperationsQueueItem(
+                seniorId=senior.id,
+                seniorName=senior.name,
+                priority=priority,  # type: ignore[arg-type]
+                reason=reason,
+                recommendedAction=task.recommendedAction if task else schedule.recommendedAction,
+                scheduleStatus=schedule.status,
+                riskLevel=record.highestRiskLevel,
+                openTaskCount=record.openTaskCount,
+                nextDueAt=schedule.nextDueAt,
+                dueInHours=schedule.hoursUntilDue,
+                lastContactAt=schedule.lastContactAt,
+                assignedTo=task.assignedTo if task else None,
+                taskId=task.id if task else None,
+                queueRank=0,
+            )
+        )
+
+    ranked = sorted(
+        queue,
+        key=lambda item: (
+            priority_order[item.priority],
+            schedule_order[item.scheduleStatus],
+            risk_order[item.riskLevel],
+            _record_sort_time(item.nextDueAt),
+            -item.openTaskCount,
+            item.seniorName,
+        ),
+    )
+    return [item.model_copy(update={"queueRank": index + 1}) for index, item in enumerate(ranked)]
 
 
 def _add_call_plan_question(
@@ -1396,6 +1490,11 @@ def get_call_plan(senior_id: str) -> CallPlan:
 @app.get("/schedule", response_model=list[CheckInScheduleItem])
 def get_schedule() -> list[CheckInScheduleItem]:
     return _build_schedule_items()
+
+
+@app.get("/operations-queue", response_model=list[OperationsQueueItem])
+def get_operations_queue() -> list[OperationsQueueItem]:
+    return _build_operations_queue()
 
 
 @app.get("/scenarios", response_model=list[Scenario])

@@ -1,4 +1,4 @@
-import type { CallPlan, CheckInScheduleItem, CheckInSession, Scenario, Senior, SeniorRecord, VolunteerTask } from "./types";
+import type { CallPlan, CheckInScheduleItem, CheckInSession, OperationsQueueItem, Scenario, Senior, SeniorRecord, VolunteerTask } from "./types";
 
 export const seniors: Senior[] = [
   {
@@ -463,6 +463,57 @@ export const volunteerTasks: VolunteerTask[] = [
     assignedTo: "Community volunteer team B",
     status: "In progress",
     createdAt: "2026-07-04T10:15:00+08:00"
+  }
+];
+
+export const operationQueueItems: OperationsQueueItem[] = [
+  {
+    seniorId: "s-001",
+    seniorName: "Mdm Tan Bee Hoon",
+    priority: "Emergency",
+    reason: "Post-fall danger signs",
+    recommendedAction: "Call caregiver and coordinate urgent medical assessment.",
+    scheduleStatus: "Due soon",
+    riskLevel: "Red",
+    openTaskCount: 1,
+    nextDueAt: "2026-07-06T09:00:00+08:00",
+    dueInHours: 23,
+    lastContactAt: "2026-07-04T09:00:00+08:00",
+    assignedTo: "SGO-style volunteer team A",
+    taskId: "t-001",
+    queueRank: 1
+  },
+  {
+    seniorId: "s-002",
+    seniorName: "Mr Raman Pillai",
+    priority: "Today",
+    reason: "Gradual speech drift over recent check-ins",
+    recommendedAction: "Schedule in-person wellbeing visit and ask caregiver about changes.",
+    scheduleStatus: "Due now",
+    riskLevel: "Green",
+    openTaskCount: 1,
+    nextDueAt: "2026-07-05T10:00:00+08:00",
+    dueInHours: 0,
+    lastContactAt: null,
+    assignedTo: "Community volunteer team B",
+    taskId: "t-002",
+    queueRank: 2
+  },
+  {
+    seniorId: "s-003",
+    seniorName: "Encik Ahmad Rahman",
+    priority: "Due",
+    reason: "Prepare the next scheduled call within 23 hours.",
+    recommendedAction: "Prepare the next scheduled call within 23 hours.",
+    scheduleStatus: "Due soon",
+    riskLevel: "Green",
+    openTaskCount: 0,
+    nextDueAt: "2026-07-06T09:04:00+08:00",
+    dueInHours: 23.1,
+    lastContactAt: "2026-07-04T09:04:00+08:00",
+    assignedTo: null,
+    taskId: null,
+    queueRank: 3
   }
 ];
 

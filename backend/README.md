@@ -15,6 +15,7 @@ FastAPI service for EarlyCare call sessions, call artifact storage, transcriptio
 - Uses OpenAI structured output for patient-only decision-support symptom and risk extraction.
 - Attaches risk evidence to patient transcript segments and audio seek times.
 - Builds categorized conversation evidence and escalation trails for Patient overview.
+- Builds an operations queue that ranks who to contact first from schedule status, risk, and open volunteer work.
 - Serves saved call metadata and replayable audio to the Patient overview.
 
 ## Scenario Runner Flow
@@ -128,6 +129,7 @@ curl http://127.0.0.1:8000/health
 | `GOOGLE_TRANSLATE_URL` | Google fallback | Defaults to Cloud Translation v2. |
 | `OPENAI_API_KEY` | AI risk review | Used for structured patient-risk extraction. |
 | `OPENAI_MODEL` | AI risk review | Defaults to `gpt-4o-mini`. |
+| `FRONTEND_ORIGINS` | Browser API access | Optional comma-separated CORS allowlist. Defaults include local Vite ports 5173-5175. |
 
 Never commit real `.env` files.
 
@@ -141,6 +143,7 @@ Never commit real `.env` files.
 | `GET /seniors/{senior_id}/record` | One senior's categorized record and timeline. |
 | `GET /call-plans` | Personalized next-call plans for the roster. |
 | `GET /seniors/{senior_id}/call-plan` | One senior's next-call plan. |
+| `GET /operations-queue` | Ranked care-ops queue combining schedule urgency, senior risk, and open volunteer tasks. |
 | `GET /checkins` | Historical check-in records, including persisted scenario runs. |
 | `POST /checkins/start` | Start and persist a scheduled check-in attempt for a senior. |
 | `POST /checkins/{checkin_id}/complete` | Complete a started check-in, categorize transcript evidence, update schedule state, and create a follow-up task when risk is elevated. |

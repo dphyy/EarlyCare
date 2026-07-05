@@ -34,6 +34,7 @@ import {
   createElevenLabsSession,
   fetchCalls,
   fetchCallPlans,
+  fetchOperationsQueue,
   fetchSchedule,
   fetchScenarios,
   fetchSeniors,
@@ -54,6 +55,7 @@ import type {
   CheckInSession,
   ConversationCategory,
   EscalationStep,
+  OperationsQueueItem,
   RiskLevel,
   RiskSignal,
   Scenario,
@@ -1252,12 +1254,91 @@ function CallPlanPanel({ callPlan, onStartCall }: { callPlan: CallPlan | null; o
   );
 }
 
+function OperationsQueuePanel({
+  queue,
+  selectedSeniorId,
+  onOpenSenior,
+  onStartCall
+}: {
+  queue: OperationsQueueItem[];
+  selectedSeniorId: string;
+  onOpenSenior: (id: string) => void;
+  onStartCall: (id: string) => void;
+}) {
+  const activeItems = queue.filter((item) => item.priority !== "Routine").slice(0, 5);
+
+  if (!activeItems.length) {
+    return (
+      <section className="operations-queue-panel">
+        <SectionHeading eyebrow="Care desk" title="Operations Queue" meta={<span>clear</span>} />
+        <p className="empty-state">No due, elevated-risk, or open follow-up items are in the queue.</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="operations-queue-panel">
+      <SectionHeading eyebrow="Care desk" title="Operations Queue" meta={<span>{activeItems.length} active</span>} />
+      <div className="queue-list">
+        {activeItems.map((item) => (
+          <article className={`queue-card queue-${item.priority.toLowerCase()} ${item.seniorId === selectedSeniorId ? "active" : ""}`} key={`${item.seniorId}-${item.queueRank}`}>
+            <div className="queue-rank">{item.queueRank}</div>
+            <div className="queue-body">
+              <div className="queue-card-header">
+                <div>
+                  <span className="eyebrow">{item.priority}</span>
+                  <strong>{item.seniorName}</strong>
+                </div>
+                <div className="queue-badges">
+                  <ScheduleBadge status={item.scheduleStatus} />
+                  <RiskBadge level={item.riskLevel} />
+                </div>
+              </div>
+              <p>{item.reason}</p>
+              <div className="queue-meta">
+                <span>
+                  <CalendarClock size={14} />
+                  {item.scheduleStatus === "Overdue"
+                    ? `${formatHours(item.dueInHours)} overdue`
+                    : item.scheduleStatus === "Due now"
+                      ? "due now"
+                      : `${formatHours(item.dueInHours)} left`}
+                </span>
+                <span>
+                  <ListChecks size={14} />
+                  {item.openTaskCount} open
+                </span>
+                {item.assignedTo ? (
+                  <span>
+                    <UserRoundCheck size={14} />
+                    {item.assignedTo}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+            <div className="queue-actions">
+              <button className="secondary-action" onClick={() => onOpenSenior(item.seniorId)} type="button">
+                Open patient
+              </button>
+              <button className="primary-action" onClick={() => onStartCall(item.seniorId)} type="button">
+                <PhoneCall size={16} />
+                Start call
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function OfficerDashboard({
   seniors,
   sessions,
   tasks,
   calls,
   schedule,
+  operationsQueue,
   records,
   callPlans,
   selectedSeniorId,
@@ -1272,6 +1353,7 @@ function OfficerDashboard({
   tasks: VolunteerTask[];
   calls: CallRecord[];
   schedule: CheckInScheduleItem[];
+  operationsQueue: OperationsQueueItem[];
   records: SeniorRecord[];
   callPlans: CallPlan[];
   selectedSeniorId: string;
@@ -1502,6 +1584,13 @@ function OfficerDashboard({
             </button>
           </div>
         </div>
+
+        <OperationsQueuePanel
+          queue={operationsQueue}
+          selectedSeniorId={selectedSenior.id}
+          onOpenSenior={setSelectedSeniorId}
+          onStartCall={onStartCall}
+        />
 
         <section className={`profile-handoff handoff-${highestRisk.toLowerCase()}`}>
           <div className="handoff-icon">
@@ -1802,6 +1891,7 @@ function App() {
   const [loadedTasks, setLoadedTasks] = useState<VolunteerTask[]>([]);
   const [loadedCalls, setLoadedCalls] = useState<CallRecord[]>([]);
   const [loadedSchedule, setLoadedSchedule] = useState<CheckInScheduleItem[]>([]);
+  const [loadedOperationsQueue, setLoadedOperationsQueue] = useState<OperationsQueueItem[]>([]);
   const [loadedScenarios, setLoadedScenarios] = useState<Scenario[]>([]);
   const [loadedSeniorRecords, setLoadedSeniorRecords] = useState<SeniorRecord[]>([]);
   const [loadedCallPlans, setLoadedCallPlans] = useState<CallPlan[]>([]);
@@ -1810,6 +1900,11 @@ function App() {
   const refreshSchedule = async () => {
     const nextSchedule = await fetchSchedule();
     setLoadedSchedule(nextSchedule);
+  };
+
+  const refreshOperationsQueue = async () => {
+    const nextQueue = await fetchOperationsQueue();
+    setLoadedOperationsQueue(nextQueue);
   };
 
   const refreshTasks = async () => {
@@ -1828,13 +1923,14 @@ function App() {
   };
 
   useEffect(() => {
-    void Promise.all([fetchSeniors(), fetchSessions(), fetchVolunteerTasks(), fetchCalls(), fetchSchedule(), fetchScenarios(), fetchSeniorRecords(), fetchCallPlans()]).then(
-      ([nextSeniors, nextSessions, nextTasks, nextCalls, nextSchedule, nextScenarios, nextRecords, nextCallPlans]) => {
+    void Promise.all([fetchSeniors(), fetchSessions(), fetchVolunteerTasks(), fetchCalls(), fetchSchedule(), fetchOperationsQueue(), fetchScenarios(), fetchSeniorRecords(), fetchCallPlans()]).then(
+      ([nextSeniors, nextSessions, nextTasks, nextCalls, nextSchedule, nextQueue, nextScenarios, nextRecords, nextCallPlans]) => {
         setLoadedSeniors(nextSeniors);
         setLoadedSessions(nextSessions);
         setLoadedTasks(nextTasks);
         setLoadedCalls(nextCalls);
         setLoadedSchedule(nextSchedule);
+        setLoadedOperationsQueue(nextQueue);
         setLoadedScenarios(nextScenarios);
         setLoadedSeniorRecords(nextRecords);
         setLoadedCallPlans(nextCallPlans);
@@ -1857,9 +1953,11 @@ function App() {
       setLoadedTasks((tasks) => tasks.map((task) => (task.id === updated.id ? updated : task)));
       await refreshSeniorRecords();
       await refreshCallPlans();
+      await refreshOperationsQueue();
       return;
     }
     setLoadedTasks((tasks) => tasks.map((task) => (task.id === taskId ? { ...task, status } : task)));
+    await refreshOperationsQueue();
   };
 
   const handleRecordMissedCheckIn = async (seniorId: string) => {
@@ -1879,6 +1977,7 @@ function App() {
     setLoadedTasks(response.tasks);
     setSelectedSeniorId(response.session.seniorId);
     await refreshSchedule();
+    await refreshOperationsQueue();
     await refreshSeniorRecords();
     await refreshCallPlans();
     return true;
@@ -1901,6 +2000,7 @@ function App() {
     setSelectedSeniorId(completed.seniorId);
     await refreshTasks();
     await refreshSchedule();
+    await refreshOperationsQueue();
     await refreshSeniorRecords();
     await refreshCallPlans();
     return true;
@@ -1980,6 +2080,7 @@ function App() {
             setLoadedTasks(tasks);
             setSelectedSeniorId(session.seniorId);
             await refreshSchedule();
+            await refreshOperationsQueue();
             await refreshSeniorRecords();
             await refreshCallPlans();
           }}
@@ -1996,6 +2097,7 @@ function App() {
               setLoadedCalls((calls) => [call, ...calls.filter((item) => item.id !== call.id)]);
               await refreshTasks();
               await refreshSchedule();
+              await refreshOperationsQueue();
               await refreshSeniorRecords();
               await refreshCallPlans();
             }}
@@ -2008,6 +2110,7 @@ function App() {
           tasks={loadedTasks}
           calls={loadedCalls}
           schedule={loadedSchedule}
+          operationsQueue={loadedOperationsQueue}
           records={loadedSeniorRecords}
           callPlans={loadedCallPlans}
           selectedSeniorId={selectedSeniorId}
