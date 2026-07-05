@@ -6,6 +6,7 @@
     "build": "pnpm --dir frontend build",
     "lint": "pnpm --dir frontend lint",
     "frontend:smoke": "pnpm --dir frontend test:data",
-    "backend:smoke": "PYTHONPATH=backend backend/.venv/bin/python backend/tests/smoke.py"
+    "backend:smoke": "PYTHONPATH=backend backend/.venv/bin/python backend/tests/smoke.py",
+    "safety:copy": "python3 scripts/check_safety_copy.py"
   }
 }

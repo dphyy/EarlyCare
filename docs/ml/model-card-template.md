@@ -125,3 +125,7 @@ Blocked labels:
 - [ ] UI copy reviewed for no-diagnosis language.
 - [ ] Human follow-up action defined.
 - [ ] Rollback path documented.
+
+## API Gate
+
+`validated model` enrichment is blocked unless the API receives completed release-gate evidence through `modelCard`, including a human follow-up action. Use `offline embedding` for research artifacts that have not passed this gate.

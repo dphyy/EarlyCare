@@ -161,6 +161,7 @@ Open the Vite URL, usually `http://localhost:5173`.
 | `pnpm build` | Build the frontend. |
 | `pnpm frontend:smoke` | Validate frontend demo data and key UI hooks. |
 | `pnpm backend:smoke` | Run backend API smoke coverage with FastAPI TestClient. |
+| `pnpm safety:copy` | Block diagnosis-style wording in user-facing app and README copy. |
 | `uvicorn app.main:app --reload --port 8000` | Start the backend from the `backend/` folder. |
 ## Repository Guide
 

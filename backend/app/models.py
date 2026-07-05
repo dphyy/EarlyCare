@@ -29,6 +29,18 @@ class SpeechProfile(BaseModel):
     updatedAt: str | None = None
 
 
+class SpeechModelCardGate(BaseModel):
+    datasetAccessReviewed: bool = False
+    speakerSplitVerified: bool = False
+    evaluationMetricsRecorded: bool = False
+    subgroupChecksReviewed: bool = False
+    failureModesDocumented: bool = False
+    uiCopyReviewed: bool = False
+    humanFollowUpActionDefined: bool = False
+    rollbackPathDocumented: bool = False
+    humanFollowUpAction: str | None = None
+
+
 class SpeechModelProvenance(BaseModel):
     runtimeMode: SpeechModelMode
     featureExtractor: str
@@ -37,6 +49,7 @@ class SpeechModelProvenance(BaseModel):
     artifactUri: str | None = None
     generatedAt: str
     validated: bool = False
+    modelCard: SpeechModelCardGate | None = None
     notes: list[str] = Field(default_factory=list)
 
 
@@ -156,6 +169,7 @@ class SpeechEnrichmentRequest(BaseModel):
     embedding: list[float] | None = None
     speechMetrics: SpeechProfile | None = Field(default=None, alias="speech_metrics")
     provenance: dict[str, object] = Field(default_factory=dict)
+    modelCard: SpeechModelCardGate | None = None
 
 
 class ProviderResult(BaseModel):

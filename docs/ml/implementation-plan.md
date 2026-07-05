@@ -88,7 +88,7 @@ Speech ML can add support through slower response, large acute baseline deviatio
 | Offline embedding job | Done | `research/speech_ml/extract_embeddings.py`, `research/speech_ml/README.md` |
 | Evaluation harness | Done | `research/speech_ml/evaluate_baseline.py`, `research/speech_ml/metrics.md` |
 | App integration | Done | Saved calls store `speechModelProvenance`; `/calls/{call_id}/speech-enrichment` accepts offline embedding rows. |
-| Safety gate | Partially done | `docs/ml/model-card-template.md` exists; every model-backed UI change still needs release-gate review. |
+| Safety gate | Done | Validated enrichment requires `modelCard`; `pnpm safety:copy` blocks diagnosis-style UI and README copy. |
 
 ### Task 1: Data Registry
 
@@ -180,6 +180,7 @@ Steps:
 - Add a model card template before any trained model is surfaced.
 - Require dataset provenance, consent/licensing notes, intended use, excluded use, subgroup performance, and known failure modes.
 - Block any UI or README text that says "detected Parkinson's", "detected concussion", or equivalent diagnosis language.
+- Reject `validated model` enrichment unless all model-card release-gate checks are true and a human follow-up action is defined.
 - Acceptance: every ML-backed score has safety wording and a human follow-up action.
 
 ## Build Order

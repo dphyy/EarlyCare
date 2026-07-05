@@ -401,6 +401,182 @@ class CallWorkflowTests(unittest.TestCase):
             finally:
                 main.CALL_STORAGE_ROOT = original_storage_root
 
+    def test_validated_speech_enrichment_requires_model_card_gate(self) -> None:
+        with TemporaryDirectory() as tmp:
+            original_storage_root = main.CALL_STORAGE_ROOT
+            main.CALL_STORAGE_ROOT = Path(tmp)
+            call_dir = main.CALL_STORAGE_ROOT / "call-validated-gate"
+            call_dir.mkdir(parents=True)
+            try:
+                call = main.CallRecord(
+                    id="call-validated-gate",
+                    seniorId="s-001",
+                    seniorName="Mdm Tan Bee Hoon",
+                    startedAt="2026-07-04T10:00:00+08:00",
+                    completedAt="2026-07-04T10:05:00+08:00",
+                    status="Complete",
+                    riskLevel="Green",
+                    originalTranscript="Patient: I am okay.",
+                    englishTranscript="Patient: I am okay.",
+                    transcriptMessages=[TranscriptMessage(role="Senior", text="I am okay.", timestamp="2026-07-04T10:01:00+08:00")],
+                    translationProvider="test",
+                    translationFallbackUsed=False,
+                    audioAvailable=False,
+                    currentSpeechProfile=SpeechProfile(
+                        speechRate=120,
+                        avgPauseMs=500,
+                        responseLatencyMs=1000,
+                        pitchVariability=0.5,
+                        phraseAccuracy=0.95,
+                        updatedAt="2026-07-04T10:05:00+08:00",
+                    ),
+                    riskAssessment=RiskAssessment(
+                        speechDeviationScore=12,
+                        parkinsonsWatchScore=0,
+                        postFallConcernScore=0,
+                        missedCheckInScore=0,
+                        riskLevel="Green",
+                        reasons=["No concerning symptoms and speech remains close to baseline"],
+                    ),
+                    recommendedAction="Continue routine scheduled check-ins.",
+                )
+                (call_dir / "metadata.json").write_text(call.model_dump_json(indent=2))
+                client = TestClient(main.app)
+
+                response = client.patch(
+                    "/calls/call-validated-gate/speech-enrichment",
+                    json={
+                        "runtimeMode": "validated model",
+                        "modelName": "speech-watch-v1",
+                        "modelVersion": "1.0.0",
+                        "featureExtractor": "MERaLiON SpeechEncoder",
+                        "artifactUri": "research/artifacts/model-card-speech-watch-v1.md",
+                        "embedding": [0.1, 0.2, 0.3],
+                    },
+                )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("modelCard", response.json()["detail"])
+            finally:
+                main.CALL_STORAGE_ROOT = original_storage_root
+
+    def test_validated_speech_enrichment_stores_model_card_gate(self) -> None:
+        with TemporaryDirectory() as tmp:
+            original_storage_root = main.CALL_STORAGE_ROOT
+            main.CALL_STORAGE_ROOT = Path(tmp)
+            call_dir = main.CALL_STORAGE_ROOT / "call-validated"
+            call_dir.mkdir(parents=True)
+            try:
+                call = main.CallRecord(
+                    id="call-validated",
+                    seniorId="s-001",
+                    seniorName="Mdm Tan Bee Hoon",
+                    startedAt="2026-07-04T10:00:00+08:00",
+                    completedAt="2026-07-04T10:05:00+08:00",
+                    status="Complete",
+                    riskLevel="Green",
+                    originalTranscript="Patient: I am okay.",
+                    englishTranscript="Patient: I am okay.",
+                    transcriptMessages=[TranscriptMessage(role="Senior", text="I am okay.", timestamp="2026-07-04T10:01:00+08:00")],
+                    translationProvider="test",
+                    translationFallbackUsed=False,
+                    audioAvailable=False,
+                    currentSpeechProfile=SpeechProfile(
+                        speechRate=120,
+                        avgPauseMs=500,
+                        responseLatencyMs=1000,
+                        pitchVariability=0.5,
+                        phraseAccuracy=0.95,
+                        updatedAt="2026-07-04T10:05:00+08:00",
+                    ),
+                    riskAssessment=RiskAssessment(
+                        speechDeviationScore=12,
+                        parkinsonsWatchScore=0,
+                        postFallConcernScore=0,
+                        missedCheckInScore=0,
+                        riskLevel="Green",
+                        reasons=["No concerning symptoms and speech remains close to baseline"],
+                    ),
+                    recommendedAction="Continue routine scheduled check-ins.",
+                )
+                (call_dir / "metadata.json").write_text(call.model_dump_json(indent=2))
+                client = TestClient(main.app)
+
+                response = client.patch(
+                    "/calls/call-validated/speech-enrichment",
+                    json={
+                        "runtimeMode": "validated model",
+                        "modelName": "speech-watch-v1",
+                        "modelVersion": "1.0.0",
+                        "featureExtractor": "MERaLiON SpeechEncoder",
+                        "artifactUri": "research/artifacts/model-card-speech-watch-v1.md",
+                        "embedding": [0.1, 0.2, 0.3],
+                        "modelCard": {
+                            "datasetAccessReviewed": True,
+                            "speakerSplitVerified": True,
+                            "evaluationMetricsRecorded": True,
+                            "subgroupChecksReviewed": True,
+                            "failureModesDocumented": True,
+                            "uiCopyReviewed": True,
+                            "humanFollowUpActionDefined": True,
+                            "rollbackPathDocumented": True,
+                            "humanFollowUpAction": "Schedule caregiver review if the speech watch pattern persists.",
+                        },
+                    },
+                )
+
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                self.assertEqual(payload["speechModelProvenance"]["runtimeMode"], "validated model")
+                self.assertTrue(payload["speechModelProvenance"]["validated"])
+                self.assertEqual(
+                    payload["speechModelProvenance"]["modelCard"]["humanFollowUpAction"],
+                    "Schedule caregiver review if the speech watch pattern persists.",
+                )
+            finally:
+                main.CALL_STORAGE_ROOT = original_storage_root
+
+    def test_model_card_gate_rejects_blocked_diagnosis_copy(self) -> None:
+        model_card = main.SpeechModelCardGate(
+            datasetAccessReviewed=True,
+            speakerSplitVerified=True,
+            evaluationMetricsRecorded=True,
+            subgroupChecksReviewed=True,
+            failureModesDocumented=True,
+            uiCopyReviewed=True,
+            humanFollowUpActionDefined=True,
+            rollbackPathDocumented=True,
+            humanFollowUpAction="Tell the caregiver Parkinson's detected.",
+        )
+
+        with self.assertRaises(main.HTTPException) as context:
+            main._validate_model_card_gate(model_card)
+
+        self.assertEqual(context.exception.status_code, 400)
+        self.assertIn("blocked diagnosis language", context.exception.detail)
+
+    def test_speech_deviation_response_includes_human_follow_up_action(self) -> None:
+        client = TestClient(main.app)
+        response = client.post(
+            "/ml/speech-deviation",
+            json={
+                "seniorId": "s-001",
+                "currentSpeechProfile": {
+                    "speechRate": 120,
+                    "avgPauseMs": 600,
+                    "responseLatencyMs": 1000,
+                    "pitchVariability": 0.6,
+                    "phraseAccuracy": 0.95,
+                },
+                "symptoms": {},
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("humanFollowUpAction", payload)
+        self.assertEqual(payload["safetyLabel"], "decision support, not diagnosis")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -23,6 +23,7 @@ from app.models import (
     SavedCallResponse,
     Scenario,
     ScenarioRunResponse,
+    SpeechModelCardGate,
     SpeechEnrichmentRequest,
     SpeechModelProvenance,
     Senior,
@@ -199,6 +200,46 @@ def _str_from_provenance(provenance: dict[str, object], *keys: str) -> str | Non
     return None
 
 
+BLOCKED_MODEL_COPY_PHRASES = (
+    "parkinson's detected",
+    "parkinson detected",
+    "detected parkinson",
+    "concussion detected",
+    "detected concussion",
+    "disease diagnosis",
+    "medical certainty",
+    "emergency confirmed",
+)
+
+
+def _contains_blocked_model_copy(text: str | None) -> bool:
+    normalized = (text or "").lower()
+    return any(phrase in normalized for phrase in BLOCKED_MODEL_COPY_PHRASES)
+
+
+def _validate_model_card_gate(model_card: SpeechModelCardGate | None) -> None:
+    if model_card is None:
+        raise HTTPException(status_code=400, detail="Validated speech models require modelCard release-gate evidence")
+
+    required_flags = [
+        "datasetAccessReviewed",
+        "speakerSplitVerified",
+        "evaluationMetricsRecorded",
+        "subgroupChecksReviewed",
+        "failureModesDocumented",
+        "uiCopyReviewed",
+        "humanFollowUpActionDefined",
+        "rollbackPathDocumented",
+    ]
+    missing = [field for field in required_flags if not getattr(model_card, field)]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Validated speech model is missing release-gate checks: {', '.join(missing)}")
+    if not model_card.humanFollowUpAction or not model_card.humanFollowUpAction.strip():
+        raise HTTPException(status_code=400, detail="Validated speech model requires a humanFollowUpAction")
+    if _contains_blocked_model_copy(model_card.humanFollowUpAction):
+        raise HTTPException(status_code=400, detail="Validated speech model humanFollowUpAction uses blocked diagnosis language")
+
+
 def _speech_profile_from_enrichment(call: CallRecord, request: SpeechEnrichmentRequest) -> SpeechProfile:
     profile = request.speechMetrics or call.currentSpeechProfile
     if profile is None:
@@ -213,24 +254,47 @@ def _speech_provenance_from_enrichment(request: SpeechEnrichmentRequest) -> Spee
     provenance = request.provenance
     runtime_mode = request.runtimeMode
     validated = runtime_mode == "validated model"
-    model_name = request.modelName or _str_from_provenance(provenance, "model_name", "model") or "offline speech embedding"
-    feature_extractor = request.featureExtractor or _str_from_provenance(provenance, "model_name", "model") or model_name
+    model_name = request.modelName or _str_from_provenance(provenance, "model_name", "model")
+    feature_extractor = request.featureExtractor or _str_from_provenance(provenance, "feature_extractor")
     generated_at = _str_from_provenance(provenance, "extracted_at", "generated_at") or _now_iso()
     artifact_uri = request.artifactUri or _str_from_provenance(provenance, "artifact_uri", "artifact", "source_id")
+    model_version = request.modelVersion or _str_from_provenance(provenance, "model_version")
+    if validated:
+        missing_fields = [
+            field
+            for field, value in {
+                "modelName": model_name,
+                "modelVersion": model_version,
+                "featureExtractor": feature_extractor,
+                "artifactUri": artifact_uri,
+            }.items()
+            if not value
+        ]
+        if missing_fields:
+            raise HTTPException(status_code=400, detail=f"Validated speech model is missing required provenance: {', '.join(missing_fields)}")
+        _validate_model_card_gate(request.modelCard)
+    model_name = model_name or "offline speech embedding"
+    feature_extractor = feature_extractor or _str_from_provenance(provenance, "model_name", "model") or model_name
     notes = [
         "Offline enrichment is stored as decision-support context.",
         "Unvalidated enrichment does not change emergency routing by itself.",
     ]
-    if not validated:
+    if validated:
+        notes = [
+            "Validated speech model-card gate was supplied.",
+            "Model output remains decision support and still requires human follow-up.",
+        ]
+    else:
         notes.append("Model-card release gate is required before this can be treated as a validated model.")
     return SpeechModelProvenance(
         runtimeMode=runtime_mode,
         featureExtractor=feature_extractor,
         modelName=model_name,
-        modelVersion=request.modelVersion or _str_from_provenance(provenance, "model_version"),
+        modelVersion=model_version,
         artifactUri=artifact_uri,
         generatedAt=generated_at,
         validated=validated,
+        modelCard=request.modelCard,
         notes=notes,
     )
 
@@ -1018,6 +1082,8 @@ def speech_deviation(request: SpeechDeviationRequest) -> dict[str, object]:
     return {
         "assessment": assessment,
         "modelNote": extract_demo_embedding_note(),
+        "humanFollowUpAction": "Review speech deviation alongside symptoms and check-in history; use it only to guide human follow-up.",
+        "safetyLabel": "decision support, not diagnosis",
     }
 
 

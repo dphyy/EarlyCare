@@ -62,4 +62,6 @@ Avoid these phrases:
 
 The current speech scoring is demo baseline scoring from structured speech metrics. It is not a validated ML model. Saved calls now carry speech model provenance labels: `demo metrics`, `offline embedding`, or `validated model`. Offline embeddings can be attached to stored calls for research review, but unvalidated enrichment must not change emergency routing by itself.
 
+The `validated model` label is gated by model-card evidence, including dataset access review, speaker-level split verification, evaluation metrics, subgroup checks, failure modes, UI copy review, rollback path, and a human follow-up action.
+
 The current ML implementation direction is documented in `docs/ml/implementation-plan.md`. The short version: build speech-deviation ML as a personal-baseline anomaly signal, validate Parkinson's watch offline with public speech datasets, and keep post-fall/concussion escalation symptom-led until there is a licensed, validated acute concussion speech dataset.
