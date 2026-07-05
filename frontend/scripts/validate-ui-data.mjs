@@ -35,6 +35,7 @@ const requiredUiHooks = [
   "SeniorRecordPanel",
   "CallPlanPanel",
   "OperationsQueuePanel",
+  "ServiceStatusIndicator",
   "updateVolunteerTask",
   "Check-In History",
   "Check-in Schedule",
@@ -49,14 +50,17 @@ const requiredUiHooks = [
   "Selected patient snapshot",
   "Care operations",
   "Operations Queue",
+  "Demo data",
+  "Open priority",
+  "Refresh",
   "Running..."
 ];
 
 const missingScenarios = requiredScenarioIds.filter((id) => !dataSource.includes(`id: "${id}"`));
 const missingCategories = requiredCategoryIds.filter((id) => !typeSource.includes(`"${id}"`));
 const missingHooks = requiredUiHooks.filter((hook) => !mainSource.includes(hook));
-const missingTypes = ["CallPlan", "CheckInScheduleItem", "OperationsQueueItem", "SeniorRecord", "SpeechModelProvenance", "speechModelProvenance"].filter((hook) => !typeSource.includes(hook));
-const missingApiHooks = ["fetchCallPlans", "fetchSchedule", "fetchOperationsQueue", "fetchSeniorRecords", "startCheckIn", "completeCheckIn"].filter((hook) => !mainSource.includes(hook));
+const missingTypes = ["CallPlan", "CheckInScheduleItem", "OperationsQueueItem", "SeniorRecord", "ServiceStatus", "SpeechModelProvenance", "speechModelProvenance"].filter((hook) => !typeSource.includes(hook));
+const missingApiHooks = ["fetchCallPlans", "fetchSchedule", "fetchOperationsQueue", "fetchSeniorRecords", "fetchServiceStatus", "startCheckIn", "completeCheckIn"].filter((hook) => !mainSource.includes(hook));
 const missingDataHooks = ["operationQueueItems"].filter((hook) => !dataSource.includes(hook));
 const sessionsSource = dataSource.slice(dataSource.indexOf("export const sessions"), dataSource.indexOf("export const scheduleItems"));
 const emptySeedSessionFields = ["categories: []", "escalationPlan: []"].filter((field) => sessionsSource.includes(field));

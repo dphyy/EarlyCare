@@ -8,6 +8,8 @@ The frontend provides three main experiences:
 - **Agents call**: an in-browser call simulation powered by ElevenLabs Agents.
 - **Patient overview**: a care-team view for roster triage, operations queue, check-in history, recordings, transcripts, categorized evidence, escalation trails, volunteer tasks, speech timing, inline AI risk highlights, answered/missed schedule logging, and follow-up recommendations.
 
+The top bar shows whether the browser is connected to the live FastAPI backend or using local demo data. The command header also surfaces the top care-desk priority, last sync time, and a manual refresh action.
+
 ## Demo Runner
 
 - Runs Stable check-in, Missed check-in, Parkinson's watch, Post-Fall Amber, Post-Fall Red, Chronic Illness Check-In, and Mental Wellbeing / Loneliness.

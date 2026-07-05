@@ -5,6 +5,7 @@ export type Language = "English" | "Mandarin" | "Malay" | "Tamil" | "Singlish/Di
 export type SpeechModelMode = "demo metrics" | "offline embedding" | "validated model";
 export type CallPlanPriority = "Routine" | "Watch" | "Urgent";
 export type OperationsQueuePriority = "Emergency" | "Today" | "Due" | "Routine";
+export type ServiceMode = "checking" | "live" | "demo";
 export type ConversationCategoryId =
   | "mental_wellbeing"
   | "fall_head_impact"
@@ -81,6 +82,14 @@ export interface OperationsQueueItem {
   assignedTo?: string | null;
   taskId?: string | null;
   queueRank: number;
+}
+
+export interface ServiceStatus {
+  mode: ServiceMode;
+  configured: boolean;
+  reachable: boolean;
+  message: string;
+  apiBaseUrl?: string;
 }
 
 export interface RiskAssessment {

@@ -1,7 +1,39 @@
 import { callPlans, operationQueueItems, scenarios, scheduleItems, seniorRecords, seniors, sessions, volunteerTasks } from "./data";
-import type { CallPlan, CallRecord, CheckInScheduleItem, CheckInSession, OperationsQueueItem, Scenario, ScenarioRunResponse, Senior, SeniorRecord, SpeechModelMode, SpeechProfile, VolunteerTask } from "./types";
+import type { CallPlan, CallRecord, CheckInScheduleItem, CheckInSession, OperationsQueueItem, Scenario, ScenarioRunResponse, Senior, SeniorRecord, ServiceStatus, SpeechModelMode, SpeechProfile, VolunteerTask } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string | undefined;
+
+export async function fetchServiceStatus(): Promise<ServiceStatus> {
+  if (!API_BASE_URL) {
+    return {
+      mode: "demo",
+      configured: false,
+      reachable: false,
+      message: "Demo data mode. Set VITE_API_BASE_URL to persist schedule actions, saved calls, and task updates."
+    };
+  }
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/health`);
+    if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+    const payload = (await response.json()) as { product?: string; status?: string };
+    return {
+      mode: "live",
+      configured: true,
+      reachable: true,
+      apiBaseUrl: API_BASE_URL,
+      message: `${payload.product ?? "EarlyCare"} API connected.`
+    };
+  } catch {
+    return {
+      mode: "demo",
+      configured: true,
+      reachable: false,
+      apiBaseUrl: API_BASE_URL,
+      message: `API is not reachable at ${API_BASE_URL}. Showing demo data until the backend is available.`
+    };
+  }
+}
 
 async function getJson<T>(path: string, fallback: T): Promise<T> {
   if (!API_BASE_URL) return fallback;

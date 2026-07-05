@@ -21,6 +21,7 @@ import {
   PhoneCall,
   PlayCircle,
   RadioTower,
+  RefreshCw,
   Search,
   ShieldCheck,
   SlidersHorizontal,
@@ -39,6 +40,7 @@ import {
   fetchScenarios,
   fetchSeniors,
   fetchSeniorRecords,
+  fetchServiceStatus,
   fetchSessions,
   fetchVolunteerTasks,
   getCallAudioUrl,
@@ -61,6 +63,7 @@ import type {
   Scenario,
   Senior,
   SeniorRecord,
+  ServiceStatus,
   SpeechModelProvenance,
   TranscriptMessage,
   VolunteerTask,
@@ -74,6 +77,13 @@ type CallState = "Ready" | "Connecting" | "In call" | "Saving" | "Analysing" | "
 type ScenarioTone = { label: string; risk: RiskLevel; detail: string };
 type AgentAudioFormat = "pcm_8000" | "pcm_16000" | "pcm_22050" | "pcm_24000" | "pcm_44100" | "pcm_48000" | "ulaw_8000";
 type RosterFilter = "all" | "due" | "tasks" | "risk";
+
+const initialServiceStatus: ServiceStatus = {
+  mode: "checking",
+  configured: false,
+  reachable: false,
+  message: "Checking service connection."
+};
 
 function scenarioToneFor(scenario: Scenario): ScenarioTone {
   if (scenario.id.includes("red")) return { label: "Emergency path", risk: "Red", detail: "Escalates to urgent medical help" };
@@ -105,6 +115,16 @@ function StatCard({ label, value, icon, meta }: { label: string; value: string; 
         {meta ? <small>{meta}</small> : null}
       </div>
     </section>
+  );
+}
+
+function ServiceStatusIndicator({ status }: { status: ServiceStatus }) {
+  const label = status.mode === "live" ? "Live API" : status.mode === "checking" ? "Checking" : "Demo data";
+  return (
+    <div className={`service-status service-${status.mode}`} aria-label={`Service status: ${status.message}`} title={status.message}>
+      <span className="service-dot" aria-hidden="true" />
+      <strong>{label}</strong>
+    </div>
   );
 }
 
@@ -145,6 +165,11 @@ function cleanTranscriptText(text: string): string {
 
 function formatDate(value?: string | null): string {
   return value ? new Date(value).toLocaleString() : "Not completed";
+}
+
+function formatSyncTime(value?: string | null): string {
+  if (!value) return "Not synced";
+  return `Synced ${new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 }
 
 function formatHours(value: number): string {
@@ -1886,6 +1911,9 @@ function OfficerDashboard({
 
 function App() {
   const [view, setView] = useState<AppView>("dashboard");
+  const [serviceStatus, setServiceStatus] = useState<ServiceStatus>(initialServiceStatus);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [loadedSeniors, setLoadedSeniors] = useState<Senior[]>([]);
   const [loadedSessions, setLoadedSessions] = useState<CheckInSession[]>([]);
   const [loadedTasks, setLoadedTasks] = useState<VolunteerTask[]>([]);
@@ -1922,9 +1950,48 @@ function App() {
     setLoadedCallPlans(nextPlans);
   };
 
+  const refreshServiceStatus = async () => {
+    const nextStatus = await fetchServiceStatus();
+    setServiceStatus(nextStatus);
+  };
+
+  const refreshWorkspace = async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      const [nextStatus, nextSeniors, nextSessions, nextTasks, nextCalls, nextSchedule, nextQueue, nextScenarios, nextRecords, nextCallPlans] = await Promise.all([
+        fetchServiceStatus(),
+        fetchSeniors(),
+        fetchSessions(),
+        fetchVolunteerTasks(),
+        fetchCalls(),
+        fetchSchedule(),
+        fetchOperationsQueue(),
+        fetchScenarios(),
+        fetchSeniorRecords(),
+        fetchCallPlans()
+      ]);
+      setServiceStatus(nextStatus);
+      setLoadedSeniors(nextSeniors);
+      setLoadedSessions(nextSessions);
+      setLoadedTasks(nextTasks);
+      setLoadedCalls(nextCalls);
+      setLoadedSchedule(nextSchedule);
+      setLoadedOperationsQueue(nextQueue);
+      setLoadedScenarios(nextScenarios);
+      setLoadedSeniorRecords(nextRecords);
+      setLoadedCallPlans(nextCallPlans);
+      setSelectedSeniorId((current) => (nextSeniors.some((senior) => senior.id === current) ? current : nextSeniors[0]?.id ?? "s-001"));
+      setLastSyncedAt(new Date().toISOString());
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   useEffect(() => {
-    void Promise.all([fetchSeniors(), fetchSessions(), fetchVolunteerTasks(), fetchCalls(), fetchSchedule(), fetchOperationsQueue(), fetchScenarios(), fetchSeniorRecords(), fetchCallPlans()]).then(
-      ([nextSeniors, nextSessions, nextTasks, nextCalls, nextSchedule, nextQueue, nextScenarios, nextRecords, nextCallPlans]) => {
+    void Promise.all([fetchServiceStatus(), fetchSeniors(), fetchSessions(), fetchVolunteerTasks(), fetchCalls(), fetchSchedule(), fetchOperationsQueue(), fetchScenarios(), fetchSeniorRecords(), fetchCallPlans()]).then(
+      ([nextStatus, nextSeniors, nextSessions, nextTasks, nextCalls, nextSchedule, nextQueue, nextScenarios, nextRecords, nextCallPlans]) => {
+        setServiceStatus(nextStatus);
         setLoadedSeniors(nextSeniors);
         setLoadedSessions(nextSessions);
         setLoadedTasks(nextTasks);
@@ -1935,6 +2002,7 @@ function App() {
         setLoadedSeniorRecords(nextRecords);
         setLoadedCallPlans(nextCallPlans);
         setSelectedSeniorId(nextSeniors[0]?.id ?? "s-001");
+        setLastSyncedAt(new Date().toISOString());
       }
     );
   }, []);
@@ -1946,17 +2014,21 @@ function App() {
   const urgentTasks = loadedTasks.filter((task) => task.priority === "Urgent" && task.status !== "Closed").length;
   const openTasks = loadedTasks.filter((task) => task.status !== "Closed").length;
   const dueNow = loadedSchedule.filter((item) => item.status === "Due now" || item.status === "Overdue").length;
+  const activeQueueItems = loadedOperationsQueue.filter((item) => item.priority !== "Routine").sort((a, b) => a.queueRank - b.queueRank);
+  const topQueueItem = activeQueueItems[0] ?? null;
 
   const handleTaskStatus = async (taskId: string, status: VolunteerTask["status"]) => {
     const updated = await updateVolunteerTask(taskId, status);
     if (updated) {
       setLoadedTasks((tasks) => tasks.map((task) => (task.id === updated.id ? updated : task)));
+      await refreshServiceStatus();
       await refreshSeniorRecords();
       await refreshCallPlans();
       await refreshOperationsQueue();
       return;
     }
     setLoadedTasks((tasks) => tasks.map((task) => (task.id === taskId ? { ...task, status } : task)));
+    await refreshServiceStatus();
     await refreshOperationsQueue();
   };
 
@@ -1976,6 +2048,7 @@ function App() {
     setLoadedSessions((sessions) => [response.session, ...sessions.filter((session) => session.id !== response.session.id)]);
     setLoadedTasks(response.tasks);
     setSelectedSeniorId(response.session.seniorId);
+    await refreshServiceStatus();
     await refreshSchedule();
     await refreshOperationsQueue();
     await refreshSeniorRecords();
@@ -1998,6 +2071,7 @@ function App() {
 
     setLoadedSessions((sessions) => [completed, ...sessions.filter((session) => session.id !== completed.id && session.id !== started.id)]);
     setSelectedSeniorId(completed.seniorId);
+    await refreshServiceStatus();
     await refreshTasks();
     await refreshSchedule();
     await refreshOperationsQueue();
@@ -2018,27 +2092,62 @@ function App() {
             <span>2-3 day living-alone check-ins</span>
           </div>
         </div>
-        <nav aria-label="Primary workspace">
-          <button className={view === "demo" ? "active" : ""} onClick={() => setView("demo")}>
-            <ClipboardList size={18} />
-            Demo runner
-          </button>
-          <button className={view === "call" ? "active" : ""} onClick={() => setView("call")}>
-            <Headphones size={18} />
-            Agents call
-          </button>
-          <button className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}>
-            <Activity size={18} />
-            Patient overview
-          </button>
-        </nav>
+        <div className="topbar-actions">
+          <ServiceStatusIndicator status={serviceStatus} />
+          <nav aria-label="Primary workspace">
+            <button className={view === "demo" ? "active" : ""} onClick={() => setView("demo")}>
+              <ClipboardList size={18} />
+              Demo runner
+            </button>
+            <button className={view === "call" ? "active" : ""} onClick={() => setView("call")}>
+              <Headphones size={18} />
+              Agents call
+            </button>
+            <button className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}>
+              <Activity size={18} />
+              Patient overview
+            </button>
+          </nav>
+        </div>
       </header>
 
-      <section className="hero-band">
+      <section className="hero-band" aria-label="Care operations command center">
         <div className="hero-copy">
-          <span className="eyebrow">Care operations command center</span>
+          <div className="ops-title-row">
+            <span className="eyebrow">Care operations command center</span>
+            <span className="sync-chip">
+              <Activity size={14} />
+              {formatSyncTime(lastSyncedAt)}
+            </span>
+          </div>
           <h1>Care operations</h1>
           <p>Monitor due check-ins, unanswered attempts, and human follow-up before silence turns into a welfare risk.</p>
+          <div className="ops-command-panel">
+            <div className="priority-brief">
+              <span className={`priority priority-${topQueueItem?.priority.toLowerCase() ?? "routine"}`}>{topQueueItem?.priority ?? "Clear"}</span>
+              <strong>{topQueueItem ? `${topQueueItem.seniorName}: ${topQueueItem.reason}` : "No elevated queue item right now."}</strong>
+              <small>{topQueueItem ? topQueueItem.recommendedAction : "Continue scheduled monitoring and keep the service connection visible."}</small>
+            </div>
+            <div className="ops-command-actions">
+              <button
+                className="primary-action"
+                disabled={!topQueueItem}
+                onClick={() => {
+                  if (!topQueueItem) return;
+                  setSelectedSeniorId(topQueueItem.seniorId);
+                  setView("dashboard");
+                }}
+                type="button"
+              >
+                <AlertTriangle size={18} />
+                Open priority
+              </button>
+              <button className="secondary-action" disabled={isRefreshing} onClick={() => void refreshWorkspace()} type="button">
+                <RefreshCw className={isRefreshing ? "spin" : undefined} size={18} />
+                {isRefreshing ? "Refreshing..." : "Refresh"}
+              </button>
+            </div>
+          </div>
           <div className="routing-strip" aria-label="EarlyCare escalation route">
             <span>
               <Timer size={15} />
@@ -2069,6 +2178,13 @@ function App() {
         </div>
       </section>
 
+      {serviceStatus.mode === "demo" ? (
+        <section className="service-banner">
+          <Activity size={18} />
+          <p>{serviceStatus.message}</p>
+        </section>
+      ) : null}
+
       {view === "demo" ? (
         <ScenarioRunner
           scenarios={loadedScenarios}
@@ -2079,6 +2195,7 @@ function App() {
             setLoadedSessions((sessions) => [session, ...sessions.filter((item) => item.id !== session.id)]);
             setLoadedTasks(tasks);
             setSelectedSeniorId(session.seniorId);
+            await refreshServiceStatus();
             await refreshSchedule();
             await refreshOperationsQueue();
             await refreshSeniorRecords();
@@ -2095,6 +2212,7 @@ function App() {
             callPlan={loadedCallPlans.find((plan) => plan.seniorId === selectedSeniorId) ?? null}
             onSavedCall={async (call) => {
               setLoadedCalls((calls) => [call, ...calls.filter((item) => item.id !== call.id)]);
+              await refreshServiceStatus();
               await refreshTasks();
               await refreshSchedule();
               await refreshOperationsQueue();
