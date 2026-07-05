@@ -91,6 +91,7 @@ Speech ML can add support through slower response, large acute baseline deviatio
 | Personal-baseline builder | Done | `research/speech_ml/build_personal_baselines.py`, `research/speech_ml/run_experiment.py`, `research/speech_ml/test_research_tools.py` |
 | Offline baseline trainer | Done | `research/speech_ml/train_baseline.py`, `docs/ml/training-runbook.md` |
 | Offline experiment runner | Done | `research/speech_ml/run_experiment.py`, `research/speech_ml/test_research_tools.py`; writes experiment report, model-card draft, and gate JSON. |
+| Enrichment payload bridge | Done | `research/speech_ml/make_enrichment_payload.py`; converts one offline row into the backend `/calls/{call_id}/speech-enrichment` request shape. |
 | Evaluation harness | Done | `research/speech_ml/evaluate_baseline.py`, `research/speech_ml/metrics.md` |
 | App integration | Done | Saved calls store `speechModelProvenance`; `/calls/{call_id}/speech-enrichment` accepts offline embedding rows. |
 | Safety gate | Done | Validated enrichment requires `modelCard`; `pnpm safety:copy` blocks diagnosis-style UI and README copy. |

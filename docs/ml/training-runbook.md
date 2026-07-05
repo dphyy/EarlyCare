@@ -80,6 +80,26 @@ The runner writes embeddings, a speaker-level evaluation JSON file, a baseline m
 
 Manual commands are still available when a step needs to be inspected separately.
 
+Build a backend payload from one offline row when you want to attach experiment output to a saved call:
+
+```bash
+python3 research/speech_ml/make_enrichment_payload.py \
+  --input research/artifacts/neurovoz-demo_embeddings.jsonl \
+  --output research/artifacts/neurovoz-demo_payload.json \
+  --speaker-id s-001
+```
+
+Patch it into the app after the backend is running and the call exists:
+
+```bash
+CALL_ID=call-id-from-save-response
+curl -X PATCH "http://localhost:8000/calls/${CALL_ID}/speech-enrichment" \
+  -H "Content-Type: application/json" \
+  --data @research/artifacts/neurovoz-demo_payload.json
+```
+
+This app handoff defaults to `offline embedding`. Do not use `validated model` unless the model-card gate has been manually completed and the payload includes a model version, stable artifact URI, and human follow-up action.
+
 Feature-only UCI sanity check, after downloading and extracting the UCI table locally:
 
 ```bash

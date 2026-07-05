@@ -12,6 +12,7 @@ from research.speech_ml import (
     convert_feature_table,
     evaluate_baseline,
     extract_embeddings,
+    make_enrichment_payload,
     prepare_manifest,
     run_experiment,
     train_baseline,
@@ -378,6 +379,142 @@ class ResearchToolTests(unittest.TestCase):
             self.assertEqual(row["speech_metrics"]["phraseAccuracy"], 0.96)
             self.assertEqual(row["provenance"]["model"], "demo")
             self.assertGreater(row["provenance"]["duration_seconds"], 0)
+
+    def test_make_enrichment_payload_writes_offline_api_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            input_path = root / "embeddings.jsonl"
+            output_path = root / "payload.json"
+            rows = [
+                {
+                    "dataset": "sample",
+                    "speaker_id": "s-001",
+                    "label": "control",
+                    "task": "repeat_phrase",
+                    "embedding": [0.1, 0.2, 0.3],
+                    "speech_metrics": {
+                        "speechRate": 120,
+                        "avgPauseMs": 450,
+                        "responseLatencyMs": 900,
+                        "pitchVariability": 0.4,
+                        "phraseAccuracy": 0.96,
+                    },
+                    "provenance": {
+                        "source_id": "recording-001",
+                        "model": "demo",
+                        "model_name": "demo-standard-library",
+                        "extracted_at": "2026-07-05T00:00:00+00:00",
+                    },
+                }
+            ]
+            input_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+
+            exit_code = make_enrichment_payload.main(
+                [
+                    "--input",
+                    str(input_path),
+                    "--output",
+                    str(output_path),
+                    "--speaker-id",
+                    "s-001",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output_path.read_text())
+            self.assertEqual(payload["runtimeMode"], "offline embedding")
+            self.assertEqual(payload["modelName"], "demo-standard-library")
+            self.assertEqual(payload["featureExtractor"], "demo-standard-library")
+            self.assertEqual(payload["embedding"], [0.1, 0.2, 0.3])
+            self.assertEqual(payload["speech_metrics"]["embedding"], [0.1, 0.2, 0.3])
+            self.assertEqual(payload["speech_metrics"]["updatedAt"], "2026-07-05T00:00:00+00:00")
+            self.assertEqual(payload["provenance"]["dataset"], "sample")
+            self.assertEqual(payload["provenance"]["speaker_id"], "s-001")
+            self.assertEqual(payload["provenance"]["source_row_index"], 1)
+            self.assertNotIn("modelCard", payload)
+
+    def test_make_enrichment_payload_requires_complete_gate_for_validated_model(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            input_path = root / "embeddings.jsonl"
+            output_path = root / "payload.json"
+            incomplete_gate_path = root / "incomplete_gate.json"
+            complete_gate_path = root / "complete_gate.json"
+            row = {
+                "dataset": "sample",
+                "speaker_id": "s-001",
+                "label": "control",
+                "task": "repeat_phrase",
+                "embedding": [0.1, 0.2],
+                "speech_metrics": {
+                    "speechRate": 120,
+                    "avgPauseMs": 450,
+                    "responseLatencyMs": 900,
+                    "pitchVariability": 0.4,
+                    "phraseAccuracy": 0.96,
+                    "embedding": [0.1, 0.2],
+                },
+                "provenance": {
+                    "source_id": "recording-001",
+                    "model_name": "speech-watch-baseline",
+                    "model_version": "2026-07-05",
+                    "feature_extractor": "wavlm-base-plus",
+                    "extracted_at": "2026-07-05T00:00:00+00:00",
+                },
+            }
+            input_path.write_text(json.dumps(row) + "\n")
+            incomplete_gate_path.write_text(json.dumps({"speakerSplitVerified": True}) + "\n")
+            complete_gate = {
+                "datasetAccessReviewed": True,
+                "speakerSplitVerified": True,
+                "evaluationMetricsRecorded": True,
+                "subgroupChecksReviewed": True,
+                "failureModesDocumented": True,
+                "uiCopyReviewed": True,
+                "humanFollowUpActionDefined": True,
+                "rollbackPathDocumented": True,
+                "humanFollowUpAction": "Review the speech deviation with the call transcript and arrange human follow-up.",
+            }
+            complete_gate_path.write_text(json.dumps(complete_gate) + "\n")
+
+            with self.assertRaises(SystemExit) as raised:
+                make_enrichment_payload.main(
+                    [
+                        "--input",
+                        str(input_path),
+                        "--output",
+                        str(output_path),
+                        "--runtime-mode",
+                        "validated model",
+                        "--model-card-gate",
+                        str(incomplete_gate_path),
+                    ]
+                )
+            self.assertIn("release-gate checks", str(raised.exception))
+
+            exit_code = make_enrichment_payload.main(
+                [
+                    "--input",
+                    str(input_path),
+                    "--output",
+                    str(output_path),
+                    "--runtime-mode",
+                    "validated model",
+                    "--model-card-gate",
+                    str(complete_gate_path),
+                    "--artifact-uri",
+                    "research/artifacts/sample_baseline_model.json",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output_path.read_text())
+            self.assertEqual(payload["runtimeMode"], "validated model")
+            self.assertEqual(payload["modelName"], "speech-watch-baseline")
+            self.assertEqual(payload["modelVersion"], "2026-07-05")
+            self.assertEqual(payload["featureExtractor"], "wavlm-base-plus")
+            self.assertEqual(payload["artifactUri"], "research/artifacts/sample_baseline_model.json")
+            self.assertEqual(payload["modelCard"], complete_gate)
 
     def test_evaluate_baseline_uses_speaker_level_split(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

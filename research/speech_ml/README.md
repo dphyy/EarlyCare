@@ -57,6 +57,41 @@ The runner refuses manifests with `review_status=needs-review` unless `--allow-r
 It also writes a draft model card and conservative `model_card_gate.json`; human-review fields stay false until they are manually reviewed.
 Every run also writes `*_personal_baselines.json`, which estimates per-speaker normal embedding variation when enough repeated samples exist.
 
+## Build an App Enrichment Payload
+
+Convert one experiment row into the FastAPI payload accepted by `/calls/{call_id}/speech-enrichment`:
+
+```bash
+python3 research/speech_ml/make_enrichment_payload.py \
+  --input research/artifacts/neurovoz-demo_embeddings.jsonl \
+  --output research/artifacts/neurovoz-demo_payload.json \
+  --speaker-id s-001
+```
+
+This defaults to `offline embedding`, which stores the embedding, speech metrics, and provenance as decision-support context. It does not mark the model as validated.
+
+After the backend is running and a call has been saved:
+
+```bash
+CALL_ID=call-id-from-save-response
+curl -X PATCH "http://localhost:8000/calls/${CALL_ID}/speech-enrichment" \
+  -H "Content-Type: application/json" \
+  --data @research/artifacts/neurovoz-demo_payload.json
+```
+
+Only use `--runtime-mode "validated model"` after the model-card review is complete. That mode requires `--model-card-gate`, `--model-version`, a stable artifact URI, and safe human follow-up wording:
+
+```bash
+python3 research/speech_ml/make_enrichment_payload.py \
+  --input research/artifacts/neurovoz-demo_embeddings.jsonl \
+  --output research/artifacts/neurovoz-demo_validated_payload.json \
+  --speaker-id s-001 \
+  --runtime-mode "validated model" \
+  --model-version 2026-07-05 \
+  --artifact-uri research/artifacts/neurovoz-demo_baseline_model.json \
+  --model-card-gate research/artifacts/neurovoz-demo_model_card_gate.json
+```
+
 ## Convert Feature Tables
 
 Feature-only datasets such as UCI Parkinson's Speech do not validate raw-audio embeddings, but they are useful for quick speaker-level sanity checks:
