@@ -6,7 +6,7 @@ The frontend provides three main experiences:
 
 - **Demo runner**: seven scripted check-in scenarios that persist records and tasks through the backend.
 - **Agents call**: an in-browser call simulation powered by ElevenLabs Agents.
-- **Patient overview**: a care-team view for check-in history, recordings, transcripts, categorized evidence, escalation trails, volunteer tasks, speech timing, inline AI risk highlights, and follow-up recommendations.
+- **Patient overview**: a care-team view for check-in history, recordings, transcripts, categorized evidence, escalation trails, volunteer tasks, speech timing, inline AI risk highlights, missed-check-in logging, and follow-up recommendations.
 
 ## Demo Runner
 

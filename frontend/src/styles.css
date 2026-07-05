@@ -92,7 +92,8 @@ nav button,
 .call-actions button,
 .scenario-tabs button,
 .scenario-card,
-.primary-action {
+.primary-action,
+.secondary-action {
   align-items: center;
   background: #ffffff;
   border: 1px solid #d8dfd0;
@@ -115,6 +116,10 @@ nav button.active,
   background: #16453f;
   border-color: #16453f;
   color: #ffffff;
+}
+
+.secondary-action {
+  justify-content: center;
 }
 
 button:disabled {
@@ -867,6 +872,17 @@ h3 {
 .schedule-action-row p {
   color: #495549;
   margin: 0;
+}
+
+.schedule-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.schedule-status-note {
+  margin-top: 10px;
 }
 
 .call-plan-panel {
@@ -1655,6 +1671,11 @@ h3 {
   .schedule-action-row {
     align-items: stretch;
     display: grid;
+  }
+
+  .schedule-actions {
+    display: grid;
+    justify-content: stretch;
   }
 
   .call-plan-footer {

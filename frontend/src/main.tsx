@@ -38,6 +38,7 @@ import {
   fetchSessions,
   fetchVolunteerTasks,
   getCallAudioUrl,
+  recordMissedCheckIn,
   runScenario,
   saveCall,
   updateVolunteerTask
@@ -1256,6 +1257,7 @@ function OfficerDashboard({
   selectedSeniorId,
   setSelectedSeniorId,
   onStartCall,
+  onRecordMissedCheckIn,
   onTaskStatus
 }: {
   seniors: Senior[];
@@ -1268,6 +1270,7 @@ function OfficerDashboard({
   selectedSeniorId: string;
   setSelectedSeniorId: (id: string) => void;
   onStartCall: (id: string) => void;
+  onRecordMissedCheckIn: (id: string) => Promise<boolean>;
   onTaskStatus: (taskId: string, status: VolunteerTask["status"]) => void;
 }) {
   const selectedSenior = seniors.find((senior) => senior.id === selectedSeniorId) ?? seniors[0];
@@ -1292,6 +1295,12 @@ function OfficerDashboard({
   const latestRecordKind = selectedRecords[0]?.kind === "call" ? "Agents call" : selectedRecords[0]?.kind === "session" ? "Check-in" : "No record";
   const latestRecordTime = selectedRecords[0]?.date ? formatDate(selectedRecords[0].date) : "No check-in yet";
   const nextAction = selectedOpenTasks[0]?.recommendedAction ?? latestRecord?.recommendedAction ?? "Continue routine scheduled check-ins.";
+  const [missedLogStatus, setMissedLogStatus] = useState("");
+  const [isLoggingMissed, setIsLoggingMissed] = useState(false);
+
+  useEffect(() => {
+    setMissedLogStatus("");
+  }, [selectedSenior.id]);
 
   const playRiskSignal = (call: CallRecord, signal: RiskSignal) => {
     setHighlightedSignalId(`${call.id}-${signal.id}`);
@@ -1302,6 +1311,20 @@ function OfficerDashboard({
       return;
     }
     document.getElementById(`signal-${call.id}-${signal.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
+  const logMissedCheckIn = async () => {
+    if (isLoggingMissed) return;
+    setIsLoggingMissed(true);
+    setMissedLogStatus("Logging missed check-in...");
+    try {
+      const logged = await onRecordMissedCheckIn(selectedSenior.id);
+      setMissedLogStatus(logged ? "Missed check-in logged. Schedule and volunteer tasks refreshed." : "Live service connection is required to log a missed check-in.");
+    } catch {
+      setMissedLogStatus("Unable to log missed check-in. Try again after checking the service connection.");
+    } finally {
+      setIsLoggingMissed(false);
+    }
   };
 
   return (
@@ -1417,11 +1440,18 @@ function OfficerDashboard({
               </div>
               <div className="schedule-action-row">
                 <p>{selectedSchedule.recommendedAction}</p>
-                <button className="primary-action" onClick={() => onStartCall(selectedSenior.id)}>
-                  <PhoneCall size={18} />
-                  Start scheduled call
-                </button>
+                <div className="schedule-actions">
+                  <button className="primary-action" onClick={() => onStartCall(selectedSenior.id)}>
+                    <PhoneCall size={18} />
+                    Start scheduled call
+                  </button>
+                  <button className="secondary-action" onClick={() => void logMissedCheckIn()} disabled={isLoggingMissed}>
+                    <FileClock size={18} />
+                    {isLoggingMissed ? "Logging..." : "Log missed"}
+                  </button>
+                </div>
               </div>
+              {missedLogStatus ? <p className="status-note schedule-status-note">{missedLogStatus}</p> : null}
             </>
           ) : (
             <p className="empty-state">No schedule is available for this senior.</p>
@@ -1705,6 +1735,28 @@ function App() {
     setLoadedTasks((tasks) => tasks.map((task) => (task.id === taskId ? { ...task, status } : task)));
   };
 
+  const handleRecordMissedCheckIn = async (seniorId: string) => {
+    const scheduleItem = loadedSchedule.find((item) => item.seniorId === seniorId);
+    const now = new Date().toISOString();
+    const response = await recordMissedCheckIn({
+      seniorId,
+      scheduledAt: scheduleItem?.nextDueAt ?? now,
+      retryAt: now,
+      attemptCount: 2,
+      note: "Logged from Patient overview after scheduled call and retry were unanswered."
+    });
+
+    if (!response) return false;
+
+    setLoadedSessions((sessions) => [response.session, ...sessions.filter((session) => session.id !== response.session.id)]);
+    setLoadedTasks(response.tasks);
+    setSelectedSeniorId(response.session.seniorId);
+    await refreshSchedule();
+    await refreshSeniorRecords();
+    await refreshCallPlans();
+    return true;
+  };
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -1814,6 +1866,7 @@ function App() {
             setSelectedSeniorId(id);
             setView("call");
           }}
+          onRecordMissedCheckIn={handleRecordMissedCheckIn}
           onTaskStatus={(taskId, status) => void handleTaskStatus(taskId, status)}
         />
       )}
