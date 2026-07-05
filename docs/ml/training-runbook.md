@@ -53,13 +53,17 @@ Keep data local only:
 
 ## Training Commands
 
-Create a manifest under `research/datasets/`:
+After downloading an approved raw-audio dataset locally, create a first-pass manifest under `research/datasets/`:
 
-```csv
-dataset,speaker_id,label,task,audio_path,language,transcript
-NeuroVoz,p001,pd,ddk,NeuroVoz/pd/p001/ddk.wav,Spanish,
-NeuroVoz,c001,control,ddk,NeuroVoz/control/c001/ddk.wav,Spanish,
+```bash
+python3 research/speech_ml/prepare_manifest.py \
+  --audio-root research/datasets/NeuroVoz \
+  --dataset NeuroVoz \
+  --language Spanish \
+  --output research/datasets/neurovoz_manifest.csv
 ```
+
+Open the manifest and manually review any row with `review_status=needs-review` before extraction or training. The script infers labels and speaker IDs from folder/file names; it does not prove clinical truth.
 
 Extract embeddings:
 

@@ -24,6 +24,20 @@ sample,s-002,pd,repeat_phrase,sample/pd/s-002.wav,English,today i am safe at hom
 
 `audio_path` can be absolute or relative to `--audio-root`.
 
+## Prepare a Manifest
+
+After downloading an approved raw-audio dataset locally, generate a first-pass manifest from its folder layout:
+
+```bash
+python3 research/speech_ml/prepare_manifest.py \
+  --audio-root research/datasets/NeuroVoz \
+  --dataset NeuroVoz \
+  --language Spanish \
+  --output research/datasets/neurovoz_manifest.csv
+```
+
+The preparer infers `label`, `speaker_id`, and `task` from path names, then marks uncertain rows as `needs-review`. Review and fix those rows before extraction or training.
+
 ## Extract Embeddings
 
 Smoke-test the pipeline with the standard-library demo extractor:

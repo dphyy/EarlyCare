@@ -7,7 +7,7 @@ import unittest
 import wave
 from pathlib import Path
 
-from research.speech_ml import evaluate_baseline, extract_embeddings, train_baseline
+from research.speech_ml import evaluate_baseline, extract_embeddings, prepare_manifest, train_baseline
 
 
 def write_wav(path: Path, frequency: float) -> None:
@@ -25,6 +25,76 @@ def write_wav(path: Path, frequency: float) -> None:
 
 
 class ResearchToolTests(unittest.TestCase):
+    def test_prepare_manifest_infers_rows_from_audio_folders(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audio_root = root / "datasets" / "NeuroVoz"
+            output_path = root / "datasets" / "neurovoz_manifest.csv"
+            write_wav(audio_root / "PD" / "speaker-001" / "ddk" / "a.wav", 220)
+            write_wav(audio_root / "HC" / "speaker-002" / "vowels" / "e.wav", 240)
+            write_wav(audio_root / "unknown" / "speaker-003" / "reading" / "x.wav", 260)
+
+            exit_code = prepare_manifest.main(
+                [
+                    "--audio-root",
+                    str(audio_root),
+                    "--output",
+                    str(output_path),
+                    "--dataset",
+                    "NeuroVoz",
+                    "--language",
+                    "Spanish",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            with output_path.open(newline="") as handle:
+                rows = list(csv.DictReader(handle))
+
+            self.assertEqual(len(rows), 3)
+            rows_by_speaker = {row["speaker_id"]: row for row in rows}
+            self.assertEqual(rows_by_speaker["speaker-001"]["label"], "pd")
+            self.assertEqual(rows_by_speaker["speaker-001"]["task"], "ddk")
+            self.assertEqual(rows_by_speaker["speaker-001"]["review_status"], "inferred")
+            self.assertEqual(rows_by_speaker["speaker-002"]["label"], "control")
+            self.assertEqual(rows_by_speaker["speaker-002"]["task"], "vowels")
+            self.assertEqual(rows_by_speaker["speaker-003"]["label"], "unknown")
+            self.assertEqual(rows_by_speaker["speaker-003"]["review_status"], "needs-review")
+            self.assertEqual(rows_by_speaker["speaker-003"]["dataset"], "NeuroVoz")
+            self.assertEqual(rows_by_speaker["speaker-003"]["language"], "Spanish")
+
+    def test_prepare_manifest_accepts_custom_tokens_and_speaker_regex(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audio_root = root / "custom"
+            output_path = root / "manifest.csv"
+            write_wav(audio_root / "case" / "participant_77" / "phonation" / "sample.wav", 220)
+            write_wav(audio_root / "comparison" / "participant_88" / "phonation" / "sample.wav", 240)
+
+            prepare_manifest.main(
+                [
+                    "--audio-root",
+                    str(audio_root),
+                    "--output",
+                    str(output_path),
+                    "--dataset",
+                    "CustomSet",
+                    "--positive-tokens",
+                    "case",
+                    "--negative-tokens",
+                    "comparison",
+                    "--speaker-regex",
+                    r"participant_(\d+)",
+                ]
+            )
+
+            with output_path.open(newline="") as handle:
+                rows = list(csv.DictReader(handle))
+
+            rows_by_speaker = {row["speaker_id"]: row for row in rows}
+            self.assertEqual(rows_by_speaker["77"]["label"], "pd")
+            self.assertEqual(rows_by_speaker["88"]["label"], "control")
+
     def test_extract_embeddings_writes_backend_compatible_jsonl(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
