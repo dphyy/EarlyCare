@@ -43,6 +43,10 @@ const requiredUiHooks = [
   "SpeechProvenanceSummary",
   "offline embedding",
   "Open Patient overview",
+  "Log answered",
+  "Search roster",
+  "Selected patient snapshot",
+  "Care operations",
   "Running..."
 ];
 
@@ -50,7 +54,7 @@ const missingScenarios = requiredScenarioIds.filter((id) => !dataSource.includes
 const missingCategories = requiredCategoryIds.filter((id) => !typeSource.includes(`"${id}"`));
 const missingHooks = requiredUiHooks.filter((hook) => !mainSource.includes(hook));
 const missingTypes = ["CallPlan", "CheckInScheduleItem", "SeniorRecord", "SpeechModelProvenance", "speechModelProvenance"].filter((hook) => !typeSource.includes(hook));
-const missingApiHooks = ["fetchCallPlans", "fetchSchedule", "fetchSeniorRecords"].filter((hook) => !mainSource.includes(hook));
+const missingApiHooks = ["fetchCallPlans", "fetchSchedule", "fetchSeniorRecords", "startCheckIn", "completeCheckIn"].filter((hook) => !mainSource.includes(hook));
 const sessionsSource = dataSource.slice(dataSource.indexOf("export const sessions"), dataSource.indexOf("export const scheduleItems"));
 const emptySeedSessionFields = ["categories: []", "escalationPlan: []"].filter((field) => sessionsSource.includes(field));
 const missingSeedSessionEvidence = [

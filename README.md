@@ -20,12 +20,12 @@ Older adults living alone may go days without anyone noticing a fall, head impac
 | --- | --- |
 | Scenario runner | Runs seven scripted demo paths: stable, missed check-in, Parkinson's watch, Post-Fall Amber, Post-Fall Red, chronic illness, and loneliness/wellbeing. |
 | Check-in schedule | Computes next due time, due/overdue status, last contact, and next action from each senior's 2-3 day cadence. |
-| Missed check-in logging | Records unanswered scheduled call attempts from Patient overview or the API, then updates the schedule, senior record, escalation trail, and volunteer task list. |
+| Schedule action logging | Records answered or missed scheduled check-ins from Patient overview, then updates the schedule, senior record, escalation trail, and volunteer task list. |
 | Senior record | Rolls check-ins and saved calls into a per-senior categorized history for repeated fall, concussion, speech-watch, chronic illness, missed-call, and wellbeing signals. |
 | Next call plan | Turns the schedule, senior profile, and categorized history into personalized questions for the next voice check-in. |
 | Agents website call | Starts an ElevenLabs Agents-powered browser call from the EarlyCare website and lets the patient speak in a comfortable language. |
 | Full-call recording | Records patient microphone audio and ElevenLabs agent audio into one replayable `full-call.webm`. |
-| Patient overview | Shows historical check-ins, saved calls, translated transcripts, original recordings, categorized evidence, escalation trails, volunteer tasks, speech timing, and risk highlights. |
+| Patient overview | Shows historical check-ins, saved calls, translated transcripts, original recordings, categorized evidence, escalation trails, volunteer tasks, speech timing, risk highlights, and roster triage filters. |
 | Transcription and translation | Uses MERaLiON first, ElevenLabs speech-to-text and Google Translate as fallback, and saved dialogue transcript only as the final demo fallback. |
 | Inline risk highlights | Uses OpenAI structured output to detect patient-only risk signals and highlights exact English evidence inline. |
 | Audio verification | Clicking a highlighted patient phrase seeks playback to immediately after the previous agent question, so caregivers can hear the patient answer in context. |

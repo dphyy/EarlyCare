@@ -151,6 +151,43 @@ export async function runScenario(scenarioId: string): Promise<ScenarioRunRespon
   }
 }
 
+export async function startCheckIn(seniorId: string): Promise<CheckInSession | null> {
+  if (!API_BASE_URL) return null;
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/checkins/start?senior_id=${encodeURIComponent(seniorId)}`, {
+      method: "POST"
+    });
+    if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+    return (await response.json()) as CheckInSession;
+  } catch {
+    return null;
+  }
+}
+
+export interface CompleteCheckInRequest {
+  completedAt?: string | null;
+  originalTranscript?: string | null;
+  englishTranscript?: string | null;
+  summary?: string | null;
+}
+
+export async function completeCheckIn(checkInId: string, payload: CompleteCheckInRequest = {}): Promise<CheckInSession | null> {
+  if (!API_BASE_URL) return null;
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/checkins/${encodeURIComponent(checkInId)}/complete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+    return (await response.json()) as CheckInSession;
+  } catch {
+    return null;
+  }
+}
+
 export interface MissedCheckInRequest {
   seniorId: string;
   scheduledAt?: string | null;

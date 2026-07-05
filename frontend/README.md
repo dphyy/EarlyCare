@@ -6,7 +6,7 @@ The frontend provides three main experiences:
 
 - **Demo runner**: seven scripted check-in scenarios that persist records and tasks through the backend.
 - **Agents call**: an in-browser call simulation powered by ElevenLabs Agents.
-- **Patient overview**: a care-team view for check-in history, recordings, transcripts, categorized evidence, escalation trails, volunteer tasks, speech timing, inline AI risk highlights, missed-check-in logging, and follow-up recommendations.
+- **Patient overview**: a care-team view for roster triage, check-in history, recordings, transcripts, categorized evidence, escalation trails, volunteer tasks, speech timing, inline AI risk highlights, answered/missed schedule logging, and follow-up recommendations.
 
 ## Demo Runner
 
@@ -31,6 +31,7 @@ The call page does not translate the live transcript. Translation happens after 
 ## Patient Overview
 
 - Lists living-alone seniors and their saved calls.
+- Filters the roster by due status, open work, elevated risk, or search text.
 - Shows historical scripted check-ins as well as saved Agents calls.
 - Shows full-call recordings through a browser audio player.
 - Shows translated English transcripts and cleaned original transcripts with `Agent:` and `Patient:` speaker labels.
@@ -38,6 +39,7 @@ The call page does not translate the live transcript. Translation happens after 
 - Shows current speech timing and baseline context.
 - Shows clickable risk-signal cards and inline risk highlights inside the English transcript.
 - If a timestamp is available, clicking a signal seeks the audio recording to that part of the call.
+- Lets users log answered or missed scheduled check-ins when the live backend is connected.
 - Lets users acknowledge or close volunteer tasks through `PATCH /volunteer-tasks/{id}`.
 
 ## Local Setup

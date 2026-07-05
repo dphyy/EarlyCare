@@ -21,13 +21,16 @@ import {
   PhoneCall,
   PlayCircle,
   RadioTower,
+  Search,
   ShieldCheck,
+  SlidersHorizontal,
   Stethoscope,
   Timer,
   UserRoundCheck,
   UsersRound
 } from "lucide-react";
 import {
+  completeCheckIn,
   createElevenLabsSession,
   fetchCalls,
   fetchCallPlans,
@@ -41,6 +44,7 @@ import {
   recordMissedCheckIn,
   runScenario,
   saveCall,
+  startCheckIn,
   updateVolunteerTask
 } from "./api";
 import type {
@@ -67,6 +71,7 @@ type AppView = "demo" | "call" | "dashboard";
 type CallState = "Ready" | "Connecting" | "In call" | "Saving" | "Analysing" | "Complete" | "Failed";
 type ScenarioTone = { label: string; risk: RiskLevel; detail: string };
 type AgentAudioFormat = "pcm_8000" | "pcm_16000" | "pcm_22050" | "pcm_24000" | "pcm_44100" | "pcm_48000" | "ulaw_8000";
+type RosterFilter = "all" | "due" | "tasks" | "risk";
 
 function scenarioToneFor(scenario: Scenario): ScenarioTone {
   if (scenario.id.includes("red")) return { label: "Emergency path", risk: "Red", detail: "Escalates to urgent medical help" };
@@ -1258,6 +1263,7 @@ function OfficerDashboard({
   selectedSeniorId,
   setSelectedSeniorId,
   onStartCall,
+  onRecordCompletedCheckIn,
   onRecordMissedCheckIn,
   onTaskStatus
 }: {
@@ -1271,10 +1277,13 @@ function OfficerDashboard({
   selectedSeniorId: string;
   setSelectedSeniorId: (id: string) => void;
   onStartCall: (id: string) => void;
+  onRecordCompletedCheckIn: (id: string) => Promise<boolean>;
   onRecordMissedCheckIn: (id: string) => Promise<boolean>;
   onTaskStatus: (taskId: string, status: VolunteerTask["status"]) => void;
 }) {
   const selectedSenior = seniors.find((senior) => senior.id === selectedSeniorId) ?? seniors[0];
+  const [rosterQuery, setRosterQuery] = useState("");
+  const [rosterFilter, setRosterFilter] = useState<RosterFilter>("all");
   const selectedTasks = tasks
     .filter((task) => task.seniorId === selectedSenior.id)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -1296,11 +1305,53 @@ function OfficerDashboard({
   const latestRecordKind = selectedRecords[0]?.kind === "call" ? "Agents call" : selectedRecords[0]?.kind === "session" ? "Check-in" : "No record";
   const latestRecordTime = selectedRecords[0]?.date ? formatDate(selectedRecords[0].date) : "No check-in yet";
   const nextAction = selectedOpenTasks[0]?.recommendedAction ?? latestRecord?.recommendedAction ?? "Continue routine scheduled check-ins.";
-  const [missedLogStatus, setMissedLogStatus] = useState("");
+  const [scheduleLogStatus, setScheduleLogStatus] = useState("");
+  const [isLoggingAnswered, setIsLoggingAnswered] = useState(false);
   const [isLoggingMissed, setIsLoggingMissed] = useState(false);
+  const rosterRows = seniors.map((senior) => {
+    const seniorRecords = [...calls, ...sessions].filter((record) => record.seniorId === senior.id);
+    const seniorRisk = highestRiskLevel(seniorRecords.map((record) => record.riskLevel));
+    const seniorOpenTasks = tasks.filter((task) => task.seniorId === senior.id && task.status !== "Closed").length;
+    const seniorSchedule = schedule.find((item) => item.seniorId === senior.id) ?? null;
+    return { senior, risk: seniorRisk, openTaskCount: seniorOpenTasks, schedule: seniorSchedule };
+  });
+  const rosterFilterOptions: Array<{ id: RosterFilter; label: string; count: number }> = [
+    { id: "all", label: "All", count: rosterRows.length },
+    { id: "due", label: "Due", count: rosterRows.filter((row) => row.schedule ? row.schedule.status !== "On track" : false).length },
+    { id: "tasks", label: "Open", count: rosterRows.filter((row) => row.openTaskCount > 0).length },
+    { id: "risk", label: "Elevated", count: rosterRows.filter((row) => row.risk !== "Green").length }
+  ];
+  const normalizedRosterQuery = rosterQuery.trim().toLowerCase();
+  const filteredRosterRows = rosterRows.filter((row) => {
+    const searchable = [
+      row.senior.name,
+      row.senior.addressZone,
+      row.senior.preferredLanguage,
+      row.senior.caregiverContact,
+      row.senior.neighborContact ?? "",
+      ...row.senior.knownConditions,
+      ...row.senior.promptFocus
+    ]
+      .join(" ")
+      .toLowerCase();
+    const matchesQuery = !normalizedRosterQuery || searchable.includes(normalizedRosterQuery);
+    const matchesFilter =
+      rosterFilter === "all" ||
+      (rosterFilter === "due" && row.schedule !== null && row.schedule.status !== "On track") ||
+      (rosterFilter === "tasks" && row.openTaskCount > 0) ||
+      (rosterFilter === "risk" && row.risk !== "Green");
+    return matchesQuery && matchesFilter;
+  });
+  const scheduleTimingSummary = selectedSchedule
+    ? selectedSchedule.status === "Overdue"
+      ? `${formatHours(selectedSchedule.overdueHours)} overdue`
+      : selectedSchedule.status === "Due now"
+        ? "due now"
+        : `${formatHours(selectedSchedule.hoursUntilDue)} left`
+    : "No active cadence";
 
   useEffect(() => {
-    setMissedLogStatus("");
+    setScheduleLogStatus("");
   }, [selectedSenior.id]);
 
   const playRiskSignal = (call: CallRecord, signal: RiskSignal) => {
@@ -1314,15 +1365,29 @@ function OfficerDashboard({
     document.getElementById(`signal-${call.id}-${signal.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
 
+  const logCompletedCheckIn = async () => {
+    if (isLoggingAnswered) return;
+    setIsLoggingAnswered(true);
+    setScheduleLogStatus("Logging answered check-in...");
+    try {
+      const logged = await onRecordCompletedCheckIn(selectedSenior.id);
+      setScheduleLogStatus(logged ? "Answered check-in logged. Schedule and senior record refreshed." : "Live service connection is required to log an answered check-in.");
+    } catch {
+      setScheduleLogStatus("Unable to log answered check-in. Try again after checking the service connection.");
+    } finally {
+      setIsLoggingAnswered(false);
+    }
+  };
+
   const logMissedCheckIn = async () => {
     if (isLoggingMissed) return;
     setIsLoggingMissed(true);
-    setMissedLogStatus("Logging missed check-in...");
+    setScheduleLogStatus("Logging missed check-in...");
     try {
       const logged = await onRecordMissedCheckIn(selectedSenior.id);
-      setMissedLogStatus(logged ? "Missed check-in logged. Schedule and volunteer tasks refreshed." : "Live service connection is required to log a missed check-in.");
+      setScheduleLogStatus(logged ? "Missed check-in logged. Schedule and volunteer tasks refreshed." : "Live service connection is required to log a missed check-in.");
     } catch {
-      setMissedLogStatus("Unable to log missed check-in. Try again after checking the service connection.");
+      setScheduleLogStatus("Unable to log missed check-in. Try again after checking the service connection.");
     } finally {
       setIsLoggingMissed(false);
     }
@@ -1332,45 +1397,102 @@ function OfficerDashboard({
     <main className="dashboard-grid">
       <section className="panel roster-panel">
         <div className="panel-heading">
-          <h2>Living-Alone Roster</h2>
-          <span>{seniors.length} seniors</span>
+          <div>
+            <span className="eyebrow">Care roster</span>
+            <h2>Living-Alone Roster</h2>
+          </div>
+          <span>{filteredRosterRows.length} of {seniors.length}</span>
+        </div>
+        <div className="roster-toolbar">
+          <label className="search-field">
+            <Search size={16} />
+            <span className="sr-only">Search roster</span>
+            <input
+              aria-label="Search roster"
+              onChange={(event) => setRosterQuery(event.target.value)}
+              placeholder="Search name, zone, language"
+              type="search"
+              value={rosterQuery}
+            />
+          </label>
+          <div className="filter-group">
+            <span className="filter-label">
+              <SlidersHorizontal size={14} />
+              Triage
+            </span>
+            <div className="filter-segments" aria-label="Roster filters">
+              {rosterFilterOptions.map((option) => (
+                <button
+                  className={rosterFilter === option.id ? "active" : ""}
+                  key={option.id}
+                  onClick={() => setRosterFilter(option.id)}
+                  type="button"
+                >
+                  <span>{option.label}</span>
+                  <strong>{option.count}</strong>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
         <div className="senior-list">
-          {seniors.map((senior) => {
-            const seniorRecords = [...calls, ...sessions].filter((record) => record.seniorId === senior.id);
-            const seniorRisk = highestRiskLevel(seniorRecords.map((record) => record.riskLevel));
-            const seniorOpenTasks = tasks.filter((task) => task.seniorId === senior.id && task.status !== "Closed").length;
-            const seniorSchedule = schedule.find((item) => item.seniorId === senior.id);
-            return (
+          {filteredRosterRows.length ? (
+            filteredRosterRows.map(({ senior, risk, openTaskCount, schedule: seniorSchedule }) => (
               <button
                 className={`senior-row ${senior.id === selectedSenior.id ? "active" : ""}`}
                 key={senior.id}
                 onClick={() => setSelectedSeniorId(senior.id)}
               >
-                <span>
+                <span className="senior-row-text">
                   <strong>{senior.name}</strong>
                   <small>
                     {senior.age} · {senior.addressZone} · {senior.preferredLanguage}
                   </small>
                 </span>
                 <span className="senior-row-meta">
-                  <RiskBadge level={seniorRisk} />
-                  {seniorSchedule ? <ScheduleBadge status={seniorSchedule.status} /> : seniorOpenTasks ? <small>{seniorOpenTasks} task{seniorOpenTasks === 1 ? "" : "s"}</small> : <small>clear</small>}
+                  <RiskBadge level={risk} />
+                  {seniorSchedule ? <ScheduleBadge status={seniorSchedule.status} /> : openTaskCount ? <small>{openTaskCount} task{openTaskCount === 1 ? "" : "s"}</small> : <small>clear</small>}
                 </span>
               </button>
-            );
-          })}
+            ))
+          ) : (
+            <p className="empty-state roster-empty">No seniors match this roster view.</p>
+          )}
         </div>
       </section>
 
       <section className="panel detail-panel">
         <div className="profile-header">
-          <div>
-            <span className="eyebrow">Patient overview</span>
-            <h2>{selectedSenior.name}</h2>
-            <p>
-              Lives alone in {selectedSenior.addressZone}. Check-in every {selectedSenior.checkInFrequencyDays} days.
-            </p>
+          <div className="profile-copy">
+            <div>
+              <span className="eyebrow">Patient overview</span>
+              <h2>{selectedSenior.name}</h2>
+              <p>
+                Lives alone in {selectedSenior.addressZone}. Check-in every {selectedSenior.checkInFrequencyDays} days.
+              </p>
+            </div>
+            <div className="profile-summary-grid" aria-label="Selected patient snapshot">
+              <div>
+                <span>Schedule</span>
+                <strong>{selectedSchedule?.status ?? "Not scheduled"}</strong>
+                <small>{scheduleTimingSummary}</small>
+              </div>
+              <div>
+                <span>Latest record</span>
+                <strong>{latestRecordKind}</strong>
+                <small>{latestRecordTime}</small>
+              </div>
+              <div>
+                <span>Open work</span>
+                <strong>{selectedOpenTasks.length} task{selectedOpenTasks.length === 1 ? "" : "s"}</strong>
+                <small>{selectedOpenTasks[0]?.priority ?? "No follow-up"}</small>
+              </div>
+              <div>
+                <span>Language</span>
+                <strong>{selectedSenior.preferredLanguage}</strong>
+                <small>{selectedSenior.caregiverContact}</small>
+              </div>
+            </div>
           </div>
           <div className="profile-actions">
             <RiskBadge level={highestRisk} />
@@ -1446,13 +1568,17 @@ function OfficerDashboard({
                     <PhoneCall size={18} />
                     Start scheduled call
                   </button>
+                  <button className="secondary-action" onClick={() => void logCompletedCheckIn()} disabled={isLoggingAnswered}>
+                    <CheckCircle2 size={18} />
+                    {isLoggingAnswered ? "Logging..." : "Log answered"}
+                  </button>
                   <button className="secondary-action" onClick={() => void logMissedCheckIn()} disabled={isLoggingMissed}>
                     <FileClock size={18} />
                     {isLoggingMissed ? "Logging..." : "Log missed"}
                   </button>
                 </div>
               </div>
-              {missedLogStatus ? <p className="status-note schedule-status-note">{missedLogStatus}</p> : null}
+              {scheduleLogStatus ? <p className="status-note schedule-status-note" aria-live="polite">{scheduleLogStatus}</p> : null}
             </>
           ) : (
             <p className="empty-state">No schedule is available for this senior.</p>
@@ -1758,6 +1884,28 @@ function App() {
     return true;
   };
 
+  const handleRecordCompletedCheckIn = async (seniorId: string) => {
+    const started = await startCheckIn(seniorId);
+    if (!started) return false;
+
+    const transcript = "Patient answered the scheduled check-in and reported no immediate concern.";
+    const completed = await completeCheckIn(started.id, {
+      completedAt: new Date().toISOString(),
+      originalTranscript: transcript,
+      englishTranscript: transcript,
+      summary: "Completed scheduled check-in from Patient overview."
+    });
+    if (!completed) return false;
+
+    setLoadedSessions((sessions) => [completed, ...sessions.filter((session) => session.id !== completed.id && session.id !== started.id)]);
+    setSelectedSeniorId(completed.seniorId);
+    await refreshTasks();
+    await refreshSchedule();
+    await refreshSeniorRecords();
+    await refreshCallPlans();
+    return true;
+  };
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -1789,8 +1937,8 @@ function App() {
       <section className="hero-band">
         <div className="hero-copy">
           <span className="eyebrow">Care operations command center</span>
-          <h1>Today's living-alone check-in desk</h1>
-          <p>Track due calls, missed replies, and human follow-up before silence turns into a welfare risk.</p>
+          <h1>Care operations</h1>
+          <p>Monitor due check-ins, unanswered attempts, and human follow-up before silence turns into a welfare risk.</p>
           <div className="routing-strip" aria-label="EarlyCare escalation route">
             <span>
               <Timer size={15} />
@@ -1816,7 +1964,7 @@ function App() {
         <div className="hero-stats">
           <StatCard label="Open tasks" value={`${openTasks}`} meta="follow-up queue" icon={<Bell size={20} />} />
           <StatCard label="Urgent" value={`${urgentTasks}`} meta="same-day attention" icon={<AlertTriangle size={20} />} />
-          <StatCard label="Due now" value={`${dueNow}`} meta="call cadence risk" icon={<CalendarClock size={20} />} />
+          <StatCard label="Due / overdue" value={`${dueNow}`} meta="cadence risk" icon={<CalendarClock size={20} />} />
           <StatCard label="Safety stance" value="No diagnosis" meta="human review only" icon={<ShieldCheck size={20} />} />
         </div>
       </section>
@@ -1868,6 +2016,7 @@ function App() {
             setSelectedSeniorId(id);
             setView("call");
           }}
+          onRecordCompletedCheckIn={handleRecordCompletedCheckIn}
           onRecordMissedCheckIn={handleRecordMissedCheckIn}
           onTaskStatus={(taskId, status) => void handleTaskStatus(taskId, status)}
         />
