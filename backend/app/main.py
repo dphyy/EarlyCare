@@ -1930,9 +1930,9 @@ def get_volunteer_tasks() -> list[VolunteerTask]:
 
 @app.patch("/volunteer-tasks/{task_id}", response_model=VolunteerTask)
 def update_volunteer_task(task_id: str, status: str) -> VolunteerTask:
-    tasks = _load_tasks()
     if status not in {"Open", "In progress", "Closed"}:
         raise HTTPException(status_code=400, detail="Invalid task status")
+    tasks = _repair_missing_follow_up_tasks()
     for task in tasks:
         if task.id == task_id:
             task.status = status  # type: ignore[assignment]
