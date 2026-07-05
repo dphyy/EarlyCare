@@ -1,6 +1,8 @@
 import unittest
-from pathlib import Path
 import json
+from contextlib import redirect_stdout
+from io import StringIO
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
@@ -8,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from app import main, providers
 from app.models import ProviderResult, RiskAssessment, SpeechProfile, TranscriptMessage, TranscriptSegment
+from research.speech_ml import make_enrichment_payload
 
 
 class CallWorkflowTests(unittest.TestCase):
@@ -483,6 +486,95 @@ class CallWorkflowTests(unittest.TestCase):
                 stored = main._load_call_record(call_dir / "metadata.json")
                 self.assertEqual(stored.currentSpeechProfile.embedding, [0.1, 0.2, 0.3])
                 self.assertEqual(stored.speechModelProvenance.runtimeMode, "offline embedding")
+            finally:
+                main.CALL_STORAGE_ROOT = original_storage_root
+
+    def test_generated_speech_enrichment_payload_patches_call(self) -> None:
+        with TemporaryDirectory() as tmp:
+            original_storage_root = main.CALL_STORAGE_ROOT
+            main.CALL_STORAGE_ROOT = Path(tmp) / "calls"
+            call_dir = main.CALL_STORAGE_ROOT / "call-generated-payload"
+            call_dir.mkdir(parents=True)
+            try:
+                call = main.CallRecord(
+                    id="call-generated-payload",
+                    seniorId="s-001",
+                    seniorName="Mdm Tan Bee Hoon",
+                    startedAt="2026-07-04T10:00:00+08:00",
+                    completedAt="2026-07-04T10:05:00+08:00",
+                    status="Complete",
+                    riskLevel="Green",
+                    originalTranscript="Patient: I am okay.",
+                    englishTranscript="Patient: I am okay.",
+                    transcriptMessages=[TranscriptMessage(role="Senior", text="I am okay.", timestamp="2026-07-04T10:01:00+08:00")],
+                    translationProvider="test",
+                    translationFallbackUsed=False,
+                    audioAvailable=False,
+                    currentSpeechProfile=SpeechProfile(
+                        speechRate=120,
+                        avgPauseMs=500,
+                        responseLatencyMs=1000,
+                        pitchVariability=0.5,
+                        phraseAccuracy=0.95,
+                        updatedAt="2026-07-04T10:05:00+08:00",
+                    ),
+                    riskAssessment=RiskAssessment(
+                        speechDeviationScore=12,
+                        parkinsonsWatchScore=0,
+                        postFallConcernScore=0,
+                        missedCheckInScore=0,
+                        riskLevel="Green",
+                        reasons=["No concerning symptoms and speech remains close to baseline"],
+                    ),
+                    recommendedAction="Continue routine scheduled check-ins.",
+                )
+                (call_dir / "metadata.json").write_text(call.model_dump_json(indent=2))
+
+                rows_path = Path(tmp) / "embeddings.jsonl"
+                payload_path = Path(tmp) / "payload.json"
+                rows_path.write_text(
+                    json.dumps(
+                        {
+                            "dataset": "sample",
+                            "speaker_id": "s-001",
+                            "label": "control",
+                            "task": "repeat_phrase",
+                            "embedding": [0.1, 0.2, 0.3],
+                            "speech_metrics": {
+                                "speechRate": 118,
+                                "avgPauseMs": 520,
+                                "responseLatencyMs": 990,
+                                "pitchVariability": 0.48,
+                                "phraseAccuracy": 0.94,
+                            },
+                            "provenance": {
+                                "source_id": "sample-row-1",
+                                "model": "demo",
+                                "model_name": "demo-standard-library",
+                                "extracted_at": "2026-07-04T10:06:00+08:00",
+                            },
+                        }
+                    )
+                    + "\n"
+                )
+                with redirect_stdout(StringIO()):
+                    make_enrichment_payload.main(
+                        ["--input", str(rows_path), "--output", str(payload_path), "--speaker-id", "s-001"]
+                    )
+                generated_payload = json.loads(payload_path.read_text())
+
+                client = TestClient(main.app)
+                response = client.patch("/calls/call-generated-payload/speech-enrichment", json=generated_payload)
+
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                self.assertEqual(payload["currentSpeechProfile"]["embedding"], [0.1, 0.2, 0.3])
+                self.assertEqual(payload["currentSpeechProfile"]["speechRate"], 118)
+                self.assertEqual(payload["speechModelProvenance"]["runtimeMode"], "offline embedding")
+                self.assertEqual(payload["speechModelProvenance"]["modelName"], "demo-standard-library")
+                self.assertEqual(payload["speechModelProvenance"]["artifactUri"], f"{rows_path}#row=1")
+                self.assertEqual(payload["speechModelProvenance"]["generatedAt"], "2026-07-04T10:06:00+08:00")
+                self.assertFalse(payload["speechModelProvenance"]["validated"])
             finally:
                 main.CALL_STORAGE_ROOT = original_storage_root
 
