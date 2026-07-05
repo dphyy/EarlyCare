@@ -5,8 +5,8 @@ React + Vite interface for the EarlyCare hackathon prototype.
 The frontend provides three main experiences:
 
 - **Demo runner**: seven scripted check-in scenarios that persist records and tasks through the backend.
-- **Agents call**: an in-browser call simulation powered by ElevenLabs Agents.
-- **Patient overview**: a care-team view for roster triage, operations queue, check-in history, recordings, transcripts, categorized evidence, escalation trails, volunteer tasks, speech timing, inline AI risk highlights, answered/missed schedule logging, copyable care-team handoffs, and follow-up recommendations.
+- **Live call**: an in-browser call simulation powered by ElevenLabs Agents.
+- **Care desk**: a care-team view for roster triage, operations queue, check-in history, recordings, transcripts, categorized evidence, escalation trails, volunteer tasks, speech timing, inline AI risk highlights, answered/missed schedule logging, copyable care-team handoffs, and follow-up recommendations.
 
 The top bar shows whether the browser is connected to the live FastAPI backend or using local demo data. The command header also surfaces the top care-desk priority, last sync time, and a manual refresh action.
 
@@ -17,7 +17,7 @@ The top bar shows whether the browser is connected to the live FastAPI backend o
 - Shows demo baseline speech scoring, categorized evidence, recommended action, and escalation steps.
 - Creates or updates volunteer tasks for missed check-ins and elevated-risk scenarios.
 
-## Agents Call
+## Live Call
 
 - Lets a volunteer select a senior and start a browser-based voice check-in.
 - Personalizes the prompt with language, living-alone status, known conditions, check-in frequency, caregiver, neighbour, and focus areas.
@@ -30,12 +30,12 @@ The top bar shows whether the browser is connected to the live FastAPI backend o
 
 The call page does not translate the live transcript. Translation happens after saving, in the backend workflow.
 
-## Patient Overview
+## Care Desk
 
 - Lists living-alone seniors and their saved calls.
 - Shows an operations queue ranked by schedule status, senior risk, and open volunteer work.
 - Filters the roster by due status, open work, elevated risk, or search text.
-- Shows historical scripted check-ins as well as saved Agents calls.
+- Shows historical scripted check-ins as well as saved Live calls.
 - Shows full-call recordings through a browser audio player.
 - Shows translated English transcripts and cleaned original transcripts with `Agent:` and `Patient:` speaker labels.
 - Displays risk review, categorized evidence, escalation steps, and recommended follow-up action.
@@ -86,7 +86,7 @@ The app usually runs at `http://localhost:5173`.
 
 | File | Purpose |
 | --- | --- |
-| `src/main.tsx` | Main React app, Agents call flow, Patient overview, audio mixing, transcript highlights. |
+| `src/main.tsx` | Main React app, Live call flow, Care desk, audio mixing, transcript highlights. |
 | `src/api.ts` | Backend API helpers and audio URL construction. |
 | `src/types.ts` | Shared frontend types for seniors, calls, transcripts, speech profiles, and risk signals. |
 | `src/styles.css` | Application styling. |

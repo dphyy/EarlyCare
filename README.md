@@ -2,7 +2,7 @@
 
 **Preventive care and patient engagement for elderly people living alone.**
 
-EarlyCare is a hackathon prototype for routine wellbeing calls. A patient starts a simulated browser call, an ElevenLabs agent conducts the check-in, the app records the full conversation, and the Patient overview shows the recording, original transcript, English transcript, patient-only AI risk highlights, and speech timing context for caregiver review.
+EarlyCare is a hackathon prototype for routine wellbeing calls. A volunteer starts a browser voice check-in, an ElevenLabs agent conducts the call, the app records the full conversation, and the Care desk shows the recording, original transcript, English transcript, patient-only AI risk highlights, and speech timing context for caregiver review.
 
 EarlyCare is decision support, not diagnosis. It helps volunteers and officers notice missed check-ins, reported danger signs, possible post-fall/concussion concerns, Parkinson's watch signals, poor intake, confusion, weakness, requests for help, and meaningful speech changes sooner.
 
@@ -21,12 +21,12 @@ Older adults living alone may go days without anyone noticing a fall, head impac
 | Scenario runner | Runs seven scripted demo paths: stable, missed check-in, Parkinson's watch, Post-Fall Amber, Post-Fall Red, chronic illness, and loneliness/wellbeing. |
 | Check-in schedule | Computes next due time, due/overdue status, last contact, and next action from each senior's 2-3 day cadence. |
 | Operations queue | Ranks who to contact first from schedule status, senior risk, and open volunteer work. |
-| Schedule action logging | Records answered or missed scheduled check-ins from Patient overview, then updates the schedule, senior record, escalation trail, and volunteer task list. |
+| Schedule action logging | Records answered or missed scheduled check-ins from Care desk, then updates the schedule, senior record, escalation trail, and volunteer task list. |
 | Senior record | Rolls check-ins and saved calls into a per-senior categorized history for repeated fall, concussion, speech-watch, chronic illness, missed-call, and wellbeing signals. |
 | Next call plan | Turns the schedule, senior profile, and categorized history into personalized questions for the next voice check-in. |
-| Agents website call | Starts an ElevenLabs Agents-powered browser call from the EarlyCare website and lets the patient speak in a comfortable language. |
+| Live call | Starts an ElevenLabs Agents-powered browser call from the EarlyCare website and lets the patient speak in a comfortable language. |
 | Full-call recording | Records patient microphone audio and ElevenLabs agent audio into one replayable `full-call.webm`. |
-| Patient overview | Shows historical check-ins, saved calls, translated transcripts, original recordings, categorized evidence, escalation trails, volunteer tasks, speech timing, risk highlights, and roster triage filters. |
+| Care desk | Shows historical check-ins, saved calls, translated transcripts, original recordings, categorized evidence, escalation trails, volunteer tasks, speech timing, risk highlights, and roster triage filters. |
 | Transcription and translation | Uses MERaLiON first, ElevenLabs speech-to-text and Google Translate as fallback, and saved dialogue transcript only as the final demo fallback. |
 | Inline risk highlights | Uses OpenAI structured output to detect patient-only risk signals and highlights exact English evidence inline. |
 | Audio verification | Clicking a highlighted patient phrase seeks playback to immediately after the previous agent question, so caregivers can hear the patient answer in context. |
@@ -37,7 +37,7 @@ Older adults living alone may go days without anyone noticing a fall, head impac
 
 ## Workflow
 
-1. Patient starts the simulated call from the **Agents call** page.
+1. A volunteer starts the check-in from the **Live call** page.
 2. The ElevenLabs agent conducts the wellbeing check-in.
 3. The frontend captures:
    - live dialogue messages in the original spoken language
@@ -56,14 +56,14 @@ Older adults living alone may go days without anyone noticing a fall, head impac
    - provider/fallback metadata
    - speech timing metrics
 7. OpenAI reviews patient speech only and returns structured risk signals.
-8. The Patient overview renders the English transcript above the original transcript and highlights risk evidence inline.
+8. The Care desk renders the English transcript above the original transcript and highlights risk evidence inline.
 9. Clicking a highlight plays the saved audio from immediately after the previous agent prompt.
 
 ## Architecture
 
 | Layer | Stack | Role |
 | --- | --- | --- |
-| Frontend | React, Vite, TypeScript | Scenario runner, Agents call experience, mixed audio capture, Patient overview, audio playback, risk-signal UI. |
+| Frontend | React, Vite, TypeScript | Scenario runner, Live call experience, mixed audio capture, Care desk, audio playback, risk-signal UI. |
 | Backend | FastAPI, Python | Signed Agents sessions, scenario persistence, volunteer task state, call artifact storage, transcription, translation, risk review, API routes. |
 | Voice agent | ElevenLabs Agents React SDK | Live browser-based voice check-in and transcript events. |
 | Transcription | MERaLiON, ElevenLabs STT | Primary and fallback speech-to-text. |
@@ -143,18 +143,18 @@ Open the Vite URL, usually `http://localhost:5173`.
 
 1. Open **Demo runner**.
 2. Run one of the seven scripted scenarios.
-3. Open **Patient overview**.
+3. Open **Care desk**.
 4. Review the operations queue, categorized senior record, next-call plan, historical check-ins, risk scores, escalation steps, transcripts, and volunteer tasks.
 5. Acknowledge or close a task to confirm PATCH-backed status persistence.
 
-### Live Agents Call Demo
+### Live Call Demo
 
-1. Open **Agents call**.
+1. Open **Live call**.
 2. Choose a senior and click **Start call**.
 3. Allow microphone permission.
 4. Speak with the agent in any comfortable language.
 5. Click **End & save**.
-6. Open **Patient overview**.
+6. Open **Care desk**.
 7. Review the full-call recording, English transcript, original transcript, speech timing, and inline risk highlights.
 8. Click a highlighted risk phrase to replay the patient answer from immediately after the previous agent question.
 
@@ -188,7 +188,7 @@ EarlyCare does not diagnose Parkinson's disease, concussion, stroke, or any othe
 
 - Replace heuristic speech timing estimates with validated audio-derived features.
 - Follow `docs/ml/implementation-plan.md` for speech-deviation model work and dataset validation.
-- Keep the schedule endpoint and Patient overview schedule panel aligned with the 2-3 day living-alone check-in workflow.
+- Keep the schedule endpoint and Care desk schedule panel aligned with the 2-3 day living-alone check-in workflow.
 - Improve audio/transcript alignment with provider word-level timestamps when available.
 - Validate risk categories with clinicians and labelled datasets before real-world deployment.
 - Add persistent database/object storage for multi-user demos.

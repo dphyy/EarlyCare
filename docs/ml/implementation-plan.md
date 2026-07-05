@@ -4,7 +4,7 @@
 
 **Architecture:** Keep the production app rule-first and safety-first. The core product works through scheduled check-ins, missed-call handling, structured conversation, and human escalation. Speech ML is a personal-baseline anomaly signal layered on top of that workflow, then combined with fall/head-impact reports, concussion danger signs, Parkinson's watch markers, and care-team escalation rules.
 
-**Tech Stack:** FastAPI, Pydantic, local file storage for the hackathon demo, optional offline Python research jobs using PyTorch/Transformers, MERaLiON SpeechEncoder or WavLM/wav2vec-style embeddings, and the existing React Patient overview.
+**Tech Stack:** FastAPI, Pydantic, local file storage for the hackathon demo, optional offline Python research jobs using PyTorch/Transformers, MERaLiON SpeechEncoder or WavLM/wav2vec-style embeddings, and the existing React Care desk.
 
 ---
 

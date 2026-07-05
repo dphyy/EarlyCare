@@ -14,9 +14,9 @@ FastAPI service for EarlyCare call sessions, call artifact storage, transcriptio
 - Falls back to ElevenLabs speech-to-text, Google Translate, and finally the saved dialogue transcript.
 - Uses OpenAI structured output for patient-only decision-support symptom and risk extraction.
 - Attaches risk evidence to patient transcript segments and audio seek times.
-- Builds categorized conversation evidence and escalation trails for Patient overview.
+- Builds categorized conversation evidence and escalation trails for Care desk.
 - Builds an operations queue that ranks who to contact first from schedule status, risk, and open volunteer work.
-- Serves saved call metadata and replayable audio to the Patient overview.
+- Serves saved call metadata and replayable audio to the Care desk.
 
 ## Scenario Runner Flow
 
@@ -79,7 +79,7 @@ EarlyCare does not diagnose medical conditions.
 
 ## Audio Seeking
 
-For Patient overview verification, risk-signal timestamps are tied to patient segments. The frontend starts playback from immediately after the previous agent question/statement so the caregiver hears the full patient answer in context.
+For Care desk verification, risk-signal timestamps are tied to patient segments. The frontend starts playback from immediately after the previous agent question/statement so the caregiver hears the full patient answer in context.
 
 The backend stores estimated segment timing for new calls. When precise provider word timestamps are unavailable, it estimates:
 
