@@ -54,6 +54,7 @@ const requiredUiHooks = [
   "Open priority",
   "Refresh",
   "Copy handoff",
+  "Loading call workspace",
   "Running..."
 ];
 
