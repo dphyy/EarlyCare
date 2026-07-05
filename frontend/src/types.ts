@@ -81,6 +81,16 @@ export interface ConversationCategory {
   recommendedAction: string;
 }
 
+export interface SeniorRecordCategory {
+  id: ConversationCategoryId;
+  label: string;
+  highestSeverity: RiskLevel;
+  recordCount: number;
+  latestAt?: string | null;
+  latestEvidence: string[];
+  recommendedAction: string;
+}
+
 export interface EscalationStep {
   id: string;
   label: string;
@@ -120,6 +130,30 @@ export interface VolunteerTask {
   sourceSessionId?: string | null;
   sourceCallId?: string | null;
   escalationStep?: string | null;
+}
+
+export interface SeniorRecordEvent {
+  id: string;
+  source: "call" | "check-in";
+  occurredAt: string;
+  riskLevel: RiskLevel;
+  status: string;
+  summary: string;
+  recommendedAction: string;
+  categories: ConversationCategory[];
+}
+
+export interface SeniorRecord {
+  seniorId: string;
+  seniorName: string;
+  livingAlone: boolean;
+  checkInFrequencyDays: number;
+  totalRecords: number;
+  openTaskCount: number;
+  highestRiskLevel: RiskLevel;
+  latestRecordAt?: string | null;
+  categories: SeniorRecordCategory[];
+  timeline: SeniorRecordEvent[];
 }
 
 export interface TranscriptMessage {

@@ -19,6 +19,7 @@ ConversationCategoryId = Literal[
 EscalationStepStatus = Literal["Standby", "Triggered", "Complete"]
 CheckInScheduleStatus = Literal["On track", "Due soon", "Due now", "Overdue"]
 CheckInContactKind = Literal["call", "check-in", "none"]
+SeniorRecordSource = Literal["call", "check-in"]
 
 
 class SpeechProfile(BaseModel):
@@ -128,6 +129,16 @@ class ConversationCategory(BaseModel):
     recommendedAction: str
 
 
+class SeniorRecordCategory(BaseModel):
+    id: ConversationCategoryId
+    label: str
+    highestSeverity: RiskLevel
+    recordCount: int
+    latestAt: str | None = None
+    latestEvidence: list[str] = Field(default_factory=list)
+    recommendedAction: str
+
+
 class EscalationStep(BaseModel):
     id: str
     label: str
@@ -167,6 +178,30 @@ class VolunteerTask(BaseModel):
     sourceSessionId: str | None = None
     sourceCallId: str | None = None
     escalationStep: str | None = None
+
+
+class SeniorRecordEvent(BaseModel):
+    id: str
+    source: SeniorRecordSource
+    occurredAt: str
+    riskLevel: RiskLevel
+    status: str
+    summary: str
+    recommendedAction: str
+    categories: list[ConversationCategory] = Field(default_factory=list)
+
+
+class SeniorRecord(BaseModel):
+    seniorId: str
+    seniorName: str
+    livingAlone: bool
+    checkInFrequencyDays: int
+    totalRecords: int
+    openTaskCount: int
+    highestRiskLevel: RiskLevel
+    latestRecordAt: str | None = None
+    categories: list[SeniorRecordCategory] = Field(default_factory=list)
+    timeline: list[SeniorRecordEvent] = Field(default_factory=list)
 
 
 class SpeechDeviationRequest(BaseModel):

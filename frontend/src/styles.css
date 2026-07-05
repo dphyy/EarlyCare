@@ -864,6 +864,105 @@ h3 {
   margin: 0;
 }
 
+.record-panel {
+  background: #ffffff;
+  border: 1px solid #dfe5d8;
+  border-radius: 8px;
+  margin: 16px 0;
+  padding: 16px;
+}
+
+.record-summary-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 12px;
+}
+
+.record-summary-grid div {
+  background: #f8faf5;
+  border: 1px solid #dfe5d8;
+  border-radius: 8px;
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.record-summary-grid span,
+.record-summary-grid small {
+  color: #667065;
+  font-size: 12px;
+}
+
+.record-summary-grid strong {
+  color: #17201a;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.record-category-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 12px;
+}
+
+.record-category,
+.record-event {
+  border: 1px solid #dfe5d8;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.record-category div,
+.record-event div:first-child {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.record-category strong,
+.record-event strong {
+  color: #17201a;
+  overflow-wrap: anywhere;
+}
+
+.record-category small,
+.record-event small {
+  color: #667065;
+}
+
+.record-category p,
+.record-event p {
+  color: #495549;
+  margin: 0;
+}
+
+.record-timeline {
+  display: grid;
+  gap: 10px;
+}
+
+.record-event-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.record-event-tags span {
+  background: #eef4e7;
+  border: 1px solid #d8dfd0;
+  border-radius: 999px;
+  color: #3e4a40;
+  font-size: 12px;
+  padding: 5px 8px;
+}
+
 .handoff-icon {
   align-items: center;
   background: #16453f;
@@ -1451,6 +1550,8 @@ h3 {
   }
 
   .transcript-stack,
+  .record-category-grid,
+  .record-summary-grid,
   .schedule-grid,
   .speech-metric-grid {
     grid-template-columns: 1fr;

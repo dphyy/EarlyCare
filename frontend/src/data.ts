@@ -1,4 +1,4 @@
-import type { CheckInScheduleItem, CheckInSession, Scenario, Senior, VolunteerTask } from "./types";
+import type { CheckInScheduleItem, CheckInSession, Scenario, Senior, SeniorRecord, VolunteerTask } from "./types";
 
 export const seniors: Senior[] = [
   {
@@ -424,5 +424,118 @@ export const volunteerTasks: VolunteerTask[] = [
     assignedTo: "Community volunteer team B",
     status: "In progress",
     createdAt: "2026-07-04T10:15:00+08:00"
+  }
+];
+
+export const seniorRecords: SeniorRecord[] = [
+  {
+    seniorId: "s-001",
+    seniorName: "Mdm Tan Bee Hoon",
+    livingAlone: true,
+    checkInFrequencyDays: 2,
+    totalRecords: 1,
+    openTaskCount: 1,
+    highestRiskLevel: "Red",
+    latestRecordAt: "2026-07-04T09:00:00+08:00",
+    categories: [
+      {
+        id: "concussion_danger",
+        label: "Possible concussion danger signs",
+        highestSeverity: "Red",
+        recordCount: 1,
+        latestAt: "2026-07-04T09:00:00+08:00",
+        latestEvidence: ["Confusion reported.", "Weakness or numbness reported.", "Headache or dizziness after impact reported."],
+        recommendedAction: "For red danger signs after a bump, blow, jolt, or fall, escalate for urgent medical help."
+      },
+      {
+        id: "fall_head_impact",
+        label: "Fall / head impact / whiplash",
+        highestSeverity: "Amber",
+        recordCount: 1,
+        latestAt: "2026-07-04T09:00:00+08:00",
+        latestEvidence: ["Fall reported.", "Head impact reported."],
+        recommendedAction: "Ask what happened, whether the head or body was hit, and whether the senior can move safely."
+      }
+    ],
+    timeline: [
+      {
+        id: "c-102",
+        source: "check-in",
+        occurredAt: "2026-07-04T09:00:00+08:00",
+        riskLevel: "Red",
+        status: "Urgent",
+        summary: "Reported fall with head impact, worsening headache, confusion, and left-hand weakness.",
+        recommendedAction: "Trigger emergency escalation and notify caregiver.",
+        categories: [
+          {
+            id: "concussion_danger",
+            label: "Possible concussion danger signs",
+            severity: "Red",
+            evidence: ["Confusion reported.", "Weakness or numbness reported.", "Headache or dizziness after impact reported."],
+            recommendedAction: "For red danger signs after a bump, blow, jolt, or fall, escalate for urgent medical help."
+          },
+          {
+            id: "fall_head_impact",
+            label: "Fall / head impact / whiplash",
+            severity: "Amber",
+            evidence: ["Fall reported.", "Head impact reported."],
+            recommendedAction: "Ask what happened, whether the head or body was hit, and whether the senior can move safely."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    seniorId: "s-002",
+    seniorName: "Mr Raman Pillai",
+    livingAlone: true,
+    checkInFrequencyDays: 3,
+    totalRecords: 0,
+    openTaskCount: 1,
+    highestRiskLevel: "Green",
+    latestRecordAt: null,
+    categories: [],
+    timeline: []
+  },
+  {
+    seniorId: "s-003",
+    seniorName: "Encik Ahmad Rahman",
+    livingAlone: true,
+    checkInFrequencyDays: 2,
+    totalRecords: 1,
+    openTaskCount: 0,
+    highestRiskLevel: "Green",
+    latestRecordAt: "2026-07-04T09:04:00+08:00",
+    categories: [
+      {
+        id: "medication_food_water",
+        label: "Medication / food / water",
+        highestSeverity: "Green",
+        recordCount: 1,
+        latestAt: "2026-07-04T09:04:00+08:00",
+        latestEvidence: ["Medication, food, or water status mentioned."],
+        recommendedAction: "Confirm medication, food, and water intake. Escalate if intake is poor or medication has been missed."
+      }
+    ],
+    timeline: [
+      {
+        id: "c-101",
+        source: "check-in",
+        occurredAt: "2026-07-04T09:04:00+08:00",
+        riskLevel: "Green",
+        status: "Checked in",
+        summary: "Stable check-in. No falls, symptoms, or adherence concerns.",
+        recommendedAction: "Record routine check-in and continue the next scheduled call.",
+        categories: [
+          {
+            id: "medication_food_water",
+            label: "Medication / food / water",
+            severity: "Green",
+            evidence: ["Medication, food, or water status mentioned."],
+            recommendedAction: "Confirm medication, food, and water intake. Escalate if intake is poor or medication has been missed."
+          }
+        ]
+      }
+    ]
   }
 ];

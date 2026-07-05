@@ -42,6 +42,32 @@ class CallWorkflowTests(unittest.TestCase):
                 main.TASKS_STATE_PATH = original_tasks_path
                 main.CALL_STORAGE_ROOT = original_call_root
 
+    def test_senior_records_roll_up_categories_and_open_tasks(self) -> None:
+        with TemporaryDirectory() as tmp:
+            original_state_root = main.STATE_STORAGE_ROOT
+            original_checkins_path = main.CHECKINS_STATE_PATH
+            original_tasks_path = main.TASKS_STATE_PATH
+            original_call_root = main.CALL_STORAGE_ROOT
+            state_root = Path(tmp) / "state"
+            main.STATE_STORAGE_ROOT = state_root
+            main.CHECKINS_STATE_PATH = state_root / "checkins.json"
+            main.TASKS_STATE_PATH = state_root / "volunteer-tasks.json"
+            main.CALL_STORAGE_ROOT = Path(tmp) / "calls"
+            try:
+                records = {record.seniorId: record for record in main._build_senior_records()}
+
+                self.assertEqual(records["s-001"].highestRiskLevel, "Red")
+                self.assertEqual(records["s-001"].totalRecords, 1)
+                self.assertTrue(any(category.id == "concussion_danger" for category in records["s-001"].categories))
+                self.assertEqual(records["s-001"].timeline[0].source, "check-in")
+                self.assertEqual(records["s-002"].openTaskCount, 1)
+                self.assertEqual(records["s-002"].totalRecords, 0)
+            finally:
+                main.STATE_STORAGE_ROOT = original_state_root
+                main.CHECKINS_STATE_PATH = original_checkins_path
+                main.TASKS_STATE_PATH = original_tasks_path
+                main.CALL_STORAGE_ROOT = original_call_root
+
     def test_transcript_to_text_uses_patient_label(self) -> None:
         messages = [
             main.TranscriptMessage(role="Agent", text="Are you okay?", timestamp=None),

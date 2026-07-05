@@ -38,6 +38,14 @@ def main_test() -> None:
         assert len(schedule_payload) == 3
         assert {item["status"] for item in schedule_payload}.issubset({"On track", "Due soon", "Due now", "Overdue"})
 
+        records = client.get("/senior-records")
+        assert records.status_code == 200
+        records_payload = records.json()
+        assert len(records_payload) == 3
+        tan_record = next(record for record in records_payload if record["seniorId"] == "s-001")
+        assert tan_record["highestRiskLevel"] == "Red"
+        assert any(category["id"] == "concussion_danger" for category in tan_record["categories"])
+
         red_run = client.post("/scenarios/post-fall-red/run")
         assert red_run.status_code == 200
         red_payload = red_run.json()
@@ -58,6 +66,10 @@ def main_test() -> None:
         checkins = client.get("/checkins")
         assert checkins.status_code == 200
         assert any(checkin["scenarioId"] == "post-fall-red" for checkin in checkins.json())
+
+        senior_record = client.get(f"/seniors/{missed_payload['session']['seniorId']}/record")
+        assert senior_record.status_code == 200
+        assert any(event["id"] == missed_payload["session"]["id"] for event in senior_record.json()["timeline"])
 
     print("backend smoke ok")
 

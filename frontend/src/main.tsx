@@ -33,6 +33,7 @@ import {
   fetchSchedule,
   fetchScenarios,
   fetchSeniors,
+  fetchSeniorRecords,
   fetchSessions,
   fetchVolunteerTasks,
   getCallAudioUrl,
@@ -50,6 +51,7 @@ import type {
   RiskSignal,
   Scenario,
   Senior,
+  SeniorRecord,
   SpeechModelProvenance,
   TranscriptMessage,
   VolunteerTask,
@@ -1101,12 +1103,97 @@ function ScenarioRunner({
   );
 }
 
+function SeniorRecordPanel({ record }: { record: SeniorRecord | null }) {
+  if (!record) {
+    return (
+      <section className="record-panel">
+        <SectionHeading eyebrow="Longitudinal record" title="Categorized History" meta={<span>No record</span>} />
+        <p className="empty-state">No categorized record is available for this senior yet.</p>
+      </section>
+    );
+  }
+
+  const topCategories = record.categories.slice(0, 5);
+  const latestEvents = record.timeline.slice(0, 4);
+
+  return (
+    <section className="record-panel">
+      <SectionHeading
+        eyebrow="Longitudinal record"
+        title="Categorized History"
+        meta={<span>{record.totalRecords} record{record.totalRecords === 1 ? "" : "s"}</span>}
+      />
+      <div className="record-summary-grid">
+        <div>
+          <span>Latest record</span>
+          <strong>{record.latestRecordAt ? formatDate(record.latestRecordAt) : "No check-in yet"}</strong>
+        </div>
+        <div>
+          <span>Highest signal</span>
+          <RiskBadge level={record.highestRiskLevel} />
+        </div>
+        <div>
+          <span>Open follow-up</span>
+          <strong>{record.openTaskCount}</strong>
+        </div>
+        <div>
+          <span>Cadence</span>
+          <strong>Every {record.checkInFrequencyDays} days</strong>
+        </div>
+      </div>
+
+      {topCategories.length ? (
+        <div className="record-category-grid">
+          {topCategories.map((category) => (
+            <article className="record-category" key={category.id}>
+              <div>
+                <RiskBadge level={category.highestSeverity} />
+                <strong>{category.label}</strong>
+              </div>
+              <small>
+                {category.recordCount} mention{category.recordCount === 1 ? "" : "s"}
+                {category.latestAt ? ` · latest ${formatDate(category.latestAt)}` : ""}
+              </small>
+              {category.latestEvidence.length ? <p>{category.latestEvidence.slice(0, 2).join(" ")}</p> : <p>{category.recommendedAction}</p>}
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="empty-state">No repeated category signal has been recorded yet.</p>
+      )}
+
+      {latestEvents.length ? (
+        <div className="record-timeline">
+          {latestEvents.map((event) => (
+            <article className="record-event" key={event.id}>
+              <div>
+                <RiskBadge level={event.riskLevel} />
+                <strong>{event.source === "call" ? "Agents call" : "Check-in"} · {event.status}</strong>
+                <small>{formatDate(event.occurredAt)}</small>
+              </div>
+              <p>{event.summary}</p>
+              {event.categories.length ? (
+                <div className="record-event-tags">
+                  {event.categories.slice(0, 4).map((category) => (
+                    <span key={`${event.id}-${category.id}`}>{category.label}</span>
+                  ))}
+                </div>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function OfficerDashboard({
   seniors,
   sessions,
   tasks,
   calls,
   schedule,
+  records,
   selectedSeniorId,
   setSelectedSeniorId,
   onStartCall,
@@ -1117,6 +1204,7 @@ function OfficerDashboard({
   tasks: VolunteerTask[];
   calls: CallRecord[];
   schedule: CheckInScheduleItem[];
+  records: SeniorRecord[];
   selectedSeniorId: string;
   setSelectedSeniorId: (id: string) => void;
   onStartCall: (id: string) => void;
@@ -1129,6 +1217,7 @@ function OfficerDashboard({
   const selectedCalls = calls.filter((call) => call.seniorId === selectedSenior.id);
   const selectedSessions = sessions.filter((session) => session.seniorId === selectedSenior.id);
   const selectedSchedule = schedule.find((item) => item.seniorId === selectedSenior.id) ?? null;
+  const selectedSeniorRecord = records.find((record) => record.seniorId === selectedSenior.id) ?? null;
   const selectedRecords = [
     ...selectedCalls.map((call) => ({ kind: "call" as const, date: call.completedAt, record: call })),
     ...selectedSessions.map((session) => ({ kind: "session" as const, date: session.completedAt ?? session.scheduledAt, record: session }))
@@ -1277,6 +1366,8 @@ function OfficerDashboard({
             <p className="empty-state">No schedule is available for this senior.</p>
           )}
         </section>
+
+        <SeniorRecordPanel record={selectedSeniorRecord} />
 
         <section className="volunteer-task-section priority-section">
           <SectionHeading title="Volunteer Tasks" meta={<span>{selectedOpenTasks.length} open</span>} />
@@ -1492,6 +1583,7 @@ function App() {
   const [loadedCalls, setLoadedCalls] = useState<CallRecord[]>([]);
   const [loadedSchedule, setLoadedSchedule] = useState<CheckInScheduleItem[]>([]);
   const [loadedScenarios, setLoadedScenarios] = useState<Scenario[]>([]);
+  const [loadedSeniorRecords, setLoadedSeniorRecords] = useState<SeniorRecord[]>([]);
   const [selectedSeniorId, setSelectedSeniorId] = useState("s-001");
 
   const refreshSchedule = async () => {
@@ -1504,15 +1596,21 @@ function App() {
     setLoadedTasks(nextTasks);
   };
 
+  const refreshSeniorRecords = async () => {
+    const nextRecords = await fetchSeniorRecords();
+    setLoadedSeniorRecords(nextRecords);
+  };
+
   useEffect(() => {
-    void Promise.all([fetchSeniors(), fetchSessions(), fetchVolunteerTasks(), fetchCalls(), fetchSchedule(), fetchScenarios()]).then(
-      ([nextSeniors, nextSessions, nextTasks, nextCalls, nextSchedule, nextScenarios]) => {
+    void Promise.all([fetchSeniors(), fetchSessions(), fetchVolunteerTasks(), fetchCalls(), fetchSchedule(), fetchScenarios(), fetchSeniorRecords()]).then(
+      ([nextSeniors, nextSessions, nextTasks, nextCalls, nextSchedule, nextScenarios, nextRecords]) => {
         setLoadedSeniors(nextSeniors);
         setLoadedSessions(nextSessions);
         setLoadedTasks(nextTasks);
         setLoadedCalls(nextCalls);
         setLoadedSchedule(nextSchedule);
         setLoadedScenarios(nextScenarios);
+        setLoadedSeniorRecords(nextRecords);
         setSelectedSeniorId(nextSeniors[0]?.id ?? "s-001");
       }
     );
@@ -1530,6 +1628,7 @@ function App() {
     const updated = await updateVolunteerTask(taskId, status);
     if (updated) {
       setLoadedTasks((tasks) => tasks.map((task) => (task.id === updated.id ? updated : task)));
+      await refreshSeniorRecords();
       return;
     }
     setLoadedTasks((tasks) => tasks.map((task) => (task.id === taskId ? { ...task, status } : task)));
@@ -1608,6 +1707,7 @@ function App() {
             setLoadedTasks(tasks);
             setSelectedSeniorId(session.seniorId);
             await refreshSchedule();
+            await refreshSeniorRecords();
           }}
           onOpenDashboard={() => setView("dashboard")}
         />
@@ -1621,6 +1721,7 @@ function App() {
               setLoadedCalls((calls) => [call, ...calls.filter((item) => item.id !== call.id)]);
               await refreshTasks();
               await refreshSchedule();
+              await refreshSeniorRecords();
             }}
           />
         </ConversationProvider>
@@ -1631,6 +1732,7 @@ function App() {
           tasks={loadedTasks}
           calls={loadedCalls}
           schedule={loadedSchedule}
+          records={loadedSeniorRecords}
           selectedSeniorId={selectedSeniorId}
           setSelectedSeniorId={setSelectedSeniorId}
           onStartCall={(id) => {

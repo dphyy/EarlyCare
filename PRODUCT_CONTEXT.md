@@ -35,8 +35,8 @@ Stroke is only a red-flag safety concern when the conversation indicates immedia
 1. Run the backend and frontend.
 2. Open **Demo runner**.
 3. Run one of seven scripted scenarios: Stable check-in, Missed check-in, Parkinson's watch, Post-Fall Amber, Post-Fall Red, Chronic Illness Check-In, or Mental Wellbeing / Loneliness.
-4. The backend persists a check-in record, generates the eight evidence categories, builds the escalation trail, and creates or updates volunteer tasks when follow-up is needed.
-5. Open **Patient overview** to review next due time, due/overdue status, history, risk scores, categories, transcripts, and task actions.
+4. The backend persists a check-in record, generates the eight evidence categories, builds the escalation trail, updates the senior-level categorized record, and creates or updates volunteer tasks when follow-up is needed.
+5. Open **Patient overview** to review next due time, due/overdue status, categorized history, risk scores, transcripts, escalation, and task actions.
 6. Use **Agents call** for the live ElevenLabs path when provider credentials are configured in `backend/.env`.
 
 ## Safety Language

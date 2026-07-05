@@ -18,12 +18,16 @@ from app.models import (
     CallRecord,
     CheckInScheduleItem,
     CheckInSession,
+    ConversationCategory,
     ProviderResult,
     RiskAssessment,
     RiskSignal,
     SavedCallResponse,
     Scenario,
     ScenarioRunResponse,
+    SeniorRecord,
+    SeniorRecordCategory,
+    SeniorRecordEvent,
     SpeechModelCardGate,
     SpeechEnrichmentRequest,
     SpeechModelProvenance,
@@ -242,6 +246,131 @@ def _build_schedule_items(now: datetime | None = None) -> list[CheckInScheduleIt
             )
         )
     return sorted(items, key=lambda item: ({"Overdue": 0, "Due now": 1, "Due soon": 2, "On track": 3}[item.status], item.nextDueAt))
+
+
+def _record_sort_time(value: str) -> datetime:
+    parsed = _parse_iso(value)
+    return _aware_datetime(parsed) if parsed else datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _record_category_is_relevant(category: ConversationCategory) -> bool:
+    return category.severity != "Green" or bool(category.evidence)
+
+
+def _record_event_categories(categories: list[ConversationCategory]) -> list[ConversationCategory]:
+    return [category for category in categories if _record_category_is_relevant(category)]
+
+
+def _highest_risk(levels: list[str]) -> str:
+    order = {"Green": 0, "Watch": 1, "Amber": 2, "Red": 3}
+    if not levels:
+        return "Green"
+    return max(levels, key=lambda level: order.get(level, 0))
+
+
+def _build_record_events(senior_id: str, checkins: list[CheckInSession], calls: list[CallRecord]) -> list[SeniorRecordEvent]:
+    events: list[SeniorRecordEvent] = []
+    for checkin in checkins:
+        if checkin.seniorId != senior_id:
+            continue
+        events.append(
+            SeniorRecordEvent(
+                id=checkin.id,
+                source="check-in",
+                occurredAt=checkin.completedAt or checkin.scheduledAt,
+                riskLevel=checkin.riskLevel,
+                status=checkin.status,
+                summary=checkin.summary,
+                recommendedAction=checkin.recommendedAction,
+                categories=_record_event_categories(checkin.categories),
+            )
+        )
+    for call in calls:
+        if call.seniorId != senior_id:
+            continue
+        events.append(
+            SeniorRecordEvent(
+                id=call.id,
+                source="call",
+                occurredAt=call.completedAt,
+                riskLevel=call.riskLevel,
+                status=call.status,
+                summary=call.englishTranscript.splitlines()[0][:180] if call.englishTranscript else "Saved Agents call.",
+                recommendedAction=call.recommendedAction,
+                categories=_record_event_categories(call.categories),
+            )
+        )
+    return sorted(events, key=lambda event: _record_sort_time(event.occurredAt), reverse=True)
+
+
+def _aggregate_record_categories(events: list[SeniorRecordEvent]) -> list[SeniorRecordCategory]:
+    aggregates: dict[str, dict[str, object]] = {}
+    order = {"Green": 0, "Watch": 1, "Amber": 2, "Red": 3}
+    for event in events:
+        for category in event.categories:
+            current = aggregates.setdefault(
+                category.id,
+                {
+                    "label": category.label,
+                    "highestSeverity": category.severity,
+                    "recordCount": 0,
+                    "latestAt": event.occurredAt,
+                    "latestEvidence": [],
+                    "recommendedAction": category.recommendedAction,
+                },
+            )
+            current["recordCount"] = int(current["recordCount"]) + 1
+            if order[category.severity] > order[str(current["highestSeverity"])]:
+                current["highestSeverity"] = category.severity
+            if _record_sort_time(event.occurredAt) >= _record_sort_time(str(current["latestAt"])):
+                current["latestAt"] = event.occurredAt
+                current["recommendedAction"] = category.recommendedAction
+            evidence = list(current["latestEvidence"])
+            for item in category.evidence:
+                if item not in evidence:
+                    evidence.append(item)
+            current["latestEvidence"] = evidence[:4]
+
+    return sorted(
+        [
+            SeniorRecordCategory(
+                id=category_id,  # type: ignore[arg-type]
+                label=str(values["label"]),
+                highestSeverity=values["highestSeverity"],  # type: ignore[arg-type]
+                recordCount=int(values["recordCount"]),
+                latestAt=values["latestAt"],  # type: ignore[arg-type]
+                latestEvidence=values["latestEvidence"],  # type: ignore[arg-type]
+                recommendedAction=str(values["recommendedAction"]),
+            )
+            for category_id, values in aggregates.items()
+        ],
+        key=lambda category: (-order[category.highestSeverity], -(category.recordCount), category.label),
+    )
+
+
+def _build_senior_records() -> list[SeniorRecord]:
+    checkins = [_enrich_session(checkin) for checkin in _load_checkins()]
+    calls = [_enrich_call_record(call) for call in _load_calls()]
+    tasks = _load_tasks()
+    records: list[SeniorRecord] = []
+    for senior in SENIORS:
+        events = _build_record_events(senior.id, checkins, calls)
+        open_task_count = len([task for task in tasks if task.seniorId == senior.id and task.status != "Closed"])
+        records.append(
+            SeniorRecord(
+                seniorId=senior.id,
+                seniorName=senior.name,
+                livingAlone=senior.livingAlone,
+                checkInFrequencyDays=senior.checkInFrequencyDays,
+                totalRecords=len(events),
+                openTaskCount=open_task_count,
+                highestRiskLevel=_highest_risk([event.riskLevel for event in events]),  # type: ignore[arg-type]
+                latestRecordAt=events[0].occurredAt if events else None,
+                categories=_aggregate_record_categories(events),
+                timeline=events,
+            )
+        )
+    return records
 
 
 def _transcript_to_text(messages: list[TranscriptMessage]) -> str:
@@ -919,6 +1048,19 @@ def get_senior(senior_id: str) -> Senior:
 def get_checkins() -> list[CheckInSession]:
     records = [_enrich_session(checkin) for checkin in _load_checkins()]
     return sorted(records, key=lambda record: record.completedAt or record.scheduledAt, reverse=True)
+
+
+@app.get("/senior-records", response_model=list[SeniorRecord])
+def get_senior_records() -> list[SeniorRecord]:
+    return _build_senior_records()
+
+
+@app.get("/seniors/{senior_id}/record", response_model=SeniorRecord)
+def get_senior_record(senior_id: str) -> SeniorRecord:
+    for record in _build_senior_records():
+        if record.seniorId == senior_id:
+            return record
+    raise HTTPException(status_code=404, detail="Senior record not found")
 
 
 @app.get("/schedule", response_model=list[CheckInScheduleItem])
