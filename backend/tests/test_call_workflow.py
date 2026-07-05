@@ -27,6 +27,45 @@ class CallWorkflowTests(unittest.TestCase):
         with patch.dict(main.os.environ, {"FRONTEND_ORIGINS": "http://example.test, http://localhost:3000"}):
             self.assertEqual(main._cors_origins(), ["http://example.test", "http://localhost:3000"])
 
+    def test_atomic_text_write_preserves_existing_file_when_replace_fails(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "state" / "checkins.json"
+            path.parent.mkdir(parents=True)
+            path.write_text("existing", encoding="utf-8")
+
+            with patch.object(Path, "replace", side_effect=OSError("replace failed")):
+                with self.assertRaises(OSError):
+                    main._write_text_atomic(path, "replacement")
+
+            self.assertEqual(path.read_text(encoding="utf-8"), "existing")
+            self.assertEqual(list(path.parent.glob(".checkins.json.*.tmp")), [])
+
+    def test_checkin_state_remains_readable_when_atomic_replace_fails(self) -> None:
+        with TemporaryDirectory() as tmp:
+            original_state_root = main.STATE_STORAGE_ROOT
+            original_checkins_path = main.CHECKINS_STATE_PATH
+            original_tasks_path = main.TASKS_STATE_PATH
+            state_root = Path(tmp) / "state"
+            main.STATE_STORAGE_ROOT = state_root
+            main.CHECKINS_STATE_PATH = state_root / "checkins.json"
+            main.TASKS_STATE_PATH = state_root / "volunteer-tasks.json"
+            try:
+                seeded = main._load_checkins()
+                original_summary = seeded[0].summary
+                changed = [seeded[0].model_copy(update={"summary": "should not replace existing state"})]
+
+                with patch.object(Path, "replace", side_effect=OSError("replace failed")):
+                    with self.assertRaises(OSError):
+                        main._save_checkins(changed)
+
+                reloaded = main._load_checkins()
+                self.assertEqual(reloaded[0].summary, original_summary)
+                self.assertNotIn("should not replace", main.CHECKINS_STATE_PATH.read_text(encoding="utf-8"))
+            finally:
+                main.STATE_STORAGE_ROOT = original_state_root
+                main.CHECKINS_STATE_PATH = original_checkins_path
+                main.TASKS_STATE_PATH = original_tasks_path
+
     def test_schedule_items_use_frequency_and_last_contact(self) -> None:
         with TemporaryDirectory() as tmp:
             original_state_root = main.STATE_STORAGE_ROOT
@@ -562,6 +601,70 @@ class CallWorkflowTests(unittest.TestCase):
         assert enriched.speechModelProvenance is not None
         self.assertEqual(enriched.speechModelProvenance.runtimeMode, "demo metrics")
         self.assertFalse(enriched.speechModelProvenance.validated)
+
+    def test_speech_enrichment_keeps_existing_metadata_when_atomic_replace_fails(self) -> None:
+        with TemporaryDirectory() as tmp:
+            original_storage_root = main.CALL_STORAGE_ROOT
+            main.CALL_STORAGE_ROOT = Path(tmp)
+            call_dir = main.CALL_STORAGE_ROOT / "call-atomic"
+            call_dir.mkdir(parents=True)
+            metadata_path = call_dir / "metadata.json"
+            try:
+                call = main.CallRecord(
+                    id="call-atomic",
+                    seniorId="s-001",
+                    seniorName="Mdm Tan Bee Hoon",
+                    startedAt="2026-07-04T10:00:00+08:00",
+                    completedAt="2026-07-04T10:05:00+08:00",
+                    status="Complete",
+                    riskLevel="Green",
+                    originalTranscript="Patient: I am okay.",
+                    englishTranscript="Patient: I am okay.",
+                    transcriptMessages=[TranscriptMessage(role="Senior", text="I am okay.", timestamp="2026-07-04T10:01:00+08:00")],
+                    translationProvider="test",
+                    translationFallbackUsed=False,
+                    audioAvailable=False,
+                    riskAssessment=RiskAssessment(
+                        speechDeviationScore=0,
+                        parkinsonsWatchScore=0,
+                        postFallConcernScore=0,
+                        missedCheckInScore=0,
+                        riskLevel="Green",
+                        reasons=["No concerning symptoms and speech remains close to baseline"],
+                    ),
+                    recommendedAction="Continue routine scheduled check-ins.",
+                )
+                metadata_path.write_text(call.model_dump_json(indent=2), encoding="utf-8")
+                request = main.SpeechEnrichmentRequest.model_validate(
+                    {
+                        "embedding": [0.1, 0.2, 0.3],
+                        "speech_metrics": {
+                            "speechRate": 118,
+                            "avgPauseMs": 520,
+                            "responseLatencyMs": 990,
+                            "pitchVariability": 0.48,
+                            "phraseAccuracy": 0.94,
+                            "embedding": [0.1, 0.2, 0.3],
+                            "updatedAt": "2026-07-04T10:06:00+08:00",
+                        },
+                        "provenance": {
+                            "model": "demo",
+                            "model_name": "demo-standard-library",
+                            "extracted_at": "2026-07-04T10:06:00+08:00",
+                        },
+                    }
+                )
+
+                with patch.object(Path, "replace", side_effect=OSError("replace failed")):
+                    with self.assertRaises(OSError):
+                        main.enrich_call_speech("call-atomic", request)
+
+                stored = main._load_call_record(metadata_path)
+                self.assertIsNone(stored.currentSpeechProfile)
+                self.assertIsNone(stored.speechModelProvenance)
+                self.assertEqual(list(call_dir.glob(".metadata.json.*.tmp")), [])
+            finally:
+                main.CALL_STORAGE_ROOT = original_storage_root
 
     def test_speech_enrichment_endpoint_stores_offline_embedding_without_changing_risk(self) -> None:
         with TemporaryDirectory() as tmp:

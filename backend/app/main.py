@@ -1,7 +1,9 @@
 import os
 import json
 import re
+from contextlib import suppress
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -129,31 +131,74 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _fsync_parent_directory(path: Path) -> None:
+    directory_flag = getattr(os, "O_DIRECTORY", 0)
+    try:
+        directory_fd = os.open(path.parent, os.O_RDONLY | directory_flag)
+    except OSError:
+        return
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+def _write_text_atomic(path: Path, payload: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            temporary_file.write(payload)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        temporary_path.replace(path)
+        _fsync_parent_directory(path)
+    finally:
+        if temporary_path and temporary_path.exists():
+            with suppress(OSError):
+                temporary_path.unlink()
+
+
+def _write_bytes_atomic(path: Path, payload: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with NamedTemporaryFile("wb", dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            temporary_file.write(payload)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        temporary_path.replace(path)
+        _fsync_parent_directory(path)
+    finally:
+        if temporary_path and temporary_path.exists():
+            with suppress(OSError):
+                temporary_path.unlink()
+
+
 def _state_json_default(path: Path, fallback: str) -> None:
     if path.exists():
         return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(fallback)
+    _write_text_atomic(path, fallback)
 
 
 def _load_checkins() -> list[CheckInSession]:
     _state_json_default(CHECKINS_STATE_PATH, json.dumps([checkin.model_dump() for checkin in CHECKINS], indent=2))
-    return [CheckInSession.model_validate(item) for item in json.loads(CHECKINS_STATE_PATH.read_text())]
+    return [CheckInSession.model_validate(item) for item in json.loads(CHECKINS_STATE_PATH.read_text(encoding="utf-8"))]
 
 
 def _save_checkins(checkins: list[CheckInSession]) -> None:
-    STATE_STORAGE_ROOT.mkdir(parents=True, exist_ok=True)
-    CHECKINS_STATE_PATH.write_text(json.dumps([checkin.model_dump() for checkin in checkins], indent=2))
+    _write_text_atomic(CHECKINS_STATE_PATH, json.dumps([checkin.model_dump() for checkin in checkins], indent=2))
 
 
 def _load_tasks() -> list[VolunteerTask]:
     _state_json_default(TASKS_STATE_PATH, json.dumps([task.model_dump() for task in VOLUNTEER_TASKS], indent=2))
-    return [VolunteerTask.model_validate(item) for item in json.loads(TASKS_STATE_PATH.read_text())]
+    return [VolunteerTask.model_validate(item) for item in json.loads(TASKS_STATE_PATH.read_text(encoding="utf-8"))]
 
 
 def _save_tasks(tasks: list[VolunteerTask]) -> None:
-    STATE_STORAGE_ROOT.mkdir(parents=True, exist_ok=True)
-    TASKS_STATE_PATH.write_text(json.dumps([task.model_dump() for task in tasks], indent=2))
+    _write_text_atomic(TASKS_STATE_PATH, json.dumps([task.model_dump() for task in tasks], indent=2))
 
 
 def _call_metadata_path(call_id: str) -> Path:
@@ -1420,7 +1465,7 @@ def _openai_risk_review(english_transcript: str, segments: list[TranscriptSegmen
 
 
 def _load_call_record(path: Path) -> CallRecord:
-    return CallRecord.model_validate_json(path.read_text())
+    return CallRecord.model_validate_json(path.read_text(encoding="utf-8"))
 
 
 def _enrich_call_record(call: CallRecord) -> CallRecord:
@@ -1648,7 +1693,7 @@ async def save_call(
     audio_path: Path | None = None
     if audio is not None:
         audio_path = call_dir / "full-call.webm"
-        audio_path.write_bytes(await audio.read())
+        _write_bytes_atomic(audio_path, await audio.read())
         audio_file_path = str(audio_path)
 
     dialogue_transcript = _transcript_to_text(messages)
@@ -1681,8 +1726,8 @@ async def save_call(
     audio_url = f"/calls/{call_id}/audio" if audio_file_path else None
     current_speech_profile = _estimate_current_speech_profile(messages, startedAt, completedAt, translation.segments, audio_path)
 
-    (call_dir / "transcript-original.json").write_text(json.dumps([message.model_dump() for message in messages], indent=2))
-    (call_dir / "transcript-english.txt").write_text(english_transcript)
+    _write_text_atomic(call_dir / "transcript-original.json", json.dumps([message.model_dump() for message in messages], indent=2))
+    _write_text_atomic(call_dir / "transcript-english.txt", english_transcript)
 
     call = CallRecord(
         id=call_id,
@@ -1711,7 +1756,7 @@ async def save_call(
         categories=categories,
         escalationPlan=escalation_plan,
     )
-    _call_metadata_path(call_id).write_text(call.model_dump_json(indent=2))
+    _write_text_atomic(_call_metadata_path(call_id), call.model_dump_json(indent=2))
     _upsert_task_for_call(call, senior)
     return SavedCallResponse(call=call)
 
@@ -1731,7 +1776,7 @@ def enrich_call_speech(call_id: str, request: SpeechEnrichmentRequest) -> CallRe
             "speechModelProvenance": speech_model_provenance,
         }
     )
-    path.write_text(updated.model_dump_json(indent=2))
+    _write_text_atomic(path, updated.model_dump_json(indent=2))
     return _enrich_call_record(updated)
 
 
