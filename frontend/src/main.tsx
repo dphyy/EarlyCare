@@ -1232,11 +1232,14 @@ function OfficerDashboard({
       </section>
 
       <section className="panel detail-panel">
-        <div className="profile-header">
+        <div className={`profile-header profile-risk-${highestRisk.toLowerCase()}`}>
           <div className="profile-copy">
-            <div>
-              <span className="eyebrow">Patient overview</span>
-              <h2>{selectedSenior.name}</h2>
+            <div className="profile-title-block">
+              <div>
+                <span className="eyebrow">Patient overview</span>
+                <h2>{selectedSenior.name}</h2>
+              </div>
+              <RiskBadge level={highestRisk} />
               <p>
                 Lives alone in {selectedSenior.addressZone}. Check-in every {selectedSenior.checkInFrequencyDays} days.
               </p>
@@ -1263,9 +1266,23 @@ function OfficerDashboard({
                 <small>{selectedSenior.caregiverContact}</small>
               </div>
             </div>
+            <div className="contact-route-grid" aria-label="Care contact route">
+              <span>
+                <UserRoundCheck size={15} />
+                {selectedSenior.caregiverContact}
+              </span>
+              <span>
+                <UsersRound size={15} />
+                {selectedSenior.neighborContact ?? "Neighbour not listed"}
+              </span>
+              <span>
+                <Stethoscope size={15} />
+                {selectedSenior.knownConditions.join(", ")}
+              </span>
+            </div>
           </div>
           <div className="profile-actions">
-            <RiskBadge level={highestRisk} />
+            <span className="profile-action-label">Next action</span>
             <div className="profile-action-buttons">
               <button className="secondary-action" onClick={() => void copyCareHandoff()} type="button">
                 <ClipboardList size={18} />
@@ -1279,13 +1296,6 @@ function OfficerDashboard({
             {handoffCopyStatus ? <small className="copy-status" aria-live="polite">{handoffCopyStatus}</small> : null}
           </div>
         </div>
-
-        <OperationsQueuePanel
-          queue={operationsQueue}
-          selectedSeniorId={selectedSenior.id}
-          onOpenSenior={setSelectedSeniorId}
-          onStartCall={onStartCall}
-        />
 
         <section className={`profile-handoff handoff-${highestRisk.toLowerCase()}`}>
           <div className="handoff-icon">
@@ -1309,6 +1319,13 @@ function OfficerDashboard({
             </span>
           </div>
         </section>
+
+        <OperationsQueuePanel
+          queue={operationsQueue}
+          selectedSeniorId={selectedSenior.id}
+          onOpenSenior={setSelectedSeniorId}
+          onStartCall={onStartCall}
+        />
 
         <section className={`schedule-panel schedule-panel-${selectedSchedule?.status.toLowerCase().replaceAll(" ", "-") ?? "none"}`}>
           <SectionHeading
@@ -1406,13 +1423,6 @@ function OfficerDashboard({
           </div>
         </section>
 
-        <div className="metric-grid">
-          <StatCard label="Language" value={selectedSenior.preferredLanguage} icon={<Languages size={20} />} />
-          <StatCard label="Caregiver" value={selectedSenior.caregiverContact} icon={<UserRoundCheck size={20} />} />
-          <StatCard label="Neighbour" value={selectedSenior.neighborContact ?? "Not listed"} icon={<UsersRound size={20} />} />
-          <StatCard label="Known conditions" value={selectedSenior.knownConditions.join(", ")} icon={<Stethoscope size={20} />} />
-        </div>
-
         <div className="focus-strip">
           {selectedSenior.promptFocus.map((item) => (
             <span key={item}>
@@ -1422,35 +1432,37 @@ function OfficerDashboard({
           ))}
         </div>
 
-        <SpeechTimingPanel senior={selectedSenior} call={selectedCalls[0] ?? null} calls={selectedCalls} />
+        <div className="decision-grid">
+          <SpeechTimingPanel senior={selectedSenior} call={selectedCalls[0] ?? null} calls={selectedCalls} />
 
-        <section className="analysis-panel dashboard-analysis">
-          <div className="analysis-header">
-            <div>
-              <span className="eyebrow">Decision support</span>
-              <h2>Latest Risk Review</h2>
-            </div>
-            <RiskBadge level={latestRecord?.riskLevel ?? "Green"} />
-          </div>
-          {latestAssessment && latestRecord ? (
-            <>
-              <ScoreBars assessment={latestAssessment} />
-              <div className="reason-box">
-                <SectionHeading title="Reasons" meta={<span>{latestAssessment.reasons.length} signals</span>} />
-                <ul>
-                  {latestAssessment.reasons.map((reason) => (
-                    <li key={reason}>{reason}</li>
-                  ))}
-                </ul>
+          <section className="analysis-panel dashboard-analysis">
+            <div className="analysis-header">
+              <div>
+                <span className="eyebrow">Decision support</span>
+                <h2>Latest Risk Review</h2>
               </div>
-              <CategoryList categories={latestRecord.categories ?? []} />
-              <SectionHeading title="Escalation path" meta={<span>{(latestRecord.escalationPlan ?? []).filter((step) => step.status === "Triggered").length} triggered</span>} />
-              <EscalationTrail steps={latestRecord.escalationPlan ?? []} />
-            </>
-          ) : (
-            <p className="empty-state">No risk assessment is available for this senior yet.</p>
-          )}
-        </section>
+              <RiskBadge level={latestRecord?.riskLevel ?? "Green"} />
+            </div>
+            {latestAssessment && latestRecord ? (
+              <>
+                <ScoreBars assessment={latestAssessment} />
+                <div className="reason-box">
+                  <SectionHeading title="Reasons" meta={<span>{latestAssessment.reasons.length} signals</span>} />
+                  <ul>
+                    {latestAssessment.reasons.map((reason) => (
+                      <li key={reason}>{reason}</li>
+                    ))}
+                  </ul>
+                </div>
+                <CategoryList categories={latestRecord.categories ?? []} />
+                <SectionHeading title="Escalation path" meta={<span>{(latestRecord.escalationPlan ?? []).filter((step) => step.status === "Triggered").length} triggered</span>} />
+                <EscalationTrail steps={latestRecord.escalationPlan ?? []} />
+              </>
+            ) : (
+              <p className="empty-state">No risk assessment is available for this senior yet.</p>
+            )}
+          </section>
+        </div>
 
         <section className="history-section">
           <SectionHeading title="Check-In History" meta={<span>{selectedSessions.length} records</span>} />
@@ -1686,6 +1698,10 @@ function App() {
   const dueNow = loadedSchedule.filter((item) => item.status === "Due now" || item.status === "Overdue").length;
   const activeQueueItems = loadedOperationsQueue.filter((item) => item.priority !== "Routine").sort((a, b) => a.queueRank - b.queueRank);
   const topQueueItem = activeQueueItems[0] ?? null;
+  const queuePriorityCounts = ["Emergency", "Today", "Due", "Routine"].map((priority) => ({
+    priority,
+    count: loadedOperationsQueue.filter((item) => item.priority === priority).length
+  }));
 
   const handleTaskStatus = async (taskId: string, status: VolunteerTask["status"]) => {
     const updated = await updateVolunteerTask(taskId, status);
@@ -1816,6 +1832,21 @@ function App() {
                 <RefreshCw className={isRefreshing ? "spin" : undefined} size={18} />
                 {isRefreshing ? "Refreshing..." : "Refresh"}
               </button>
+            </div>
+          </div>
+          <div className="queue-pressure-strip" aria-label="Operations queue pressure">
+            <div className="pressure-summary">
+              <span className="eyebrow">Queue pressure</span>
+              <strong>{activeQueueItems.length} active</strong>
+              <small>{loadedSeniors.length} seniors covered</small>
+            </div>
+            <div className="pressure-segments">
+              {queuePriorityCounts.map((item) => (
+                <span className={`pressure-segment pressure-${item.priority.toLowerCase()}`} key={item.priority}>
+                  <strong>{item.count}</strong>
+                  <small>{item.priority}</small>
+                </span>
+              ))}
             </div>
           </div>
           <div className="routing-strip" aria-label="EarlyCare escalation route">
