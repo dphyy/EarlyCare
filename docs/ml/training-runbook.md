@@ -76,7 +76,7 @@ python3 research/speech_ml/run_experiment.py \
   --model demo
 ```
 
-The runner writes embeddings, a speaker-level evaluation JSON file, a baseline model artifact, a markdown experiment report, a draft model card, and a conservative `model_card_gate.json`. It refuses `needs-review` manifest rows unless `--allow-review-rows` is explicitly passed.
+The runner writes embeddings, a speaker-level evaluation JSON file, a baseline model artifact, personal-baseline drift thresholds, a markdown experiment report, a draft model card, and a conservative `model_card_gate.json`. It refuses `needs-review` manifest rows unless `--allow-review-rows` is explicitly passed.
 
 Manual commands are still available when a step needs to be inspected separately.
 
@@ -91,7 +91,7 @@ python3 research/speech_ml/run_experiment.py \
   --language Turkish
 ```
 
-This writes feature rows, a speaker-level evaluation JSON file, a baseline model artifact, a markdown report, and a model-card draft. Manual commands are still available when a step needs to be inspected separately:
+This writes feature rows, a speaker-level evaluation JSON file, a baseline model artifact, personal-baseline drift thresholds when enough repeated samples exist, a markdown report, and a model-card draft. Manual commands are still available when a step needs to be inspected separately:
 
 ```bash
 python3 research/speech_ml/convert_feature_table.py \
@@ -109,6 +109,11 @@ python3 research/speech_ml/train_baseline.py \
   --input research/artifacts/uci_parkinson_feature_rows.jsonl \
   --output research/artifacts/uci_parkinson_feature_model.json \
   --positive-labels pd,parkinson,parkinsonian
+
+python3 research/speech_ml/build_personal_baselines.py \
+  --input research/artifacts/uci_parkinson_feature_rows.jsonl \
+  --output research/artifacts/uci_parkinson_personal_baselines.json \
+  --min-samples 3
 ```
 
 Treat this as feature-table validation only. It does not prove raw-audio embedding performance.

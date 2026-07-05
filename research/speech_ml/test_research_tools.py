@@ -7,7 +7,15 @@ import unittest
 import wave
 from pathlib import Path
 
-from research.speech_ml import convert_feature_table, evaluate_baseline, extract_embeddings, prepare_manifest, run_experiment, train_baseline
+from research.speech_ml import (
+    build_personal_baselines,
+    convert_feature_table,
+    evaluate_baseline,
+    extract_embeddings,
+    prepare_manifest,
+    run_experiment,
+    train_baseline,
+)
 
 
 def write_wav(path: Path, frequency: float) -> None:
@@ -102,9 +110,13 @@ class ResearchToolTests(unittest.TestCase):
             manifest_path = root / "datasets" / "sample_manifest.csv"
             output_dir = root / "artifacts"
             write_wav(audio_root / "pd" / "pd-001" / "ddk" / "a.wav", 220)
+            write_wav(audio_root / "pd" / "pd-001" / "vowels" / "e.wav", 225)
             write_wav(audio_root / "pd" / "pd-002" / "ddk" / "a.wav", 240)
+            write_wav(audio_root / "pd" / "pd-002" / "vowels" / "e.wav", 245)
             write_wav(audio_root / "control" / "control-001" / "ddk" / "a.wav", 260)
+            write_wav(audio_root / "control" / "control-001" / "vowels" / "e.wav", 265)
             write_wav(audio_root / "control" / "control-002" / "ddk" / "a.wav", 280)
+            write_wav(audio_root / "control" / "control-002" / "vowels" / "e.wav", 285)
             prepare_manifest.main(
                 [
                     "--audio-root",
@@ -130,6 +142,8 @@ class ResearchToolTests(unittest.TestCase):
                     "demo-run",
                     "--test-fraction",
                     "0.5",
+                    "--personal-min-samples",
+                    "2",
                 ]
             )
 
@@ -137,13 +151,17 @@ class ResearchToolTests(unittest.TestCase):
             embeddings_path = output_dir / "demo-run_embeddings.jsonl"
             evaluation_path = output_dir / "demo-run_eval.json"
             model_path = output_dir / "demo-run_baseline_model.json"
+            personal_baseline_path = output_dir / "demo-run_personal_baselines.json"
             report_path = output_dir / "demo-run_experiment.md"
             model_card_path = output_dir / "demo-run_model_card.md"
             model_card_gate_path = output_dir / "demo-run_model_card_gate.json"
             self.assertTrue(embeddings_path.exists())
-            self.assertEqual(len(embeddings_path.read_text().splitlines()), 4)
+            self.assertEqual(len(embeddings_path.read_text().splitlines()), 8)
             self.assertEqual(json.loads(evaluation_path.read_text())["status"], "ok")
             self.assertEqual(json.loads(model_path.read_text())["status"], "ok")
+            personal_baselines = json.loads(personal_baseline_path.read_text())
+            self.assertEqual(personal_baselines["status"], "ok")
+            self.assertEqual(personal_baselines["speakers_with_baselines"], 4)
             gate = json.loads(model_card_gate_path.read_text())
             self.assertTrue(gate["speakerSplitVerified"])
             self.assertTrue(gate["evaluationMetricsRecorded"])
@@ -154,6 +172,7 @@ class ResearchToolTests(unittest.TestCase):
             self.assertIn("offline research only", report)
             self.assertIn("Rows needing review: 0", report)
             self.assertIn("Subgroup Checks", report)
+            self.assertIn("Personal baselines", report)
             self.assertIn("Model card draft", report)
 
     def test_run_experiment_refuses_unreviewed_manifest_rows(self) -> None:
@@ -214,6 +233,8 @@ class ResearchToolTests(unittest.TestCase):
                     "Turkish",
                     "--test-fraction",
                     "0.5",
+                    "--personal-min-samples",
+                    "2",
                 ]
             )
 
@@ -222,10 +243,12 @@ class ResearchToolTests(unittest.TestCase):
             report_path = output_dir / "feature-run_experiment.md"
             evaluation_path = output_dir / "feature-run_eval.json"
             model_path = output_dir / "feature-run_baseline_model.json"
+            personal_baseline_path = output_dir / "feature-run_personal_baselines.json"
             model_card_path = output_dir / "feature-run_model_card.md"
             model_card_gate_path = output_dir / "feature-run_model_card_gate.json"
             self.assertEqual(json.loads(evaluation_path.read_text())["status"], "ok")
             self.assertEqual(json.loads(model_path.read_text())["status"], "ok")
+            self.assertEqual(json.loads(personal_baseline_path.read_text())["speakers_with_baselines"], 4)
             self.assertFalse(json.loads(model_card_gate_path.read_text())["subgroupChecksReviewed"])
             first_row = json.loads(rows_path.read_text().splitlines()[0])
             self.assertEqual(first_row["provenance"]["source_type"], "feature_table")
@@ -234,6 +257,30 @@ class ResearchToolTests(unittest.TestCase):
             self.assertIn("Model: `feature-table-zscore`", report)
             self.assertIn("Source Type", report)
             self.assertIn("feature table", model_card_path.read_text())
+
+    def test_build_personal_baselines_writes_thresholds_and_insufficient_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            input_path = root / "embeddings.jsonl"
+            output_path = root / "personal.json"
+            rows = [
+                {"dataset": "sample", "speaker_id": "s-1", "label": "control", "task": "repeat", "embedding": [1.0, 0.0]},
+                {"dataset": "sample", "speaker_id": "s-1", "label": "control", "task": "repeat", "embedding": [0.98, 0.02]},
+                {"dataset": "sample", "speaker_id": "s-1", "label": "control", "task": "repeat", "embedding": [0.97, 0.03]},
+                {"dataset": "sample", "speaker_id": "s-2", "label": "control", "task": "repeat", "embedding": [0.0, 1.0]},
+            ]
+            input_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+
+            exit_code = build_personal_baselines.main(["--input", str(input_path), "--output", str(output_path), "--min-samples", "3"])
+
+            self.assertEqual(exit_code, 0)
+            report = json.loads(output_path.read_text())
+            self.assertEqual(report["status"], "ok")
+            baselines = {item["speaker_id"]: item for item in report["baselines"]}
+            self.assertEqual(baselines["s-1"]["status"], "ok")
+            self.assertIn("watch", baselines["s-1"]["thresholds"])
+            self.assertEqual(baselines["s-2"]["status"], "insufficient-data")
+            self.assertIn("diagnosis", report["safety"]["excluded_use"])
 
     def test_convert_feature_table_writes_evaluable_jsonl(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

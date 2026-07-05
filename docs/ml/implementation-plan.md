@@ -88,6 +88,7 @@ Speech ML can add support through slower response, large acute baseline deviatio
 | Feature extractor interface | Done | `backend/app/speech_features.py`, `backend/tests/test_speech_features.py` |
 | Offline embedding job | Done | `research/speech_ml/extract_embeddings.py`, `research/speech_ml/README.md` |
 | Feature-table converter | Done | `research/speech_ml/convert_feature_table.py`, `research/speech_ml/run_experiment.py`, `research/speech_ml/test_research_tools.py` |
+| Personal-baseline builder | Done | `research/speech_ml/build_personal_baselines.py`, `research/speech_ml/run_experiment.py`, `research/speech_ml/test_research_tools.py` |
 | Offline baseline trainer | Done | `research/speech_ml/train_baseline.py`, `docs/ml/training-runbook.md` |
 | Offline experiment runner | Done | `research/speech_ml/run_experiment.py`, `research/speech_ml/test_research_tools.py`; writes experiment report, model-card draft, and gate JSON. |
 | Evaluation harness | Done | `research/speech_ml/evaluate_baseline.py`, `research/speech_ml/metrics.md` |

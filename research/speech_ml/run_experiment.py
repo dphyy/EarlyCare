@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
-from research.speech_ml import convert_feature_table, evaluate_baseline, extract_embeddings, train_baseline
+from research.speech_ml import build_personal_baselines, convert_feature_table, evaluate_baseline, extract_embeddings, train_baseline
 
 
 def utc_now() -> str:
@@ -77,6 +77,7 @@ def artifact_paths(output_dir: Path, slug: str) -> dict[str, Path]:
         "embeddings": output_dir / f"{slug}_embeddings.jsonl",
         "evaluation": output_dir / f"{slug}_eval.json",
         "model": output_dir / f"{slug}_baseline_model.json",
+        "personal_baselines": output_dir / f"{slug}_personal_baselines.json",
         "report": output_dir / f"{slug}_experiment.md",
         "model_card": output_dir / f"{slug}_model_card.md",
         "model_card_gate": output_dir / f"{slug}_model_card_gate.json",
@@ -156,6 +157,17 @@ def training_args(args: argparse.Namespace, embeddings_path: Path, model_path: P
         str(model_path),
         "--positive-labels",
         args.positive_labels,
+    ]
+
+
+def personal_baseline_args(args: argparse.Namespace, embeddings_path: Path, output_path: Path) -> list[str]:
+    return [
+        "--input",
+        str(embeddings_path),
+        "--output",
+        str(output_path),
+        "--min-samples",
+        str(args.personal_min_samples),
     ]
 
 
@@ -264,6 +276,7 @@ def write_model_card(
         f"- Downstream model: {model.get('model_type') or 'speaker-centroid-baseline'}",
         f"- Experiment report: `{paths['report']}`",
         f"- Release-gate JSON: `{paths['model_card_gate']}`",
+        f"- Personal baseline artifact: `{paths['personal_baselines']}`",
         "",
         "## Intended Use",
         "",
@@ -302,6 +315,7 @@ def write_model_card(
             "- Retention period: review required.",
             "- Storage location: local `research/datasets/` and `research/artifacts/` only.",
             "- Derived artifacts created: embeddings/features, evaluation report, baseline model, experiment report, model-card draft.",
+            "- Personal baseline artifact: per-speaker centroid and drift-threshold draft for offline review.",
             "",
             "## Preprocessing",
             "",
@@ -412,6 +426,7 @@ def write_report(
         f"- Embeddings: `{paths['embeddings']}`",
         f"- Evaluation: `{paths['evaluation']}`",
         f"- Baseline model: `{paths['model']}`",
+        f"- Personal baselines: `{paths['personal_baselines']}`",
         f"- Model card draft: `{paths['model_card']}`",
         f"- Model card gate JSON: `{paths['model_card_gate']}`",
         "",
@@ -465,6 +480,12 @@ def write_report(
             f"- Embedding dimensions: {model.get('embedding_dimensions')}",
             f"- Train balanced accuracy: {model.get('train_balanced_accuracy')}",
             "",
+            "## Personal Baselines",
+            "",
+            f"- Artifact: `{paths['personal_baselines']}`",
+            f"- Minimum samples per speaker: {args.personal_min_samples}",
+            "- Use: offline within-person speech drift review only.",
+            "",
             "## Safety Notes",
             "",
             "- This artifact can support speech-deviation research only.",
@@ -493,6 +514,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--test-dataset", help="Test only on this dataset name.")
     parser.add_argument("--limit", type=int, help="Process only the first N manifest rows.")
     parser.add_argument("--allow-review-rows", action="store_true", help="Allow rows marked needs-review to proceed.")
+    parser.add_argument("--personal-min-samples", type=int, default=3, help="Minimum repeated samples per speaker for personal baseline artifact.")
     parser.add_argument("--dataset", default="UCI Parkinson Speech", help="Dataset name for --feature-table mode.")
     parser.add_argument("--language", default="", help="Language stored in feature-table provenance.")
     parser.add_argument("--speaker-column", help="Feature-table speaker/subject column.")
@@ -505,6 +527,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if (args.train_dataset and not args.test_dataset) or (args.test_dataset and not args.train_dataset):
         parser.error("--train-dataset and --test-dataset must be provided together")
+    if args.personal_min_samples < 2:
+        parser.error("--personal-min-samples must be at least 2")
     if not args.experiment_name:
         input_stem = args.manifest.stem if args.manifest else args.feature_table.stem
         model_name = args.model if args.manifest else "feature-table"
@@ -541,6 +565,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     evaluate_baseline.main(evaluation_args(args, paths["embeddings"], paths["evaluation"]))
     train_baseline.main(training_args(args, paths["embeddings"], paths["model"]))
+    build_personal_baselines.main(personal_baseline_args(args, paths["embeddings"], paths["personal_baselines"]))
 
     evaluation = read_json(paths["evaluation"])
     model = read_json(paths["model"])

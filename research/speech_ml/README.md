@@ -55,6 +55,7 @@ python3 research/speech_ml/run_experiment.py \
 
 The runner refuses manifests with `review_status=needs-review` unless `--allow-review-rows` is explicitly passed.
 It also writes a draft model card and conservative `model_card_gate.json`; human-review fields stay false until they are manually reviewed.
+Every run also writes `*_personal_baselines.json`, which estimates per-speaker normal embedding variation when enough repeated samples exist.
 
 ## Convert Feature Tables
 
@@ -115,6 +116,19 @@ python3 research/speech_ml/train_baseline.py \
 ```
 
 This writes a centroid baseline artifact for offline review. It is not loaded by the live app and is not a validated model.
+
+## Build Personal Baselines
+
+Estimate within-speaker speech drift thresholds from repeated samples:
+
+```bash
+python3 research/speech_ml/build_personal_baselines.py \
+  --input research/artifacts/sample_embeddings.jsonl \
+  --output research/artifacts/sample_personal_baselines.json \
+  --min-samples 3
+```
+
+This is closer to EarlyCare's real product signal than a diagnosis classifier: it measures how far a speaker's future call may drift from their own stable pattern. Treat thresholds as draft research values until a model card is manually reviewed.
 
 ## Evaluate
 
