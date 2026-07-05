@@ -52,10 +52,11 @@ After supported datasets are fetched locally, run all locally ready feature-base
 
 ```bash
 python3 research/speech_ml/run_ready_experiments.py \
-  --output-dir research/artifacts
+  --output-dir research/artifacts \
+  --audit
 ```
 
-Preview first with `--dry-run`. Add `--include-progression` only when you also want progression-only reports such as UCI Parkinsons Telemonitoring; those reports are not PD/control classifier training.
+Preview first with `--dry-run`. Add `--include-progression` only when you also want progression-only reports such as UCI Parkinsons Telemonitoring; those reports are not PD/control classifier training. Add `--require-validated` only for release gating; most research runs should fail that gate and remain research-only.
 
 After experiments run, audit the generated artifacts before app handoff:
 

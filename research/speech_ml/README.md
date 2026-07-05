@@ -28,10 +28,11 @@ After local datasets have been fetched, run every locally ready feature-baseline
 
 ```bash
 python3 research/speech_ml/run_ready_experiments.py \
-  --output-dir research/artifacts
+  --output-dir research/artifacts \
+  --audit
 ```
 
-Use `--dry-run` to preview commands first. Add `--include-progression` when you also want progression-only analysis reports; those are not classifier training.
+Use `--dry-run` to preview commands first. Add `--include-progression` when you also want progression-only analysis reports; those are not classifier training. Add `--require-validated` only for a release gate; it fails unless the audit says every selected experiment is validated-ready.
 
 Audit generated artifacts before any app handoff:
 
