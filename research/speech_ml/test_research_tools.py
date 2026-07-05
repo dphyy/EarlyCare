@@ -7,7 +7,7 @@ import unittest
 import wave
 from pathlib import Path
 
-from research.speech_ml import evaluate_baseline, extract_embeddings, prepare_manifest, run_experiment, train_baseline
+from research.speech_ml import convert_feature_table, evaluate_baseline, extract_embeddings, prepare_manifest, run_experiment, train_baseline
 
 
 def write_wav(path: Path, frequency: float) -> None:
@@ -168,6 +168,55 @@ class ResearchToolTests(unittest.TestCase):
                 run_experiment.main(["--manifest", str(manifest_path), "--audio-root", str(root)])
 
             self.assertIn("needs-review", str(raised.exception))
+
+    def test_convert_feature_table_writes_evaluable_jsonl(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            input_path = root / "uci_like.csv"
+            output_path = root / "feature_rows.jsonl"
+            eval_path = root / "feature_eval.json"
+            with input_path.open("w", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=["Subject id", "Jitter", "Shimmer", "UPDRS", "class information"])
+                writer.writeheader()
+                writer.writerows(
+                    [
+                        {"Subject id": "pd-001", "Jitter": "10", "Shimmer": "12", "UPDRS": "22", "class information": "1"},
+                        {"Subject id": "pd-001", "Jitter": "11", "Shimmer": "13", "UPDRS": "22", "class information": "1"},
+                        {"Subject id": "pd-002", "Jitter": "12", "Shimmer": "14", "UPDRS": "24", "class information": "1"},
+                        {"Subject id": "pd-002", "Jitter": "13", "Shimmer": "15", "UPDRS": "24", "class information": "1"},
+                        {"Subject id": "ctl-001", "Jitter": "0", "Shimmer": "1", "UPDRS": "", "class information": "0"},
+                        {"Subject id": "ctl-001", "Jitter": "1", "Shimmer": "2", "UPDRS": "", "class information": "0"},
+                        {"Subject id": "ctl-002", "Jitter": "2", "Shimmer": "3", "UPDRS": "", "class information": "0"},
+                        {"Subject id": "ctl-002", "Jitter": "3", "Shimmer": "4", "UPDRS": "", "class information": "0"},
+                    ]
+                )
+
+            exit_code = convert_feature_table.main(
+                [
+                    "--input",
+                    str(input_path),
+                    "--output",
+                    str(output_path),
+                    "--dataset",
+                    "UCI Parkinson Speech",
+                    "--language",
+                    "Turkish",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            rows = [json.loads(line) for line in output_path.read_text().splitlines()]
+            self.assertEqual(len(rows), 8)
+            self.assertEqual(rows[0]["label"], "pd")
+            self.assertEqual(rows[-1]["label"], "control")
+            self.assertEqual(rows[0]["provenance"]["source_type"], "feature_table")
+            self.assertEqual(rows[0]["provenance"]["model"], "feature-table-zscore")
+            self.assertEqual(rows[0]["provenance"]["feature_columns"], ["Jitter", "Shimmer"])
+
+            evaluate_baseline.main(["--input", str(output_path), "--output", str(eval_path), "--test-fraction", "0.5"])
+            report = json.loads(eval_path.read_text())
+            self.assertEqual(report["status"], "ok")
+            self.assertFalse(report["split"]["speaker_leakage"])
 
     def test_extract_embeddings_writes_backend_compatible_jsonl(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -55,6 +55,20 @@ python3 research/speech_ml/run_experiment.py \
 
 The runner refuses manifests with `review_status=needs-review` unless `--allow-review-rows` is explicitly passed.
 
+## Convert Feature Tables
+
+Feature-only datasets such as UCI Parkinson's Speech do not validate raw-audio embeddings, but they are useful for quick speaker-level sanity checks:
+
+```bash
+python3 research/speech_ml/convert_feature_table.py \
+  --input research/datasets/uci-parkinson/training_data.csv \
+  --output research/artifacts/uci_parkinson_feature_rows.jsonl \
+  --dataset "UCI Parkinson Speech" \
+  --language Turkish
+```
+
+The converter writes z-scored numeric feature vectors using `source_type=feature_table` provenance. Feed the JSONL into the same `evaluate_baseline.py` and `train_baseline.py` scripts, but keep results labelled as feature-table experiments.
+
 ## Extract Embeddings
 
 Smoke-test the pipeline with the standard-library demo extractor:

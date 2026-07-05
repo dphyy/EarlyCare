@@ -80,6 +80,32 @@ The runner writes embeddings, a speaker-level evaluation JSON file, a baseline m
 
 Manual commands are still available when a step needs to be inspected separately.
 
+Feature-only UCI sanity check, after downloading and extracting the UCI table locally:
+
+```bash
+python3 research/speech_ml/convert_feature_table.py \
+  --input research/datasets/uci-parkinson/training_data.csv \
+  --output research/artifacts/uci_parkinson_feature_rows.jsonl \
+  --dataset "UCI Parkinson Speech" \
+  --language Turkish
+```
+
+Then evaluate and train against the generated JSONL:
+
+```bash
+python3 research/speech_ml/evaluate_baseline.py \
+  --input research/artifacts/uci_parkinson_feature_rows.jsonl \
+  --output research/artifacts/uci_parkinson_feature_eval.json \
+  --positive-labels pd,parkinson,parkinsonian
+
+python3 research/speech_ml/train_baseline.py \
+  --input research/artifacts/uci_parkinson_feature_rows.jsonl \
+  --output research/artifacts/uci_parkinson_feature_model.json \
+  --positive-labels pd,parkinson,parkinsonian
+```
+
+Treat this as feature-table validation only. It does not prove raw-audio embedding performance.
+
 Extract embeddings:
 
 ```bash
