@@ -145,6 +145,7 @@ class ResearchToolTests(unittest.TestCase):
             report = report_path.read_text()
             self.assertIn("offline research only", report)
             self.assertIn("Rows needing review: 0", report)
+            self.assertIn("Subgroup Checks", report)
 
     def test_run_experiment_refuses_unreviewed_manifest_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -219,6 +220,7 @@ class ResearchToolTests(unittest.TestCase):
             report = report_path.read_text()
             self.assertIn("Input mode: feature table", report)
             self.assertIn("Model: `feature-table-zscore`", report)
+            self.assertIn("Source Type", report)
 
     def test_convert_feature_table_writes_evaluable_jsonl(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -323,10 +325,38 @@ class ResearchToolTests(unittest.TestCase):
             input_path = root / "embeddings.jsonl"
             output_path = root / "eval.json"
             rows = [
-                {"dataset": "sample", "speaker_id": "pd-train", "label": "pd", "embedding": [1.0, 0.0]},
-                {"dataset": "sample", "speaker_id": "pd-test", "label": "pd", "embedding": [0.9, 0.1]},
-                {"dataset": "sample", "speaker_id": "ctl-train", "label": "control", "embedding": [0.0, 1.0]},
-                {"dataset": "sample", "speaker_id": "ctl-test", "label": "control", "embedding": [0.1, 0.9]},
+                {
+                    "dataset": "sample",
+                    "speaker_id": "pd-train",
+                    "label": "pd",
+                    "task": "ddk",
+                    "embedding": [1.0, 0.0],
+                    "provenance": {"language": "English", "source_type": "feature_table"},
+                },
+                {
+                    "dataset": "sample",
+                    "speaker_id": "pd-test",
+                    "label": "pd",
+                    "task": "ddk",
+                    "embedding": [0.9, 0.1],
+                    "provenance": {"language": "English", "source_type": "feature_table"},
+                },
+                {
+                    "dataset": "sample",
+                    "speaker_id": "ctl-train",
+                    "label": "control",
+                    "task": "ddk",
+                    "embedding": [0.0, 1.0],
+                    "provenance": {"language": "English", "source_type": "feature_table"},
+                },
+                {
+                    "dataset": "sample",
+                    "speaker_id": "ctl-test",
+                    "label": "control",
+                    "task": "ddk",
+                    "embedding": [0.1, 0.9],
+                    "provenance": {"language": "English", "source_type": "feature_table"},
+                },
             ]
             input_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
 
@@ -338,6 +368,9 @@ class ResearchToolTests(unittest.TestCase):
             self.assertFalse(report["split"]["speaker_leakage"])
             self.assertEqual(report["metrics"]["balanced_accuracy"], 1.0)
             self.assertEqual(report["metrics"]["confusion"], {"tp": 1, "tn": 1, "fp": 0, "fn": 0})
+            self.assertEqual(report["metrics"]["subgroups"]["task"]["ddk"]["balanced_accuracy"], 1.0)
+            self.assertEqual(report["metrics"]["subgroups"]["language"]["English"]["speakers"], 2)
+            self.assertEqual(report["metrics"]["subgroups"]["source_type"]["feature_table"]["speakers"], 2)
 
     def test_evaluate_baseline_reports_insufficient_data(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

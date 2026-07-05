@@ -17,6 +17,7 @@ All evaluation must use speaker-level splits. A speaker can appear in train or t
 | Calibration / Brier score | Shows whether score-like outputs behave like probabilities. |
 | False-positive review | Lists speakers who would be escalated incorrectly. |
 | False-negative review | Lists speakers who would be missed. |
+| Subgroup checks | Reports speaker-level performance by dataset, task, language, and source type where metadata exists. |
 
 ## Minimum Report
 
@@ -32,7 +33,7 @@ Every experiment note should include:
 - preprocessing steps
 - metrics table
 - false-positive and false-negative examples
-- subgroup checks when metadata exists
+- subgroup checks for dataset, task, language, and source type when metadata exists
 
 ## Release Gate
 

@@ -157,6 +157,31 @@ def training_args(args: argparse.Namespace, embeddings_path: Path, model_path: P
     ]
 
 
+def subgroup_report_lines(metrics: dict[str, object]) -> list[str]:
+    subgroups = metrics.get("subgroups")
+    if not isinstance(subgroups, dict):
+        return ["- Not available"]
+
+    lines: list[str] = []
+    for field in ["dataset", "task", "language", "source_type"]:
+        groups = subgroups.get(field)
+        if not isinstance(groups, dict) or not groups:
+            continue
+        lines.append(f"### {field.replace('_', ' ').title()}")
+        lines.append("")
+        for name, values in sorted(groups.items()):
+            if not isinstance(values, dict):
+                continue
+            lines.append(
+                f"- {name}: speakers={values.get('speakers')}, "
+                f"balanced_accuracy={values.get('balanced_accuracy')}, "
+                f"sensitivity={values.get('sensitivity')}, "
+                f"specificity={values.get('specificity')}"
+            )
+        lines.append("")
+    return lines or ["- Not available"]
+
+
 def write_report(
     report_path: Path,
     args: argparse.Namespace,
@@ -218,6 +243,10 @@ def write_report(
                 f"- ROC-AUC: {metrics.get('roc_auc')}",
                 f"- Sensitivity: {metrics.get('sensitivity')}",
                 f"- Specificity: {metrics.get('specificity')}",
+                "",
+                "## Subgroup Checks",
+                "",
+                *subgroup_report_lines(metrics),
             ]
         )
     else:

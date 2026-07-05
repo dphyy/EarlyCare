@@ -21,6 +21,9 @@ class SpeakerExample:
     dataset: str
     label: str
     is_positive: bool
+    task: str
+    language: str
+    source_type: str
     embedding: list[float]
     row_count: int
 
@@ -52,6 +55,33 @@ def normalize_label(label: str) -> str:
     return label.strip().lower().replace("'", "").replace("-", "_").replace(" ", "_")
 
 
+def stable_group_value(values: Sequence[str], default: str = "unknown") -> str:
+    cleaned = sorted({value.strip() for value in values if value and value.strip()})
+    if not cleaned:
+        return default
+    if len(cleaned) == 1:
+        return cleaned[0]
+    return "mixed"
+
+
+def row_language(row: dict[str, object]) -> str:
+    provenance = row.get("provenance")
+    if isinstance(provenance, dict):
+        value = provenance.get("language")
+        if value:
+            return str(value)
+    return str(row.get("language") or "")
+
+
+def row_source_type(row: dict[str, object]) -> str:
+    provenance = row.get("provenance")
+    if isinstance(provenance, dict):
+        value = provenance.get("source_type")
+        if value:
+            return str(value)
+    return "raw_audio"
+
+
 def speaker_examples(rows: list[dict[str, object]], positive_labels: set[str]) -> list[SpeakerExample]:
     grouped: dict[tuple[str, str], list[dict[str, object]]] = defaultdict(list)
     for row in rows:
@@ -75,6 +105,9 @@ def speaker_examples(rows: list[dict[str, object]], positive_labels: set[str]) -
                 dataset=dataset,
                 label=label,
                 is_positive=normalize_label(label) in positive_labels,
+                task=stable_group_value([str(row.get("task") or "") for row in speaker_rows]),
+                language=stable_group_value([row_language(row) for row in speaker_rows]),
+                source_type=stable_group_value([row_source_type(row) for row in speaker_rows]),
                 embedding=mean_vector(embeddings),  # type: ignore[arg-type]
                 row_count=len(speaker_rows),
             )
@@ -136,6 +169,43 @@ def probability(score: float) -> float:
     return 1 / (1 + math.exp(-max(-20, min(20, score * 5))))
 
 
+def prediction_metrics(predictions: list[dict[str, object]]) -> dict[str, object]:
+    tp = sum(1 for item in predictions if item["actual_positive"] and item["predicted_positive"])
+    tn = sum(1 for item in predictions if not item["actual_positive"] and not item["predicted_positive"])
+    fp = sum(1 for item in predictions if not item["actual_positive"] and item["predicted_positive"])
+    fn = sum(1 for item in predictions if item["actual_positive"] and not item["predicted_positive"])
+    sensitivity = tp / (tp + fn) if tp + fn else None
+    specificity = tn / (tn + fp) if tn + fp else None
+    if sensitivity is not None and specificity is not None:
+        balanced_accuracy = round((sensitivity + specificity) / 2, 6)
+    else:
+        balanced_accuracy = None
+    labels = [bool(item["actual_positive"]) for item in predictions]
+    scores = [float(item["score"]) for item in predictions]
+    brier = sum((float(item["probability"]) - (1 if item["actual_positive"] else 0)) ** 2 for item in predictions) / max(len(predictions), 1)
+    return {
+        "speakers": len(predictions),
+        "positive_speakers": sum(1 for label in labels if label),
+        "negative_speakers": sum(1 for label in labels if not label),
+        "sensitivity": round(sensitivity, 6) if sensitivity is not None else None,
+        "specificity": round(specificity, 6) if specificity is not None else None,
+        "balanced_accuracy": balanced_accuracy,
+        "roc_auc": roc_auc(labels, scores),
+        "calibration": {"brier_score": round(brier, 6)},
+        "confusion": {"tp": tp, "tn": tn, "fp": fp, "fn": fn},
+    }
+
+
+def subgroup_metrics(predictions: list[dict[str, object]]) -> dict[str, dict[str, object]]:
+    report: dict[str, dict[str, object]] = {}
+    for field in ["dataset", "task", "language", "source_type"]:
+        grouped: dict[str, list[dict[str, object]]] = defaultdict(list)
+        for item in predictions:
+            grouped[str(item.get(field) or "unknown")].append(item)
+        report[field] = {name: prediction_metrics(items) for name, items in sorted(grouped.items())}
+    return report
+
+
 def evaluate(train: list[SpeakerExample], test: list[SpeakerExample]) -> dict[str, object]:
     positive_centroid = mean_vector(example.embedding for example in train if example.is_positive)
     negative_centroid = mean_vector(example.embedding for example in train if not example.is_positive)
@@ -148,6 +218,9 @@ def evaluate(train: list[SpeakerExample], test: list[SpeakerExample]) -> dict[st
                 "speaker_id": example.speaker_id,
                 "dataset": example.dataset,
                 "label": example.label,
+                "task": example.task,
+                "language": example.language,
+                "source_type": example.source_type,
                 "actual_positive": example.is_positive,
                 "predicted_positive": predicted_positive,
                 "score": round(score, 6),
@@ -156,23 +229,15 @@ def evaluate(train: list[SpeakerExample], test: list[SpeakerExample]) -> dict[st
             }
         )
 
-    tp = sum(1 for item in predictions if item["actual_positive"] and item["predicted_positive"])
-    tn = sum(1 for item in predictions if not item["actual_positive"] and not item["predicted_positive"])
-    fp = sum(1 for item in predictions if not item["actual_positive"] and item["predicted_positive"])
-    fn = sum(1 for item in predictions if item["actual_positive"] and not item["predicted_positive"])
-    sensitivity = tp / (tp + fn) if tp + fn else 0
-    specificity = tn / (tn + fp) if tn + fp else 0
-    labels = [bool(item["actual_positive"]) for item in predictions]
-    scores = [float(item["score"]) for item in predictions]
-    brier = sum((float(item["probability"]) - (1 if item["actual_positive"] else 0)) ** 2 for item in predictions) / max(len(predictions), 1)
-
+    metrics = prediction_metrics(predictions)
     return {
-        "sensitivity": round(sensitivity, 6),
-        "specificity": round(specificity, 6),
-        "balanced_accuracy": round((sensitivity + specificity) / 2, 6),
-        "roc_auc": roc_auc(labels, scores),
-        "calibration": {"brier_score": round(brier, 6)},
-        "confusion": {"tp": tp, "tn": tn, "fp": fp, "fn": fn},
+        "sensitivity": metrics["sensitivity"],
+        "specificity": metrics["specificity"],
+        "balanced_accuracy": metrics["balanced_accuracy"],
+        "roc_auc": metrics["roc_auc"],
+        "calibration": metrics["calibration"],
+        "confusion": metrics["confusion"],
+        "subgroups": subgroup_metrics(predictions),
         "false_positives": [item for item in predictions if not item["actual_positive"] and item["predicted_positive"]],
         "false_negatives": [item for item in predictions if item["actual_positive"] and not item["predicted_positive"]],
         "predictions": predictions,
