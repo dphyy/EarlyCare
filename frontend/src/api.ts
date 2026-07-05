@@ -244,6 +244,11 @@ export interface MissedCheckInRequest {
   note?: string | null;
 }
 
+export type VolunteerTaskUpdateResult =
+  | { outcome: "updated"; task: VolunteerTask }
+  | { outcome: "demo"; task: null }
+  | { outcome: "failed"; task: null; message: string };
+
 export async function recordMissedCheckIn(payload: MissedCheckInRequest): Promise<ScenarioRunResponse | null> {
   if (!API_BASE_URL) return null;
 
@@ -260,16 +265,20 @@ export async function recordMissedCheckIn(payload: MissedCheckInRequest): Promis
   }
 }
 
-export async function updateVolunteerTask(taskId: string, status: VolunteerTask["status"]): Promise<VolunteerTask | null> {
-  if (!API_BASE_URL) return null;
+export async function updateVolunteerTask(taskId: string, status: VolunteerTask["status"]): Promise<VolunteerTaskUpdateResult> {
+  if (!API_BASE_URL) return { outcome: "demo", task: null };
 
   try {
     const response = await fetch(`${API_BASE_URL}/volunteer-tasks/${taskId}?status=${encodeURIComponent(status)}`, {
       method: "PATCH"
     });
     if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-    return (await response.json()) as VolunteerTask;
-  } catch {
-    return null;
+    return { outcome: "updated", task: (await response.json()) as VolunteerTask };
+  } catch (error) {
+    return {
+      outcome: "failed",
+      task: null,
+      message: error instanceof Error ? error.message : "Task update failed."
+    };
   }
 }

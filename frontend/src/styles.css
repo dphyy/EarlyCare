@@ -203,6 +203,12 @@ nav {
   color: #5f4307;
 }
 
+.task-update-banner {
+  background: #fff8e8;
+  border-bottom-color: #e5c979;
+  color: #5f4307;
+}
+
 nav button,
 .call-actions button,
 .scenario-tabs button,

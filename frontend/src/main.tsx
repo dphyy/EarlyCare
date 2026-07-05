@@ -1685,6 +1685,7 @@ function App() {
   const [loadedSeniorRecords, setLoadedSeniorRecords] = useState<SeniorRecord[]>([]);
   const [loadedCallPlans, setLoadedCallPlans] = useState<CallPlan[]>([]);
   const [selectedSeniorId, setSelectedSeniorId] = useState("s-001");
+  const [taskUpdateStatus, setTaskUpdateStatus] = useState("");
 
   const refreshSchedule = async () => {
     const nextSchedule = await fetchSchedule();
@@ -1743,6 +1744,7 @@ function App() {
       setLoadedSeniorRecords(nextRecords);
       setLoadedCallPlans(nextCallPlans);
       setSelectedSeniorId((current) => (nextSeniors.some((senior) => senior.id === current) ? current : nextSeniors[0]?.id ?? "s-001"));
+      setTaskUpdateStatus("");
       setLastSyncedAt(new Date().toISOString());
     } finally {
       setIsRefreshing(false);
@@ -1783,18 +1785,23 @@ function App() {
   }));
 
   const handleTaskStatus = async (taskId: string, status: VolunteerTask["status"]) => {
-    const updated = await updateVolunteerTask(taskId, status);
-    if (updated) {
-      setLoadedTasks((tasks) => tasks.map((task) => (task.id === updated.id ? updated : task)));
+    setTaskUpdateStatus("");
+    const result = await updateVolunteerTask(taskId, status);
+    if (result.outcome === "updated") {
+      setLoadedTasks((tasks) => tasks.map((task) => (task.id === result.task.id ? result.task : task)));
       await refreshServiceStatus();
       await refreshSeniorRecords();
       await refreshCallPlans();
       await refreshOperationsQueue();
       return;
     }
-    setLoadedTasks((tasks) => tasks.map((task) => (task.id === taskId ? { ...task, status } : task)));
+    if (result.outcome === "demo") {
+      setLoadedTasks((tasks) => tasks.map((task) => (task.id === taskId ? { ...task, status } : task)));
+      setTaskUpdateStatus("Demo-only task update. Connect the backend to persist follow-up changes.");
+      return;
+    }
+    setTaskUpdateStatus(`Task update was not saved: ${result.message}`);
     await refreshServiceStatus();
-    await refreshOperationsQueue();
   };
 
   const handleRecordMissedCheckIn = async (seniorId: string) => {
@@ -1962,6 +1969,13 @@ function App() {
         <section className={`service-banner ${serviceStatus.storageWarnings?.length ? "service-warning-banner" : ""}`}>
           {serviceStatus.storageWarnings?.length ? <AlertTriangle size={18} /> : <Activity size={18} />}
           <p>{serviceStatus.message}</p>
+        </section>
+      ) : null}
+
+      {taskUpdateStatus ? (
+        <section className="service-banner task-update-banner" aria-live="polite">
+          <AlertTriangle size={18} />
+          <p>{taskUpdateStatus}</p>
         </section>
       ) : null}
 
