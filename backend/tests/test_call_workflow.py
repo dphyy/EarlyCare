@@ -102,6 +102,60 @@ class CallWorkflowTests(unittest.TestCase):
                 main.TASKS_STATE_PATH = original_tasks_path
                 main.CALL_STORAGE_ROOT = original_call_root
 
+    def test_record_missed_checkin_persists_session_task_and_schedule_attempt(self) -> None:
+        with TemporaryDirectory() as tmp:
+            original_state_root = main.STATE_STORAGE_ROOT
+            original_checkins_path = main.CHECKINS_STATE_PATH
+            original_tasks_path = main.TASKS_STATE_PATH
+            original_call_root = main.CALL_STORAGE_ROOT
+            state_root = Path(tmp) / "state"
+            main.STATE_STORAGE_ROOT = state_root
+            main.CHECKINS_STATE_PATH = state_root / "checkins.json"
+            main.TASKS_STATE_PATH = state_root / "volunteer-tasks.json"
+            main.CALL_STORAGE_ROOT = Path(tmp) / "calls"
+            try:
+                client = TestClient(main.app)
+                response = client.post(
+                    "/checkins/missed",
+                    json={
+                        "seniorId": "s-002",
+                        "scheduledAt": "2026-07-05T08:00:00+08:00",
+                        "retryAt": "2026-07-05T08:20:00+08:00",
+                        "attemptCount": 2,
+                        "note": "Phone rang but nobody answered.",
+                    },
+                )
+
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                session = payload["session"]
+                self.assertEqual(session["seniorId"], "s-002")
+                self.assertEqual(session["status"], "Missed")
+                self.assertEqual(session["riskLevel"], "Amber")
+                self.assertEqual(session["riskAssessment"]["missedCheckInScore"], 100)
+                self.assertTrue(any(category["id"] == "missed_checkin" for category in session["categories"]))
+                self.assertTrue(any(step["id"] == "retry-call" and step["status"] == "Triggered" for step in session["escalationPlan"]))
+
+                task = next(task for task in payload["tasks"] if task.get("sourceSessionId") == session["id"])
+                self.assertEqual(task["seniorId"], "s-002")
+                self.assertEqual(task["priority"], "Today")
+                self.assertEqual(task["status"], "Open")
+
+                stored = {checkin.id: checkin for checkin in main._load_checkins()}
+                self.assertIn(session["id"], stored)
+
+                now = main._parse_iso("2026-07-05T10:00:00+08:00")
+                assert now is not None
+                schedule = {item.seniorId: item for item in main._build_schedule_items(now)}
+                self.assertEqual(schedule["s-002"].status, "Overdue")
+                self.assertEqual(schedule["s-002"].lastAttemptStatus, "Missed")
+                self.assertTrue(schedule["s-002"].lastAttemptAt.startswith("2026-07-05T08:00:00"))
+            finally:
+                main.STATE_STORAGE_ROOT = original_state_root
+                main.CHECKINS_STATE_PATH = original_checkins_path
+                main.TASKS_STATE_PATH = original_tasks_path
+                main.CALL_STORAGE_ROOT = original_call_root
+
     def test_transcript_to_text_uses_patient_label(self) -> None:
         messages = [
             main.TranscriptMessage(role="Agent", text="Are you okay?", timestamp=None),

@@ -244,6 +244,14 @@ class SpeechEnrichmentRequest(BaseModel):
     modelCard: SpeechModelCardGate | None = None
 
 
+class MissedCheckInRequest(BaseModel):
+    seniorId: str
+    scheduledAt: str | None = None
+    retryAt: str | None = None
+    attemptCount: int = Field(default=2, ge=1, le=5)
+    note: str | None = None
+
+
 class ProviderResult(BaseModel):
     provider: str
     language: str

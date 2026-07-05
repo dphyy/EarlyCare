@@ -38,7 +38,8 @@ Stroke is only a red-flag safety concern when the conversation indicates immedia
 4. The backend persists a check-in record, generates the eight evidence categories, builds the escalation trail, updates the senior-level categorized record, and creates or updates volunteer tasks when follow-up is needed.
 5. EarlyCare generates a next-call plan from schedule status, known conditions, prompt focus, and categorized history.
 6. Open **Patient overview** to review next due time, due/overdue status, next-call plan, categorized history, risk scores, transcripts, escalation, and task actions.
-6. Use **Agents call** for the live ElevenLabs path when provider credentials are configured in `backend/.env`.
+7. Use `POST /checkins/missed` when a scheduled call and retry are unanswered; this records the missed attempt and triggers the same schedule, escalation, record, and volunteer-task flow as the demo scenario.
+8. Use **Agents call** for the live ElevenLabs path when provider credentials are configured in `backend/.env`.
 
 ## Safety Language
 

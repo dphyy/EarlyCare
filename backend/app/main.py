@@ -21,6 +21,7 @@ from app.models import (
     CheckInScheduleItem,
     CheckInSession,
     ConversationCategory,
+    MissedCheckInRequest,
     ProviderResult,
     RiskAssessment,
     RiskSignal,
@@ -946,6 +947,58 @@ def _upsert_task_for_call(call: CallRecord, senior: Senior) -> list[VolunteerTas
     return tasks
 
 
+def _missed_checkin_transcript(request: MissedCheckInRequest) -> str:
+    parts = [f"No answer after {request.attemptCount} scheduled call attempt{'s' if request.attemptCount != 1 else ''}."]
+    if request.retryAt:
+        parts.append(f"Latest retry attempt was at {request.retryAt}.")
+    if request.note:
+        parts.append(request.note.strip())
+    return " ".join(part for part in parts if part)
+
+
+def _create_missed_checkin_session(request: MissedCheckInRequest) -> ScenarioRunResponse:
+    senior = get_senior(request.seniorId)
+    scheduled_at = request.scheduledAt or _now_iso()
+    symptoms = Symptoms(missedCheckIn=True)
+    assessment = assessment_from_symptoms(
+        symptoms,
+        "Amber",
+        [
+            "Scheduled check-in was missed after retry.",
+            "Volunteer follow-up needed because the senior lives alone.",
+        ],
+    )
+    transcript = _missed_checkin_transcript(request)
+    categories = build_conversation_categories(transcript, symptoms, assessment, senior)
+    recommended_action = recommended_action_for(assessment, categories, senior)
+    escalation_plan = build_escalation_plan(assessment, categories, senior)
+    session = CheckInSession(
+        id=f"missed-{senior.id}-{uuid4().hex[:8]}",
+        seniorId=senior.id,
+        scheduledAt=scheduled_at,
+        completedAt=None,
+        status="Missed",
+        language=senior.preferredLanguage,
+        riskLevel="Amber",
+        summary=(
+            f"Scheduled check-in missed after {request.attemptCount} attempt"
+            f"{'s' if request.attemptCount != 1 else ''}."
+        ),
+        recommendedAction=recommended_action,
+        originalTranscript=transcript,
+        englishTranscript=transcript,
+        riskAssessment=assessment,
+        categories=categories,
+        escalationPlan=escalation_plan,
+        modelNote="No speech metrics were produced because the senior did not answer the scheduled check-in.",
+    )
+    checkins = _load_checkins()
+    checkins.append(session)
+    _save_checkins(checkins)
+    tasks = _upsert_task_for_session(session, senior)
+    return ScenarioRunResponse(session=session, tasks=tasks)
+
+
 def _risk_schema() -> dict[str, object]:
     signal_schema = {
         "type": "object",
@@ -1299,6 +1352,11 @@ def run_scenario(scenario_id: str) -> ScenarioRunResponse:
     _save_checkins(checkins)
     tasks = _upsert_task_for_session(session, senior)
     return ScenarioRunResponse(session=session, tasks=tasks)
+
+
+@app.post("/checkins/missed", response_model=ScenarioRunResponse)
+def record_missed_checkin(request: MissedCheckInRequest) -> ScenarioRunResponse:
+    return _create_missed_checkin_session(request)
 
 
 @app.get("/calls", response_model=list[CallRecord])

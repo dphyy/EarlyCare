@@ -151,6 +151,30 @@ export async function runScenario(scenarioId: string): Promise<ScenarioRunRespon
   }
 }
 
+export interface MissedCheckInRequest {
+  seniorId: string;
+  scheduledAt?: string | null;
+  retryAt?: string | null;
+  attemptCount?: number;
+  note?: string | null;
+}
+
+export async function recordMissedCheckIn(payload: MissedCheckInRequest): Promise<ScenarioRunResponse | null> {
+  if (!API_BASE_URL) return null;
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/checkins/missed`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+    return (await response.json()) as ScenarioRunResponse;
+  } catch {
+    return null;
+  }
+}
+
 export async function updateVolunteerTask(taskId: string, status: VolunteerTask["status"]): Promise<VolunteerTask | null> {
   if (!API_BASE_URL) return null;
 

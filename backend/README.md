@@ -142,6 +142,7 @@ Never commit real `.env` files.
 | `GET /call-plans` | Personalized next-call plans for the roster. |
 | `GET /seniors/{senior_id}/call-plan` | One senior's next-call plan. |
 | `GET /checkins` | Historical check-in records, including persisted scenario runs. |
+| `POST /checkins/missed` | Record a missed scheduled check-in attempt, persist the missed session, and create/update the volunteer follow-up task. |
 | `GET /scenarios` | Scripted demo scenarios. |
 | `POST /scenarios/{scenario_id}/run` | Run and persist a scripted scenario. |
 | `GET /calls` | Saved call records, newest first. |
