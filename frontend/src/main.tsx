@@ -1413,6 +1413,7 @@ function OfficerDashboard({
   const latestRecordTime = selectedRecords[0]?.date ? formatDate(selectedRecords[0].date) : "No check-in yet";
   const nextAction = selectedOpenTasks[0]?.recommendedAction ?? latestRecord?.recommendedAction ?? "Continue routine scheduled check-ins.";
   const [scheduleLogStatus, setScheduleLogStatus] = useState("");
+  const [handoffCopyStatus, setHandoffCopyStatus] = useState("");
   const [isLoggingAnswered, setIsLoggingAnswered] = useState(false);
   const [isLoggingMissed, setIsLoggingMissed] = useState(false);
   const rosterRows = seniors.map((senior) => {
@@ -1459,6 +1460,7 @@ function OfficerDashboard({
 
   useEffect(() => {
     setScheduleLogStatus("");
+    setHandoffCopyStatus("");
   }, [selectedSenior.id]);
 
   const playRiskSignal = (call: CallRecord, signal: RiskSignal) => {
@@ -1497,6 +1499,42 @@ function OfficerDashboard({
       setScheduleLogStatus("Unable to log missed check-in. Try again after checking the service connection.");
     } finally {
       setIsLoggingMissed(false);
+    }
+  };
+
+  const buildCareHandoffText = () => {
+    const elevatedCategories = (latestRecord?.categories ?? []).filter((category) => category.severity !== "Green").slice(0, 4);
+    const taskLines = selectedOpenTasks.slice(0, 3).map((task) => `- ${task.priority}: ${task.recommendedAction} (${task.assignedTo})`);
+    const categoryLines = elevatedCategories.map((category) => {
+      const evidence = category.evidence.slice(0, 2).join(" ");
+      return `- ${category.severity}: ${category.label}${evidence ? ` - ${evidence}` : ""}`;
+    });
+
+    return [
+      "EarlyCare care-team handoff",
+      `Senior: ${selectedSenior.name}, ${selectedSenior.age}, ${selectedSenior.addressZone}`,
+      `Language: ${selectedSenior.preferredLanguage}`,
+      `Known conditions: ${selectedSenior.knownConditions.join(", ") || "none listed"}`,
+      `Schedule: ${selectedSchedule ? `${selectedSchedule.status}; next due ${formatDate(selectedSchedule.nextDueAt)} (${scheduleTimingSummary})` : "not scheduled"}`,
+      `Highest risk: ${highestRisk}`,
+      `Latest record: ${latestRecordKind} at ${latestRecordTime}`,
+      `Recommended action: ${nextAction}`,
+      selectedSchedule ? `Schedule guidance: ${selectedSchedule.recommendedAction}` : "",
+      selectedOpenTasks.length ? `Open follow-up tasks:\n${taskLines.join("\n")}` : "Open follow-up tasks: none",
+      categoryLines.length ? `Elevated evidence:\n${categoryLines.join("\n")}` : "Elevated evidence: none recorded",
+      `Caregiver: ${selectedSenior.caregiverContact}`,
+      `Neighbour: ${selectedSenior.neighborContact ?? "not listed"}`,
+      "Safety note: EarlyCare is decision support only. A human should assess and escalate urgent danger signs."
+    ].filter(Boolean).join("\n");
+  };
+
+  const copyCareHandoff = async () => {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable.");
+      await navigator.clipboard.writeText(buildCareHandoffText());
+      setHandoffCopyStatus("Handoff copied.");
+    } catch {
+      setHandoffCopyStatus("Unable to copy. Use the visible handoff details.");
     }
   };
 
@@ -1603,10 +1641,17 @@ function OfficerDashboard({
           </div>
           <div className="profile-actions">
             <RiskBadge level={highestRisk} />
-            <button className="primary-action" onClick={() => onStartCall(selectedSenior.id)}>
-              <PhoneCall size={18} />
-              Start new call
-            </button>
+            <div className="profile-action-buttons">
+              <button className="secondary-action" onClick={() => void copyCareHandoff()} type="button">
+                <ClipboardList size={18} />
+                Copy handoff
+              </button>
+              <button className="primary-action" onClick={() => onStartCall(selectedSenior.id)}>
+                <PhoneCall size={18} />
+                Start new call
+              </button>
+            </div>
+            {handoffCopyStatus ? <small className="copy-status" aria-live="polite">{handoffCopyStatus}</small> : null}
           </div>
         </div>
 

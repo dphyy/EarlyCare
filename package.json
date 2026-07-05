@@ -7,6 +7,8 @@
     "lint": "pnpm --dir frontend lint",
     "frontend:smoke": "pnpm --dir frontend test:data",
     "backend:smoke": "PYTHONPATH=backend backend/.venv/bin/python backend/tests/smoke.py",
+    "backend:test": "PYTHONPATH=backend backend/.venv/bin/python -m unittest discover -s backend/tests -p 'test_*.py'",
+    "research:test": "PYTHONPATH=. python3 research/speech_ml/test_research_tools.py",
     "safety:copy": "python3 scripts/check_safety_copy.py"
   }
 }

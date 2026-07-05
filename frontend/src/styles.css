@@ -549,6 +549,23 @@ h3 {
   gap: 10px;
 }
 
+.profile-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.profile-action-buttons .primary-action,
+.profile-action-buttons .secondary-action {
+  white-space: nowrap;
+}
+
+.copy-status {
+  color: #216637;
+  font-weight: 700;
+}
+
 .profile-header {
   background: #ffffff;
   border: 1px solid #dfe5d8;
@@ -597,7 +614,8 @@ h3 {
   overflow-wrap: anywhere;
 }
 
-.profile-actions .primary-action {
+.profile-actions .primary-action,
+.profile-actions .secondary-action {
   white-space: nowrap;
 }
 
@@ -2311,10 +2329,12 @@ h3 {
   }
 
   .profile-actions {
-    align-items: stretch;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, max-content));
+    align-items: flex-start;
     justify-content: start;
+  }
+
+  .profile-action-buttons {
+    justify-content: flex-start;
   }
 
   nav {
@@ -2412,11 +2432,16 @@ h3 {
     grid-template-columns: 1fr;
   }
 
+  .profile-action-buttons {
+    display: grid;
+  }
+
   .service-status {
     width: 100%;
   }
 
   .profile-actions .primary-action,
+  .profile-actions .secondary-action,
   .ops-command-actions .primary-action,
   .ops-command-actions .secondary-action,
   .queue-actions .primary-action,

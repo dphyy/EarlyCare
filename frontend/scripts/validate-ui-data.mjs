@@ -53,6 +53,7 @@ const requiredUiHooks = [
   "Demo data",
   "Open priority",
   "Refresh",
+  "Copy handoff",
   "Running..."
 ];
 

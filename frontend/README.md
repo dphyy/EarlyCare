@@ -6,7 +6,7 @@ The frontend provides three main experiences:
 
 - **Demo runner**: seven scripted check-in scenarios that persist records and tasks through the backend.
 - **Agents call**: an in-browser call simulation powered by ElevenLabs Agents.
-- **Patient overview**: a care-team view for roster triage, operations queue, check-in history, recordings, transcripts, categorized evidence, escalation trails, volunteer tasks, speech timing, inline AI risk highlights, answered/missed schedule logging, and follow-up recommendations.
+- **Patient overview**: a care-team view for roster triage, operations queue, check-in history, recordings, transcripts, categorized evidence, escalation trails, volunteer tasks, speech timing, inline AI risk highlights, answered/missed schedule logging, copyable care-team handoffs, and follow-up recommendations.
 
 The top bar shows whether the browser is connected to the live FastAPI backend or using local demo data. The command header also surfaces the top care-desk priority, last sync time, and a manual refresh action.
 
