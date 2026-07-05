@@ -404,6 +404,64 @@ class CallWorkflowTests(unittest.TestCase):
                 main.TASKS_STATE_PATH = original_tasks_path
                 main.CALL_STORAGE_ROOT = original_call_root
 
+    def test_task_repair_returns_in_memory_tasks_when_persist_fails(self) -> None:
+        with TemporaryDirectory() as tmp:
+            original_state_root = main.STATE_STORAGE_ROOT
+            original_checkins_path = main.CHECKINS_STATE_PATH
+            original_tasks_path = main.TASKS_STATE_PATH
+            original_call_root = main.CALL_STORAGE_ROOT
+            state_root = Path(tmp) / "state"
+            call_root = Path(tmp) / "calls"
+            call_dir = call_root / "call-unwritten"
+            main.STATE_STORAGE_ROOT = state_root
+            main.CHECKINS_STATE_PATH = state_root / "checkins.json"
+            main.TASKS_STATE_PATH = state_root / "volunteer-tasks.json"
+            main.CALL_STORAGE_ROOT = call_root
+            try:
+                state_root.mkdir(parents=True)
+                call_dir.mkdir(parents=True)
+                main.CHECKINS_STATE_PATH.write_text("[]", encoding="utf-8")
+                main.TASKS_STATE_PATH.write_text("[]", encoding="utf-8")
+                call = main.CallRecord(
+                    id="call-unwritten",
+                    seniorId="s-001",
+                    seniorName="Mdm Tan Bee Hoon",
+                    startedAt="2026-07-04T10:00:00+08:00",
+                    completedAt="2026-07-04T10:05:00+08:00",
+                    status="Complete",
+                    riskLevel="Amber",
+                    originalTranscript="Patient: I fell and feel dizzy.",
+                    englishTranscript="Patient: I fell and feel dizzy.",
+                    transcriptMessages=[TranscriptMessage(role="Senior", text="I fell and feel dizzy.", timestamp="2026-07-04T10:01:00+08:00")],
+                    translationProvider="test",
+                    translationFallbackUsed=False,
+                    audioAvailable=False,
+                    riskAssessment=RiskAssessment(
+                        speechDeviationScore=0,
+                        parkinsonsWatchScore=0,
+                        postFallConcernScore=80,
+                        missedCheckInScore=0,
+                        riskLevel="Amber",
+                        reasons=["Fall with dizziness"],
+                    ),
+                    recommendedAction="Notify caregiver and arrange same-day follow-up.",
+                    categories=[],
+                )
+                (call_dir / "metadata.json").write_text(call.model_dump_json(indent=2), encoding="utf-8")
+
+                with patch.object(main, "_save_tasks", side_effect=OSError("disk unavailable")):
+                    response = TestClient(main.app).get("/volunteer-tasks")
+
+                self.assertEqual(response.status_code, 200)
+                task = next(item for item in response.json() if item.get("sourceCallId") == "call-unwritten")
+                self.assertEqual(task["priority"], "Today")
+                self.assertEqual(json.loads(main.TASKS_STATE_PATH.read_text(encoding="utf-8")), [])
+            finally:
+                main.STATE_STORAGE_ROOT = original_state_root
+                main.CHECKINS_STATE_PATH = original_checkins_path
+                main.TASKS_STATE_PATH = original_tasks_path
+                main.CALL_STORAGE_ROOT = original_call_root
+
     def test_record_missed_checkin_persists_session_task_and_schedule_attempt(self) -> None:
         with TemporaryDirectory() as tmp:
             original_state_root = main.STATE_STORAGE_ROOT

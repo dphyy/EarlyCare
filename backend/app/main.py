@@ -1201,7 +1201,8 @@ def _repair_missing_follow_up_tasks(checkins: list[CheckInSession] | None = None
         repaired = True
 
     if repaired:
-        _save_tasks(tasks)
+        with suppress(OSError):
+            _save_tasks(tasks)
     return tasks
 
 
