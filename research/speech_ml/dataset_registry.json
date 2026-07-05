@@ -1,0 +1,194 @@
+{
+  "schema_version": 1,
+  "updated": "2026-07-05",
+  "use_rules": [
+    "Keep raw data under ignored research/datasets/ folders.",
+    "Keep derived embeddings, reports, and model artifacts under ignored research/artifacts/ folders.",
+    "Use speaker-level splits only.",
+    "Do not use any dataset to claim EarlyCare diagnoses Parkinson's disease, concussion, TBI, stroke, depression, or any other condition.",
+    "Treat validated model release as blocked until model-card gates are manually reviewed."
+  ],
+  "datasets": [
+    {
+      "id": "neurovoz",
+      "name": "NeuroVoz",
+      "status": "access-needed",
+      "target": "parkinsons-watch",
+      "source_urls": [
+        "https://github.com/BYO-UPM/Neurovoz_Dababase",
+        "https://zenodo.org/records/10777657",
+        "https://www.nature.com/articles/s41597-024-04186-z"
+      ],
+      "labels": "Parkinsonian vs healthy control",
+      "language": "Castilian Spanish",
+      "tasks": ["sustained vowels", "DDK", "listen-and-repeat utterances", "monologue"],
+      "participants": "108 speakers described by the project: 53 Parkinsonian, 55 controls; 2,903 audio files",
+      "raw_audio": "yes-after-access",
+      "fetcher_dataset_id": null,
+      "training_mode": "raw_audio_embedding_benchmark",
+      "earlycare_use": "First raw-audio Parkinson's watch benchmark after access and license are confirmed.",
+      "required_before_training": [
+        "Confirm dataset access approval.",
+        "Record license and redistribution restrictions.",
+        "Download locally under research/datasets/NeuroVoz.",
+        "Prepare and manually review the manifest before extraction."
+      ]
+    },
+    {
+      "id": "uci-parkinson-speech",
+      "name": "UCI Parkinson's Speech with Multiple Types of Sound Recordings",
+      "status": "feature-only",
+      "target": "parkinsons-watch",
+      "source_urls": [
+        "https://archive.ics.uci.edu/dataset/301/parkinson%2Bspeech%2Bdataset%2Bwith%2Bmultiple%2Btypes%2Bof%2BAudio%2Brecordings"
+      ],
+      "labels": "Parkinson's disease vs healthy control; UPDRS for Parkinson's participants",
+      "language": "Turkish",
+      "tasks": ["sustained vowels", "numbers", "words", "short sentences"],
+      "participants": "20 Parkinson's participants and 20 healthy controls in training data; additional sustained-vowel Parkinson's test set",
+      "raw_audio": "no-feature-table",
+      "fetcher_dataset_id": "uci-parkinson-speech",
+      "training_mode": "feature_classification_smoke",
+      "earlycare_use": "Feature-table sanity check for speaker-level PD/control experiments; not raw-audio embedding validation.",
+      "required_before_training": [
+        "Fetch with research/speech_ml/fetch_public_datasets.py.",
+        "Confirm the fetch manifest has a classification_ready table.",
+        "Keep reports labelled feature-only."
+      ]
+    },
+    {
+      "id": "uci-parkinsons-telemonitoring",
+      "name": "UCI Parkinsons Telemonitoring",
+      "status": "feature-only",
+      "target": "parkinsons-progression",
+      "source_urls": [
+        "https://archive.ics.uci.edu/dataset/189/parkinsons%2Btelemonitoring"
+      ],
+      "labels": "Motor UPDRS and total UPDRS for early-stage Parkinson's participants",
+      "language": "English context; feature table only",
+      "tasks": ["home voice recordings represented as biomedical voice measures"],
+      "participants": "42 early-stage Parkinson's participants; 5,875 rows",
+      "raw_audio": "no-feature-table",
+      "fetcher_dataset_id": "uci-parkinsons-telemonitoring",
+      "training_mode": "progression_analysis",
+      "earlycare_use": "Longitudinal UPDRS trend and feature-association research only; not PD/control classifier training.",
+      "required_before_training": [
+        "Fetch with research/speech_ml/fetch_public_datasets.py.",
+        "Confirm the fetch manifest has a progression_ready table.",
+        "Use analyze_progression_table.py, not run_experiment.py."
+      ]
+    },
+    {
+      "id": "mpower",
+      "name": "mPower",
+      "status": "access-needed",
+      "target": "parkinsons-watch",
+      "source_urls": [
+        "https://www.synapse.org/Synapse:syn4993293"
+      ],
+      "labels": "Self-reported Parkinson's/control, surveys, and mobile active-task metadata",
+      "language": "Mostly English mobile study context",
+      "tasks": ["phonation", "gait", "tapping", "cognition", "surveys"],
+      "participants": "Synapse portal lists 8,320 participants",
+      "raw_audio": "access-dependent",
+      "fetcher_dataset_id": null,
+      "training_mode": "raw_audio_embedding_scale_candidate",
+      "earlycare_use": "Scale candidate after Synapse data-use review; useful for sustained-vowel validation, not immediate hackathon training.",
+      "required_before_training": [
+        "Complete Synapse access and data-use statement.",
+        "Confirm whether voice files are available under approved access.",
+        "Map file IDs to participant metadata without committing subject exports."
+      ]
+    },
+    {
+      "id": "pc-gita",
+      "name": "PC-GITA",
+      "status": "access-needed",
+      "target": "parkinsons-watch",
+      "source_urls": [
+        "https://aclanthology.org/L14-1549/"
+      ],
+      "labels": "Parkinson's disease vs matched healthy controls",
+      "language": "Colombian Spanish",
+      "tasks": ["sustained vowels", "DDK", "words", "sentences", "reading", "monologue"],
+      "participants": "50 Parkinson's participants and 50 matched controls",
+      "raw_audio": "access-dependent",
+      "fetcher_dataset_id": null,
+      "training_mode": "cross_dataset_raw_audio_benchmark",
+      "earlycare_use": "Secondary benchmark for cross-dataset Parkinson's watch validation after access is approved.",
+      "required_before_training": [
+        "Confirm access and license.",
+        "Use only after NeuroVoz-style raw-audio pipeline is working.",
+        "Report cross-dataset performance separately."
+      ]
+    },
+    {
+      "id": "bridge2ai-voice",
+      "name": "Bridge2AI Voice",
+      "status": "access-needed",
+      "target": "broad-voice-health",
+      "source_urls": [
+        "https://physionet.org/content/b2ai-voice/",
+        "https://bridge2ai.org/datasets/"
+      ],
+      "labels": "Voice disorders, neurological disorders, mood disorders, respiratory disorders, and clinical metadata depending on release tier",
+      "language": "North American multi-site context",
+      "tasks": ["standardized voice tasks", "derived voice features", "questionnaires"],
+      "participants": "PhysioNet v3.1 describes 833 participants in the low-risk public release",
+      "raw_audio": "controlled-access",
+      "fetcher_dataset_id": null,
+      "training_mode": "future_validation_candidate",
+      "earlycare_use": "Future broad voice-health validation source; not a quick Parkinson's/concussion training set for this app.",
+      "required_before_training": [
+        "Confirm exact release tier and raw-audio access.",
+        "Review PhysioNet credentialing and data-use terms.",
+        "Avoid mixing disease domains without subgroup reporting."
+      ]
+    },
+    {
+      "id": "tbibank",
+      "name": "TBIBank / Coelho Corpus",
+      "status": "access-needed",
+      "target": "tbi-language-research",
+      "source_urls": [
+        "https://talkbank.org/tbi/",
+        "https://talkbank.org/tbi/access/English/Coelho.html"
+      ],
+      "labels": "Closed head injury vs non-brain-injured controls for selected corpora",
+      "language": "English for Coelho corpus; other TalkBank corpora vary",
+      "tasks": ["discourse", "conversation", "story narrative"],
+      "participants": "Coelho corpus describes 55 closed-head-injury speakers and 52 controls",
+      "raw_audio": "access-dependent",
+      "fetcher_dataset_id": null,
+      "training_mode": "future_tbi_discourse_research",
+      "earlycare_use": "Future discourse/language research only; not acute concussion detection.",
+      "required_before_training": [
+        "Join the relevant TalkBank/TBIBank access group.",
+        "Confirm corpus-specific terms.",
+        "Do not use as an acute concussion speech detector."
+      ]
+    },
+    {
+      "id": "concussion-speech-pilots",
+      "name": "Concussion speech pilot studies",
+      "status": "literature-only",
+      "target": "acute-concussion-research",
+      "source_urls": [
+        "https://neuro.jmir.org/2025/1/e64624"
+      ],
+      "labels": "Concussed participants, healthy controls, and neurodegenerative comparison groups in reported studies",
+      "language": "Study-dependent",
+      "tasks": ["PaTaKa", "sustained vowel"],
+      "participants": "Published pilot reports include concussed and control speech samples, but public app-ready raw-audio access is not established here",
+      "raw_audio": "not-verified-public",
+      "fetcher_dataset_id": null,
+      "training_mode": "literature_only_no_training",
+      "earlycare_use": "Evidence framing only. Keep concussion escalation symptom-led until an approved acute concussion speech dataset is available.",
+      "required_before_training": [
+        "Find a public or approved acute concussion speech dataset.",
+        "Confirm consent, labels, recording timing, and license.",
+        "Validate against clinical danger signs and avoid standalone diagnosis claims."
+      ]
+    }
+  ]
+}

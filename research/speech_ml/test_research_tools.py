@@ -14,6 +14,7 @@ from research.speech_ml import (
     analyze_progression_table,
     build_personal_baselines,
     convert_feature_table,
+    dataset_registry,
     evaluate_baseline,
     extract_embeddings,
     fetch_public_datasets,
@@ -58,6 +59,152 @@ class ResearchToolTests(unittest.TestCase):
         )
 
         self.assertIn("--dataset-fetch-manifest", result.stdout)
+
+    def test_dataset_registry_script_help_works_from_repo_root(self) -> None:
+        result = subprocess.run(
+            [sys.executable, "research/speech_ml/dataset_registry.py", "--help"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertIn("--ready-only", result.stdout)
+
+    def test_dataset_registry_reports_fetch_manifest_readiness(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            registry_path = root / "registry.json"
+            datasets_root = root / "datasets"
+            registry_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "use_rules": ["no diagnosis"],
+                        "datasets": [
+                            {
+                                "id": "uci",
+                                "name": "UCI Parkinson Speech",
+                                "status": "feature-only",
+                                "target": "parkinsons-watch",
+                                "source_urls": ["https://example.com/uci"],
+                                "labels": "pd/control",
+                                "language": "Turkish",
+                                "tasks": ["vowels"],
+                                "participants": "sample",
+                                "raw_audio": "no-feature-table",
+                                "fetcher_dataset_id": "uci-parkinson-speech",
+                                "training_mode": "feature_classification_smoke",
+                                "earlycare_use": "feature sanity check",
+                                "required_before_training": ["fetch"],
+                            },
+                            {
+                                "id": "tele",
+                                "name": "UCI Telemonitoring",
+                                "status": "feature-only",
+                                "target": "parkinsons-progression",
+                                "source_urls": ["https://example.com/tele"],
+                                "labels": "updrs",
+                                "language": "English",
+                                "tasks": ["voice measures"],
+                                "participants": "sample",
+                                "raw_audio": "no-feature-table",
+                                "fetcher_dataset_id": "uci-parkinsons-telemonitoring",
+                                "training_mode": "progression_analysis",
+                                "earlycare_use": "progression only",
+                                "required_before_training": ["fetch"],
+                            },
+                            {
+                                "id": "concussion",
+                                "name": "Concussion pilots",
+                                "status": "literature-only",
+                                "target": "acute-concussion-research",
+                                "source_urls": ["https://example.com/concussion"],
+                                "labels": "study dependent",
+                                "language": "study dependent",
+                                "tasks": ["pataka"],
+                                "participants": "sample",
+                                "raw_audio": "not-verified-public",
+                                "fetcher_dataset_id": None,
+                                "training_mode": "literature_only_no_training",
+                                "earlycare_use": "evidence framing",
+                                "required_before_training": ["find approved acute concussion speech data"],
+                            },
+                        ],
+                    }
+                )
+                + "\n"
+            )
+            uci_root = datasets_root / "uci-parkinson-speech"
+            uci_root.mkdir(parents=True)
+            (uci_root / "dataset_fetch_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "table_summaries": [
+                            {
+                                "path": "training_data.csv",
+                                "classification_ready": True,
+                                "progression_ready": False,
+                            }
+                        ]
+                    }
+                )
+                + "\n"
+            )
+            tele_root = datasets_root / "uci-parkinsons-telemonitoring"
+            tele_root.mkdir(parents=True)
+            (tele_root / "dataset_fetch_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "table_summaries": [
+                            {
+                                "path": "parkinsons_updrs.data",
+                                "classification_ready": False,
+                                "progression_ready": True,
+                            }
+                        ]
+                    }
+                )
+                + "\n"
+            )
+
+            report = dataset_registry.build_readiness_report(registry_path=registry_path, datasets_root=datasets_root)
+            entries = {entry["id"]: entry for entry in report["datasets"]}
+
+            self.assertEqual(report["counts"]["trainable_now"], 1)
+            self.assertEqual(report["counts"]["analysis_ready"], 1)
+            self.assertEqual(entries["uci"]["local_status"], "classification-ready")
+            self.assertEqual(entries["uci"]["ready_for"], ["feature_baseline_training"])
+            self.assertIn("run_experiment.py", entries["uci"]["next_action"])
+            self.assertFalse(entries["uci"]["app_model_allowed"])
+            self.assertEqual(entries["tele"]["local_status"], "progression-ready")
+            self.assertIn("analyze_progression_table.py", entries["tele"]["next_action"])
+            self.assertEqual(entries["concussion"]["local_status"], "not-applicable")
+            self.assertFalse(entries["concussion"]["trainable_now"])
+
+    def test_dataset_registry_writes_markdown_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_path = root / "readiness.md"
+            json_output_path = root / "readiness.json"
+
+            exit_code = dataset_registry.main(
+                [
+                    "--output",
+                    str(output_path),
+                    "--json-output",
+                    str(json_output_path),
+                    "--target",
+                    "parkinsons-watch",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            markdown = output_path.read_text()
+            payload = json.loads(json_output_path.read_text())
+            self.assertIn("EarlyCare Dataset Readiness", markdown)
+            self.assertIn("not a validated app model", markdown)
+            self.assertTrue(payload["datasets"])
+            self.assertTrue(all(entry["target"] == "parkinsons-watch" for entry in payload["datasets"]))
 
     def test_prepare_manifest_infers_rows_from_audio_folders(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

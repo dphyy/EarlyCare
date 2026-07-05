@@ -38,6 +38,16 @@ Keep data local only:
 - Derived embeddings/models/reports: `research/artifacts/`
 - Never commit dataset files, embeddings, model artifacts, or subject exports.
 
+Before download or training, inspect the structured registry:
+
+```bash
+python3 research/speech_ml/dataset_registry.py \
+  --output research/artifacts/dataset_readiness.md \
+  --json-output research/artifacts/dataset_readiness.json
+```
+
+The registry report checks `research/speech_ml/dataset_registry.json` plus any local `dataset_fetch_manifest.json` files under `research/datasets/`. It separates feature-baseline training, progression analysis, access-needed raw-audio work, and literature-only concussion evidence.
+
 For supported public feature-only datasets, start with the local fetcher:
 
 ```bash

@@ -12,6 +12,18 @@ The product does not need ML for the core MVP. These scripts only support option
 
 Do not use these scripts to claim Parkinson's disease, concussion, TBI, stroke, depression, or any other diagnosis.
 
+## Inspect Dataset Readiness
+
+Run the registry readiness check before fetching data or training:
+
+```bash
+python3 research/speech_ml/dataset_registry.py \
+  --output research/artifacts/dataset_readiness.md \
+  --json-output research/artifacts/dataset_readiness.json
+```
+
+The registry lives at `research/speech_ml/dataset_registry.json`. The report also inspects local `dataset_fetch_manifest.json` files under `research/datasets/` and marks datasets as feature-baseline trainable, progression-analysis ready, access-needed, or literature-only.
+
 ## Fetch Public Feature Datasets
 
 Download supported public feature-only datasets into ignored local folders:

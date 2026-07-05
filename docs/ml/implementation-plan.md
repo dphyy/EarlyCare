@@ -84,6 +84,7 @@ Speech ML can add support through slower response, large acute baseline deviatio
 | Task | Status | Evidence |
 | --- | --- | --- |
 | Data registry | Done | `docs/ml/dataset-registry.md` |
+| Structured dataset readiness | Done | `research/speech_ml/dataset_registry.json`, `research/speech_ml/dataset_registry.py`; separates feature-baseline training, progression analysis, access-needed raw audio, and literature-only concussion evidence. |
 | Public dataset fetcher | Done | `research/speech_ml/fetch_public_datasets.py`; fetches supported UCI feature datasets into ignored local folders and records extraction/readiness notes. |
 | Dataset manifest prep | Done | `research/speech_ml/prepare_manifest.py`, `research/speech_ml/test_research_tools.py` |
 | Feature extractor interface | Done | `backend/app/speech_features.py`, `backend/tests/test_speech_features.py` |
