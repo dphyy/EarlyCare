@@ -40,6 +40,15 @@ python3 research/speech_ml/fetch_public_datasets.py \
 
 Telemonitoring tables should show `progression_ready=true` and `classification_ready=false`; do not pass them into the PD/control classifier flow.
 
+After extraction, run an experiment directly from a fetch manifest. The runner selects the first `classification_ready=true` table and refuses progression-only manifests:
+
+```bash
+python3 research/speech_ml/run_experiment.py \
+  --dataset-fetch-manifest research/datasets/uci-parkinson-speech/dataset_fetch_manifest.json \
+  --output-dir research/artifacts \
+  --experiment-name uci-parkinson-feature
+```
+
 ## Manifest Format
 
 Create a CSV or JSONL manifest under `research/datasets/`:

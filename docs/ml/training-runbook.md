@@ -47,6 +47,17 @@ python3 research/speech_ml/fetch_public_datasets.py \
 
 The fetcher writes `dataset_fetch_manifest.json` with source URL, table candidates, nested archives, extraction notes, and table readiness summaries. Only run classifier training when a table summary has `classification_ready=true`. UCI's Parkinson speech package currently contains a nested `.rar`; install `unar`, `unrar`, or `7z` and re-run with `--allow-external-extractors` if the manifest says extraction is still required. UCI Parkinsons Telemonitoring should be treated as progression-only even when `progression_ready=true`.
 
+Once the fetch manifest contains a classifier-ready table, run the experiment from the manifest instead of copying table paths by hand:
+
+```bash
+python3 research/speech_ml/run_experiment.py \
+  --dataset-fetch-manifest research/datasets/uci-parkinson-speech/dataset_fetch_manifest.json \
+  --output-dir research/artifacts \
+  --experiment-name uci-parkinson-feature
+```
+
+The runner refuses fetch manifests with no `classification_ready=true` table, including progression-only Telemonitoring manifests.
+
 ## Dataset Shortlist
 
 | Dataset | Action | Training Use | Notes |

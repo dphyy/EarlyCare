@@ -7,12 +7,22 @@ import argparse
 import csv
 import json
 import re
+import sys
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 from research.speech_ml import build_personal_baselines, convert_feature_table, evaluate_baseline, extract_embeddings, train_baseline
+
+
+FETCH_MANIFEST_DEFAULTS = {
+    "uci-parkinson-speech": {"language": "Turkish"},
+    "uci-parkinsons-telemonitoring": {"language": ""},
+}
 
 
 def utc_now() -> str:
@@ -66,6 +76,55 @@ def review_row_count(rows: list[dict[str, str]]) -> int:
 
 def read_json(path: Path) -> dict[str, object]:
     return json.loads(path.read_text())
+
+
+def list_value(payload: dict[str, object], key: str) -> list[object]:
+    value = payload.get(key)
+    return value if isinstance(value, list) else []
+
+
+def str_value(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def select_fetch_manifest_table(manifest_path: Path, requested_table: str | None = None) -> dict[str, object]:
+    payload = read_json(manifest_path)
+    summaries = [summary for summary in list_value(payload, "table_summaries") if isinstance(summary, dict)]
+    if requested_table:
+        requested = requested_table.strip()
+        summaries = [summary for summary in summaries if str_value(summary.get("path")) == requested]
+        if not summaries:
+            raise SystemExit(f"Dataset fetch manifest has no table summary for {requested_table}")
+
+    ready = [summary for summary in summaries if summary.get("classification_ready") is True]
+    if not ready:
+        progression = [str_value(summary.get("path")) for summary in summaries if summary.get("progression_ready") is True]
+        detail = f" Progression-only tables: {', '.join(path for path in progression if path)}." if progression else ""
+        raise SystemExit(f"No classification_ready table found in {manifest_path}.{detail}")
+    return ready[0]
+
+
+def apply_fetch_manifest_defaults(args: argparse.Namespace) -> None:
+    if not args.dataset_fetch_manifest:
+        return
+    payload = read_json(args.dataset_fetch_manifest)
+    selected = select_fetch_manifest_table(args.dataset_fetch_manifest, args.fetch_table)
+    table_path = str_value(selected.get("path"))
+    if not table_path:
+        raise SystemExit(f"Selected table summary in {args.dataset_fetch_manifest} is missing path")
+    args.feature_table = args.dataset_fetch_manifest.parent / table_path
+    if not args.feature_table.exists():
+        raise SystemExit(f"Selected table from dataset fetch manifest does not exist: {args.feature_table}")
+
+    dataset_id = str_value(payload.get("dataset_id")) or ""
+    defaults = FETCH_MANIFEST_DEFAULTS.get(dataset_id, {})
+    args.dataset = args.dataset or str_value(payload.get("name")) or dataset_id or "fetched feature table"
+    args.language = args.language or defaults.get("language", "")
+    args.speaker_column = args.speaker_column or str_value(selected.get("speaker_column"))
+    args.label_column = args.label_column or str_value(selected.get("label_column"))
 
 
 def read_jsonl(path: Path) -> list[dict[str, object]]:
@@ -257,6 +316,8 @@ def write_model_card(
     metrics = evaluation.get("metrics") if isinstance(evaluation.get("metrics"), dict) else {}
     input_mode = "raw-audio manifest" if args.manifest else "feature table"
     input_label = args.manifest if args.manifest else args.feature_table
+    if getattr(args, "dataset_fetch_manifest", None):
+        input_label = f"{args.dataset_fetch_manifest} -> {args.feature_table}"
     model_label = args.model if args.manifest else "feature-table-zscore"
     split = evaluation.get("split") if isinstance(evaluation.get("split"), dict) else {}
     card_path.parent.mkdir(parents=True, exist_ok=True)
@@ -408,6 +469,8 @@ def write_report(
     metrics = evaluation.get("metrics") if isinstance(evaluation.get("metrics"), dict) else {}
     split = evaluation.get("split") if isinstance(evaluation.get("split"), dict) else {}
     input_label = args.manifest if args.manifest else args.feature_table
+    if getattr(args, "dataset_fetch_manifest", None):
+        input_label = f"{args.dataset_fetch_manifest} -> {args.feature_table}"
     input_mode = "raw-audio manifest" if args.manifest else "feature table"
     model_label = args.model if args.manifest else "feature-table-zscore"
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -501,6 +564,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     input_group = parser.add_mutually_exclusive_group(required=True)
     input_group.add_argument("--manifest", type=Path, help="Reviewed CSV or JSONL manifest.")
     input_group.add_argument("--feature-table", type=Path, help="Feature-only CSV or TSV dataset.")
+    input_group.add_argument("--dataset-fetch-manifest", type=Path, help="dataset_fetch_manifest.json written by fetch_public_datasets.py.")
     parser.add_argument("--audio-root", type=Path, default=Path("research/datasets"), help="Folder that manifest audio_path values are relative to.")
     parser.add_argument("--output-dir", type=Path, default=Path("research/artifacts"))
     parser.add_argument("--experiment-name", help="Human-readable experiment name. Defaults to manifest stem plus model.")
@@ -515,8 +579,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--limit", type=int, help="Process only the first N manifest rows.")
     parser.add_argument("--allow-review-rows", action="store_true", help="Allow rows marked needs-review to proceed.")
     parser.add_argument("--personal-min-samples", type=int, default=3, help="Minimum repeated samples per speaker for personal baseline artifact.")
-    parser.add_argument("--dataset", default="UCI Parkinson Speech", help="Dataset name for --feature-table mode.")
+    parser.add_argument("--dataset", help="Dataset name for feature-table mode.")
     parser.add_argument("--language", default="", help="Language stored in feature-table provenance.")
+    parser.add_argument("--fetch-table", help="Table path inside --dataset-fetch-manifest. Defaults to the first classification-ready table.")
     parser.add_argument("--speaker-column", help="Feature-table speaker/subject column.")
     parser.add_argument("--label-column", help="Feature-table class/label column.")
     parser.add_argument("--task-column", help="Feature-table task/sample column.")
@@ -529,6 +594,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--train-dataset and --test-dataset must be provided together")
     if args.personal_min_samples < 2:
         parser.error("--personal-min-samples must be at least 2")
+    apply_fetch_manifest_defaults(args)
+    if args.feature_table and not args.dataset:
+        args.dataset = "UCI Parkinson Speech"
     if not args.experiment_name:
         input_stem = args.manifest.stem if args.manifest else args.feature_table.stem
         model_name = args.model if args.manifest else "feature-table"

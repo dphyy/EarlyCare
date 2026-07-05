@@ -2,6 +2,8 @@ import csv
 import json
 import math
 import struct
+import subprocess
+import sys
 import tempfile
 import unittest
 import wave
@@ -36,6 +38,16 @@ def write_wav(path: Path, frequency: float) -> None:
 
 
 class ResearchToolTests(unittest.TestCase):
+    def test_run_experiment_script_help_works_from_repo_root(self) -> None:
+        result = subprocess.run(
+            [sys.executable, "research/speech_ml/run_experiment.py", "--help"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertIn("--dataset-fetch-manifest", result.stdout)
+
     def test_prepare_manifest_infers_rows_from_audio_folders(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -368,6 +380,106 @@ class ResearchToolTests(unittest.TestCase):
             self.assertIn("Model: `feature-table-zscore`", report)
             self.assertIn("Source Type", report)
             self.assertIn("feature table", model_card_path.read_text())
+
+    def test_run_experiment_supports_dataset_fetch_manifest_input(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dataset_root = root / "datasets" / "uci-parkinson-speech"
+            dataset_root.mkdir(parents=True)
+            input_path = dataset_root / "training_data.csv"
+            output_dir = root / "artifacts"
+            with input_path.open("w", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=["Subject id", "Jitter", "Shimmer", "class information"])
+                writer.writeheader()
+                writer.writerows(
+                    [
+                        {"Subject id": "pd-001", "Jitter": "10", "Shimmer": "12", "class information": "1"},
+                        {"Subject id": "pd-001", "Jitter": "11", "Shimmer": "13", "class information": "1"},
+                        {"Subject id": "pd-002", "Jitter": "12", "Shimmer": "14", "class information": "1"},
+                        {"Subject id": "pd-002", "Jitter": "13", "Shimmer": "15", "class information": "1"},
+                        {"Subject id": "ctl-001", "Jitter": "0", "Shimmer": "1", "class information": "0"},
+                        {"Subject id": "ctl-001", "Jitter": "1", "Shimmer": "2", "class information": "0"},
+                        {"Subject id": "ctl-002", "Jitter": "2", "Shimmer": "3", "class information": "0"},
+                        {"Subject id": "ctl-002", "Jitter": "3", "Shimmer": "4", "class information": "0"},
+                    ]
+                )
+            fetch_manifest_path = dataset_root / "dataset_fetch_manifest.json"
+            fetch_manifest_path.write_text(
+                json.dumps(
+                    {
+                        "dataset_id": "uci-parkinson-speech",
+                        "name": "UCI Parkinson's Speech with Multiple Types of Sound Recordings",
+                        "table_summaries": [
+                            {
+                                "path": "training_data.csv",
+                                "speaker_column": "Subject id",
+                                "label_column": "class information",
+                                "classification_ready": True,
+                                "progression_ready": False,
+                            }
+                        ],
+                    }
+                )
+                + "\n"
+            )
+
+            exit_code = run_experiment.main(
+                [
+                    "--dataset-fetch-manifest",
+                    str(fetch_manifest_path),
+                    "--output-dir",
+                    str(output_dir),
+                    "--experiment-name",
+                    "fetch-run",
+                    "--test-fraction",
+                    "0.5",
+                    "--personal-min-samples",
+                    "2",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            rows_path = output_dir / "fetch-run_embeddings.jsonl"
+            first_row = json.loads(rows_path.read_text().splitlines()[0])
+            self.assertEqual(first_row["dataset"], "UCI Parkinson's Speech with Multiple Types of Sound Recordings")
+            self.assertEqual(first_row["provenance"]["language"], "Turkish")
+            self.assertEqual(json.loads((output_dir / "fetch-run_eval.json").read_text())["status"], "ok")
+            report = (output_dir / "fetch-run_experiment.md").read_text()
+            self.assertIn("dataset_fetch_manifest.json", report)
+            self.assertIn("training_data.csv", report)
+
+    def test_run_experiment_refuses_non_classification_fetch_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dataset_root = root / "datasets" / "uci-parkinsons-telemonitoring"
+            dataset_root.mkdir(parents=True)
+            table_path = dataset_root / "parkinsons_updrs.data"
+            table_path.write_text("subject#,motor_UPDRS,total_UPDRS,Jitter(%)\n1,20,30,0.1\n")
+            fetch_manifest_path = dataset_root / "dataset_fetch_manifest.json"
+            fetch_manifest_path.write_text(
+                json.dumps(
+                    {
+                        "dataset_id": "uci-parkinsons-telemonitoring",
+                        "name": "UCI Parkinsons Telemonitoring",
+                        "table_summaries": [
+                            {
+                                "path": "parkinsons_updrs.data",
+                                "speaker_column": "subject#",
+                                "label_column": None,
+                                "classification_ready": False,
+                                "progression_ready": True,
+                            }
+                        ],
+                    }
+                )
+                + "\n"
+            )
+
+            with self.assertRaises(SystemExit) as raised:
+                run_experiment.main(["--dataset-fetch-manifest", str(fetch_manifest_path), "--output-dir", str(root / "artifacts")])
+
+            self.assertIn("No classification_ready table", str(raised.exception))
+            self.assertIn("Progression-only", str(raised.exception))
 
     def test_build_personal_baselines_writes_thresholds_and_insufficient_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
