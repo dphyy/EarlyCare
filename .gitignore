@@ -1,21 +1,28 @@
 # Dependencies
 node_modules/
 frontend/node_modules/
+.pnpm-store/
 
 # Build outputs
 dist/
 frontend/dist/
 frontend/tsconfig.tsbuildinfo
+*.tsbuildinfo
 
 # Python environments and caches
 .venv/
 backend/.venv/
+venv/
+env/
 __pycache__/
 **/__pycache__/
 *.pyc
+*.pyo
+*.pyd
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.hypothesis/
 
 # Local environment files and secrets
 .env
@@ -30,14 +37,29 @@ backend/.env.*
 
 # Local storage and generated call artifacts
 backend/storage/
+backend/storage/**
+*.webm
+*.wav
+*.mp3
+*.m4a
+*.ogg
 
 # OS/editor noise
 .DS_Store
+.idea/
+.vscode/
 *.local
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 # Coverage and temporary files
 coverage/
 .coverage
+.coverage.*
+htmlcov/
 tmp/
 temp/
+.tmp/

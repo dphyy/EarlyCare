@@ -145,9 +145,12 @@ class ProviderResult(BaseModel):
 
 class TranscriptSegment(BaseModel):
     text: str
+    originalText: str | None = None
+    englishText: str | None = None
     startTimeSeconds: float | None = None
     endTimeSeconds: float | None = None
     role: str | None = None
+    speaker: str | None = None
 
 
 class TranscriptMessage(BaseModel):
@@ -161,7 +164,9 @@ class RiskSignal(BaseModel):
     label: str
     severity: RiskLevel
     quotedText: str
+    highlightText: str | None = None
     reason: str
+    sentenceIndex: int | None = None
     startTimeSeconds: float | None = None
     endTimeSeconds: float | None = None
 
@@ -182,6 +187,8 @@ class CallRecord(BaseModel):
     audioFilePath: str | None = None
     audioUrl: str | None = None
     audioAvailable: bool
+    agentAudioCaptured: bool = False
+    currentSpeechProfile: SpeechProfile | None = None
     transcriptSegments: list[TranscriptSegment] = []
     riskSignals: list[RiskSignal] = []
     aiRiskFallbackUsed: bool = False

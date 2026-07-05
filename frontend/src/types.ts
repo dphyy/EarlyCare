@@ -102,9 +102,12 @@ export interface TranscriptMessage {
 
 export interface TranscriptSegment {
   text: string;
+  originalText?: string | null;
+  englishText?: string | null;
   startTimeSeconds?: number | null;
   endTimeSeconds?: number | null;
   role?: string | null;
+  speaker?: string | null;
 }
 
 export interface RiskSignal {
@@ -112,7 +115,9 @@ export interface RiskSignal {
   label: string;
   severity: RiskLevel;
   quotedText: string;
+  highlightText?: string | null;
   reason: string;
+  sentenceIndex?: number | null;
   startTimeSeconds?: number | null;
   endTimeSeconds?: number | null;
 }
@@ -133,6 +138,8 @@ export interface CallRecord {
   audioFilePath?: string | null;
   audioUrl?: string | null;
   audioAvailable: boolean;
+  agentAudioCaptured?: boolean;
+  currentSpeechProfile?: SpeechProfile | null;
   transcriptSegments?: TranscriptSegment[];
   riskSignals?: RiskSignal[];
   aiRiskFallbackUsed?: boolean;

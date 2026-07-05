@@ -61,3 +61,5 @@ Avoid these phrases:
 ## Demo Scope
 
 The current speech scoring is demo baseline scoring from structured speech metrics. It is not a validated ML model. Future versions can add wav2vec 2.0, WavLM, or MERaLiON SpeechEncoder embeddings behind the existing `SpeechProfile.embedding` shape, but the UI must not claim those embeddings are live until implemented and validated.
+
+The current ML implementation direction is documented in `docs/ml/implementation-plan.md`. The short version: build speech-deviation ML as a personal-baseline anomaly signal, validate Parkinson's watch offline with public speech datasets, and keep post-fall/concussion escalation symptom-led until there is a licensed, validated acute concussion speech dataset.

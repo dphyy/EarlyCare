@@ -50,7 +50,8 @@ import type {
   Scenario,
   Senior,
   TranscriptMessage,
-  VolunteerTask
+  VolunteerTask,
+  TranscriptSegment
 } from "./types";
 import "./styles.css";
 
@@ -58,6 +59,7 @@ const riskOrder: Record<RiskLevel, number> = { Green: 0, Watch: 1, Amber: 2, Red
 type AppView = "demo" | "call" | "dashboard";
 type CallState = "Ready" | "Connecting" | "In call" | "Saving" | "Analysing" | "Complete" | "Failed";
 type ScenarioTone = { label: string; risk: RiskLevel; detail: string };
+type AgentAudioFormat = "pcm_8000" | "pcm_16000" | "pcm_22050" | "pcm_24000" | "pcm_44100" | "pcm_48000" | "ulaw_8000";
 
 function scenarioToneFor(scenario: Scenario): ScenarioTone {
   if (scenario.id.includes("red")) return { label: "Emergency path", risk: "Red", detail: "Escalates to urgent medical help" };
@@ -117,7 +119,7 @@ function SectionHeading({
 
 function cleanTranscriptText(text: string): string {
   return text
-    .replace(/\s*\[(happy|relieved|good|sad|angry|calm|cheerful|concerned|empathetic|laughs?|sighs?|pause|thinking)\]\s*/gi, " ")
+    .replace(/\s*\[[^\]\r\n]{1,40}\]\s*/g, " ")
     .replace(/[ \t]+/g, " ")
     .trim();
 }
@@ -210,6 +212,280 @@ function EscalationTrail({ steps }: { steps: EscalationStep[] }) {
   );
 }
 
+function base64ToArrayBuffer(base64Audio: string): ArrayBuffer {
+  const binary = window.atob(base64Audio);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes.buffer;
+}
+
+function sampleRateFromFormat(format: AgentAudioFormat): number {
+  const rate = Number(format.split("_")[1]);
+  return Number.isFinite(rate) ? rate : 16000;
+}
+
+function decodeMuLawSample(value: number): number {
+  const inverted = ~value & 0xff;
+  const sign = inverted & 0x80;
+  const exponent = (inverted >> 4) & 0x07;
+  const mantissa = inverted & 0x0f;
+  let sample = ((mantissa << 3) + 0x84) << exponent;
+  sample -= 0x84;
+  return (sign ? -sample : sample) / 32768;
+}
+
+function createAgentAudioBuffer(audioContext: AudioContext, base64Audio: string, format: AgentAudioFormat): AudioBuffer {
+  const bytes = new Uint8Array(base64ToArrayBuffer(base64Audio));
+  const sampleRate = sampleRateFromFormat(format);
+  const sampleCount = format.startsWith("pcm_") ? Math.floor(bytes.length / 2) : bytes.length;
+  const audioBuffer = audioContext.createBuffer(1, sampleCount, sampleRate);
+  const channel = audioBuffer.getChannelData(0);
+
+  if (format.startsWith("pcm_")) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    for (let index = 0; index < sampleCount; index += 1) {
+      channel[index] = view.getInt16(index * 2, true) / 32768;
+    }
+    return audioBuffer;
+  }
+
+  if (format === "ulaw_8000") {
+    for (let index = 0; index < sampleCount; index += 1) {
+      channel[index] = decodeMuLawSample(bytes[index]);
+    }
+    return audioBuffer;
+  }
+
+  throw new Error(`Unsupported agent audio format: ${format}`);
+}
+
+function multilingualAgentPrompt(senior: Senior): string {
+  return [
+    `You are EarlyCare calling ${senior.name} for a routine wellbeing check-in.`,
+    `The patient profile says their preferred language is ${senior.preferredLanguage}, but they may speak English, Mandarin, Malay, Tamil, Singlish, or a mix.`,
+    "The live call transcript must stay in the original spoken language. Do not translate the patient's message before responding.",
+    "For each agent reply, use the language or dialect that the patient used the most in their immediately previous response. If the patient code-switches, follow the dominant language from that one previous response.",
+    "If the patient asks to speak Chinese or any other language, switch immediately.",
+    "Ask concise turn-by-turn questions about falls, head impact, headache, dizziness, vomiting, confusion, weakness, speech difficulty, food and water, and whether they can ask for help.",
+    "Do not add bracketed emotional cues such as [concerned] or [happy]."
+  ].join(" ");
+}
+
+function nextReplyLanguageInstruction(patientText: string): string {
+  return [
+    "For your next reply only, respond in the language or dialect used most in this patient's immediately previous response.",
+    "Do not translate their response into English before replying.",
+    `Previous patient response: ${patientText}`
+  ].join(" ");
+}
+
+function looksNonEnglish(text: string): boolean {
+  return /[\u4e00-\u9fff\u3040-\u30ff\u0b80-\u0bff\u0d00-\u0d7f\u0600-\u06ff]/.test(text);
+}
+
+function splitSentences(text: string): string[] {
+  const cleaned = cleanTranscriptText(text);
+  if (!cleaned) return [];
+  return cleaned.split(/(?<=[.!?。？！])\s+/).map((line) => line.trim()).filter(Boolean);
+}
+
+function relativeSeconds(timestamp: string | undefined, startedAt: string): number | null {
+  if (!timestamp || !startedAt) return null;
+  const current = new Date(timestamp).getTime();
+  const start = new Date(startedAt).getTime();
+  if (!Number.isFinite(current) || !Number.isFinite(start)) return null;
+  return Math.max(0, (current - start) / 1000);
+}
+
+function sentenceTimeFromMessages(call: CallRecord, sentenceIndex: number, sentenceCount: number): number | null {
+  const timedMessages = call.transcriptMessages
+    .map((message, index) => ({ message, index, start: relativeSeconds(message.timestamp, call.startedAt) }))
+    .filter((item): item is { message: TranscriptMessage; index: number; start: number } => item.start !== null);
+  if (!timedMessages.length) return null;
+  const mappedIndex = Math.min(timedMessages.length - 1, Math.round(sentenceIndex * (timedMessages.length - 1) / Math.max(1, sentenceCount - 1)));
+  return timedMessages[mappedIndex].start;
+}
+
+function isPatientSegment(segment: TranscriptSegment): boolean {
+  const text = cleanTranscriptText(segment.englishText || segment.text);
+  return segment.role === "Patient" || segment.speaker === "Patient" || text.startsWith("Patient:");
+}
+
+function textWithoutSpeakerLabel(text: string): string {
+  return cleanTranscriptText(text).replace(/^(Agent|Patient):\s*/i, "");
+}
+
+function wordCount(text: string): number {
+  const matches = textWithoutSpeakerLabel(text).match(/\w+|[\u4e00-\u9fff]/g);
+  return Math.max(1, matches?.length ?? 1);
+}
+
+function estimatedUtteranceSeconds(text: string): number {
+  return Math.min(12, Math.max(0.9, wordCount(text) / 2.4));
+}
+
+function isAgentSegment(segment: TranscriptSegment): boolean {
+  const text = cleanTranscriptText(segment.englishText || segment.text);
+  return segment.role === "Agent" || segment.speaker === "Agent" || text.startsWith("Agent:");
+}
+
+function agentEstimatedEnd(segment: TranscriptSegment): number | null {
+  if (typeof segment.startTimeSeconds !== "number") return null;
+  const estimatedEnd = segment.startTimeSeconds + estimatedUtteranceSeconds(segment.englishText || segment.text);
+  if (typeof segment.endTimeSeconds === "number" && segment.endTimeSeconds > segment.startTimeSeconds) {
+    return Math.min(segment.endTimeSeconds, estimatedEnd);
+  }
+  return estimatedEnd;
+}
+
+function previousAgentReplyEnd(segments: TranscriptSegment[], patientSegmentIndex: number): number | null {
+  for (let index = patientSegmentIndex - 1; index >= 0; index -= 1) {
+    const candidate = segments[index];
+    if (isAgentSegment(candidate)) {
+      return agentEstimatedEnd(candidate);
+    }
+  }
+  return null;
+}
+
+function getEnglishTranscriptSegments(call: CallRecord): TranscriptSegment[] {
+  const segments = call.transcriptSegments ?? [];
+  const joinedSegmentEnglish = segments.map((segment) => cleanTranscriptText(segment.englishText || segment.text)).join("\n").trim();
+  const shouldUseCallTranscript =
+    !segments.length ||
+    !joinedSegmentEnglish ||
+    joinedSegmentEnglish === cleanTranscriptText(call.originalTranscript) ||
+    (looksNonEnglish(joinedSegmentEnglish) && !looksNonEnglish(call.englishTranscript));
+
+  if (shouldUseCallTranscript) {
+    const sentences = splitSentences(call.englishTranscript);
+    if (!sentences.length) return [{ text: call.englishTranscript, englishText: call.englishTranscript }];
+    if (segments.length === 1) {
+      return sentences.map((sentence, index) => ({
+        text: sentence,
+        englishText: sentence,
+        originalText: index === 0 ? segments[0].originalText : undefined,
+        startTimeSeconds: index === 0 ? segments[0].startTimeSeconds ?? sentenceTimeFromMessages(call, index, sentences.length) : sentenceTimeFromMessages(call, index, sentences.length),
+        endTimeSeconds: index === sentences.length - 1 ? segments[0].endTimeSeconds : undefined
+      }));
+    }
+    return sentences.map((sentence, index) => ({
+      text: sentence,
+      englishText: sentence,
+      startTimeSeconds: segments[index]?.startTimeSeconds ?? sentenceTimeFromMessages(call, index, sentences.length),
+      endTimeSeconds: segments[index]?.endTimeSeconds
+    }));
+  }
+
+  if (segments.length === 1) {
+    const text = cleanTranscriptText(segments[0].englishText || segments[0].text);
+    const sentences = splitSentences(text);
+    if (sentences.length > 1) {
+      return sentences.map((sentence, index) => ({
+        ...segments[0],
+        text: sentence,
+        englishText: sentence,
+        startTimeSeconds: index === 0 ? segments[0].startTimeSeconds ?? sentenceTimeFromMessages(call, index, sentences.length) : sentenceTimeFromMessages(call, index, sentences.length),
+        endTimeSeconds: index === sentences.length - 1 ? segments[0].endTimeSeconds : undefined
+      }));
+    }
+  }
+
+  return segments;
+}
+
+function buildTranscriptText(call: CallRecord, language: "original" | "english"): string {
+  if (language === "english") {
+    return getEnglishTranscriptSegments(call).map((segment) => cleanTranscriptText(segment.englishText || segment.text)).filter(Boolean).join("\n") || call.englishTranscript;
+  }
+  return call.originalTranscript.replace(/\bSenior:/g, "Patient:");
+}
+
+function HighlightedEnglishTranscript({
+  call,
+  highlightedSignalId,
+  onSelectSignal
+}: {
+  call: CallRecord;
+  highlightedSignalId: string | null;
+  onSelectSignal: (signal: RiskSignal) => void;
+}) {
+  const segments = getEnglishTranscriptSegments(call);
+  const patientSegments = segments
+    .map((segment, segmentIndex) => ({ segment, segmentIndex }))
+    .filter(({ segment }) => isPatientSegment(segment));
+  const signals = call.riskSignals ?? [];
+
+  return (
+    <div className="highlighted-transcript">
+      {segments.map((segment, segmentIndex) => {
+        const text = cleanTranscriptText(segment.englishText || segment.text);
+        const patientIndex = patientSegments.findIndex((item) => item.segmentIndex === segmentIndex);
+        const patientOnly = patientIndex >= 0;
+        const matches = signals.filter((signal) => {
+          const highlight = cleanTranscriptText(signal.highlightText || signal.quotedText);
+          if (!patientOnly || !highlight) return false;
+          const lowerHighlight = highlight.toLowerCase();
+          const patientText = textWithoutSpeakerLabel(text).toLowerCase();
+          const exactPatientMatchExists = patientSegments.some((item) =>
+            textWithoutSpeakerLabel(item.segment.englishText || item.segment.text).toLowerCase().includes(lowerHighlight)
+          );
+          return patientText.includes(lowerHighlight) || (!exactPatientMatchExists && signal.sentenceIndex === patientIndex);
+        });
+
+        if (!matches.length || !text) {
+          return <p key={`${call.id}-segment-${segmentIndex}`}>{text}</p>;
+        }
+
+        const signal = matches[0];
+        const signalWithSentenceTime: RiskSignal = {
+          ...signal,
+          startTimeSeconds: previousAgentReplyEnd(segments, segmentIndex) ?? segment.startTimeSeconds ?? signal.startTimeSeconds,
+          endTimeSeconds: segment.endTimeSeconds ?? signal.endTimeSeconds,
+          sentenceIndex: patientIndex >= 0 ? patientIndex : signal.sentenceIndex
+        };
+        const highlight = cleanTranscriptText(signal.highlightText || signal.quotedText);
+        const patientText = textWithoutSpeakerLabel(text);
+        const patientTextStart = text.indexOf(patientText);
+        const matchIndexInPatientText = patientText.toLowerCase().indexOf(highlight.toLowerCase());
+        const matchIndex = matchIndexInPatientText >= 0 ? Math.max(0, patientTextStart) + matchIndexInPatientText : -1;
+        if (matchIndex < 0) {
+          return (
+            <p key={`${call.id}-segment-${segmentIndex}`}>
+              <button
+                className={`transcript-highlight ${highlightedSignalId === `${call.id}-${signal.id}` ? "active" : ""}`}
+                id={`signal-${call.id}-${signal.id}`}
+                onClick={() => onSelectSignal(signalWithSentenceTime)}
+              >
+                {text}
+              </button>
+            </p>
+          );
+        }
+
+        const before = text.slice(0, matchIndex);
+        const matched = text.slice(matchIndex, matchIndex + highlight.length);
+        const after = text.slice(matchIndex + highlight.length);
+        return (
+          <p key={`${call.id}-segment-${segmentIndex}`}>
+            {before}
+            <button
+              className={`transcript-highlight ${highlightedSignalId === `${call.id}-${signal.id}` ? "active" : ""}`}
+              id={`signal-${call.id}-${signal.id}`}
+              onClick={() => onSelectSignal(signalWithSentenceTime)}
+            >
+              {matched}
+            </button>
+            {after}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
 function ScoreBars({ assessment }: { assessment: CheckInSession["riskAssessment"] }) {
   const scores = [
     ["Speech deviation", assessment.speechDeviationScore],
@@ -240,10 +516,89 @@ function TranscriptBubbleList({ messages }: { messages: TranscriptMessage[] }) {
     <div className="transcript">
       {messages.map((line, index) => (
         <p className={line.role === "Senior" ? "senior-line" : line.role === "System" ? "system-line" : "agent-line"} key={`${line.role}-${line.text}-${index}`}>
-          {line.role}: {line.text}
+          {line.role === "Senior" ? "Patient" : line.role}: {line.text}
         </p>
       ))}
     </div>
+  );
+}
+
+function formatMetric(value: number | undefined | null, suffix = ""): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return "Not enough data";
+  return `${Math.round(value)}${suffix}`;
+}
+
+function averageProfiles(profiles: NonNullable<CallRecord["currentSpeechProfile"]>[]): NonNullable<CallRecord["currentSpeechProfile"]> | null {
+  if (!profiles.length) return null;
+  const sum = profiles.reduce(
+    (totals, profile) => ({
+      speechRate: totals.speechRate + (profile.speechRate || 0),
+      avgPauseMs: totals.avgPauseMs + (profile.avgPauseMs || 0),
+      responseLatencyMs: totals.responseLatencyMs + (profile.responseLatencyMs || 0),
+      pitchVariability: totals.pitchVariability + (profile.pitchVariability || 0),
+      phraseAccuracy: totals.phraseAccuracy + (profile.phraseAccuracy || 0)
+    }),
+    { speechRate: 0, avgPauseMs: 0, responseLatencyMs: 0, pitchVariability: 0, phraseAccuracy: 0 }
+  );
+  return {
+    speechRate: sum.speechRate / profiles.length,
+    avgPauseMs: sum.avgPauseMs / profiles.length,
+    responseLatencyMs: sum.responseLatencyMs / profiles.length,
+    pitchVariability: sum.pitchVariability / profiles.length,
+    phraseAccuracy: sum.phraseAccuracy / profiles.length,
+    updatedAt: profiles[0]?.updatedAt ?? new Date().toISOString()
+  };
+}
+
+function baselineFromCalls(senior: Senior, calls: CallRecord[]): { profile: Senior["baselineSpeechProfile"]; source: string } {
+  const profiles = calls
+    .filter((call) => call.currentSpeechProfile)
+    .slice(0, 5)
+    .map((call) => call.currentSpeechProfile)
+    .filter((profile): profile is NonNullable<CallRecord["currentSpeechProfile"]> => Boolean(profile));
+  const averaged = averageProfiles(profiles);
+  if (averaged) {
+    return {
+      profile: { ...senior.baselineSpeechProfile, ...averaged },
+      source: profiles.length >= 5 ? "Average of latest 5 recordings" : `Average of ${profiles.length} recording${profiles.length === 1 ? "" : "s"}`
+    };
+  }
+  return { profile: senior.baselineSpeechProfile, source: "Default baseline until recordings are available" };
+}
+
+function SpeechTimingPanel({ senior, call, calls }: { senior: Senior; call: CallRecord | null; calls: CallRecord[] }) {
+  const baselineState = baselineFromCalls(senior, calls);
+  const baseline = baselineState.profile;
+  const current = call?.currentSpeechProfile ?? null;
+  const rows = [
+    { label: "Speech rate", baseline: `${Math.round(baseline.speechRate)} wpm`, current: formatMetric(current?.speechRate, " wpm") },
+    { label: "Average pause", baseline: `${Math.round(baseline.avgPauseMs)} ms`, current: formatMetric(current?.avgPauseMs, " ms") },
+    { label: "Response latency", baseline: `${Math.round(baseline.responseLatencyMs)} ms`, current: formatMetric(current?.responseLatencyMs, " ms") },
+    { label: "Pitch variability", baseline: baseline.pitchVariability.toFixed(2), current: formatMetric(current?.pitchVariability) },
+    { label: "Phrase accuracy", baseline: `${Math.round(baseline.phraseAccuracy * 100)}%`, current: formatMetric(current ? current.phraseAccuracy * 100 : null, "%") }
+  ];
+
+  return (
+    <section className="speech-timing-panel">
+      <div className="panel-heading compact-heading">
+        <h3>Speech timing</h3>
+        <span>{baselineState.source}</span>
+      </div>
+      <div className="speech-metric-grid">
+        {rows.map((row) => (
+          <div className="speech-metric" key={row.label}>
+            <span>{row.label}</span>
+            <strong>{row.current}</strong>
+            <small>Baseline {row.baseline}</small>
+          </div>
+        ))}
+      </div>
+      {!current || !current.avgPauseMs || !current.responseLatencyMs ? (
+        <p className="metric-note">
+          Not enough timing data yet. Improve this by keeping full-call recording enabled, ensuring Meralion returns timestamps/diarization, and letting the agent ask short turn-by-turn questions so patient responses can be timed cleanly.
+        </p>
+      ) : null}
+    </section>
   );
 }
 
@@ -266,12 +621,19 @@ function AgentsCall({
   const [startedAt, setStartedAt] = useState<string | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const mixedDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const agentAudioFormatRef = useRef<AgentAudioFormat>("pcm_16000");
+  const agentPlaybackTimeRef = useRef(0);
+  const agentAudioCapturedRef = useRef(false);
+  const agentAudioWarningShownRef = useRef(false);
   const transcriptRef = useRef<TranscriptMessage[]>([]);
 
   const conversation = useConversation({
     onConnect: () => {
       setCallState("In call");
       setCallMessage("Agent connected. Waiting for the first check-in question...");
+      conversation.sendContextualUpdate(multilingualAgentPrompt(selectedSenior));
       window.setTimeout(() => {
         const hasAgentMessage = transcriptRef.current.some((line) => line.role === "Agent");
         if (!hasAgentMessage) {
@@ -279,6 +641,7 @@ function AgentsCall({
             [
               `Begin the EarlyCare check-in for ${selectedSenior.name}.`,
               `Preferred language: ${selectedSenior.preferredLanguage}.`,
+              "Continue in the patient's dominant language or dialect from their previous response.",
               `Known conditions: ${selectedSenior.knownConditions.join(", ") || "none listed"}.`,
               `Focus areas: ${selectedSenior.promptFocus.join(", ") || "basic wellbeing"}.`,
               "Ask for consent, then cover wellbeing, falls, head impact, whiplash or jolts, headache, dizziness, vomiting, confusion, weakness, numbness, slurred speech, food, water, medication, loneliness, and the repeat phrase.",
@@ -306,6 +669,29 @@ function AgentsCall({
     onDebug: (debug) => {
       setDebugMessage(JSON.stringify(debug));
     },
+    onConversationMetadata: (metadata) => {
+      agentAudioFormatRef.current = metadata.agent_output_audio_format as AgentAudioFormat;
+    },
+    onAudio: (base64Audio) => {
+      const audioContext = audioContextRef.current;
+      const destination = mixedDestinationRef.current;
+      if (!audioContext || !destination) return;
+      try {
+        const audioBuffer = createAgentAudioBuffer(audioContext, base64Audio, agentAudioFormatRef.current);
+        const source = audioContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(destination);
+        const startAt = Math.max(audioContext.currentTime, agentPlaybackTimeRef.current);
+        source.start(startAt);
+        agentPlaybackTimeRef.current = startAt + audioBuffer.duration;
+        agentAudioCapturedRef.current = true;
+      } catch (error) {
+        if (!agentAudioWarningShownRef.current) {
+          agentAudioWarningShownRef.current = true;
+          setDebugMessage(error instanceof Error ? error.message : "Unable to mix agent audio into recording.");
+        }
+      }
+    },
     onMessage: (message) => {
       const line: TranscriptMessage = {
         role: message.role === "agent" ? "Agent" : "Senior",
@@ -314,6 +700,9 @@ function AgentsCall({
       };
       transcriptRef.current = [...transcriptRef.current, line];
       setTranscriptMessages(transcriptRef.current);
+      if (line.role === "Senior" && line.text) {
+        conversation.sendContextualUpdate(nextReplyLanguageInstruction(line.text));
+      }
     }
   });
 
@@ -329,7 +718,19 @@ function AgentsCall({
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
-      const recorder = new MediaRecorder(stream);
+      const AudioContextConstructor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextConstructor) throw new Error("Browser audio recording is not supported.");
+      const audioContext = new AudioContextConstructor();
+      const destination = audioContext.createMediaStreamDestination();
+      audioContext.createMediaStreamSource(stream).connect(destination);
+      audioContextRef.current = audioContext;
+      mixedDestinationRef.current = destination;
+      agentPlaybackTimeRef.current = audioContext.currentTime;
+      agentAudioCapturedRef.current = false;
+      agentAudioWarningShownRef.current = false;
+      agentAudioFormatRef.current = "pcm_16000";
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
+      const recorder = new MediaRecorder(destination.stream, { mimeType });
       recorder.start();
       recorderRef.current = recorder;
 
@@ -391,7 +792,11 @@ function AgentsCall({
     formData.append("startedAt", startedAt ?? new Date().toISOString());
     formData.append("completedAt", new Date().toISOString());
     formData.append("transcriptMessages", JSON.stringify(transcriptRef.current));
-    if (audioBlob) formData.append("audio", audioBlob, "mic-audio.webm");
+    formData.append("agentAudioCaptured", String(agentAudioCapturedRef.current));
+    audioContextRef.current?.close();
+    audioContextRef.current = null;
+    mixedDestinationRef.current = null;
+    if (audioBlob) formData.append("audio", audioBlob, "full-call.webm");
 
     setCallState("Analysing");
     const saved = await saveCall(formData);
@@ -800,6 +1205,8 @@ function OfficerDashboard({
           ))}
         </div>
 
+        <SpeechTimingPanel senior={selectedSenior} call={selectedCalls[0] ?? null} calls={selectedCalls} />
+
         <section className="analysis-panel dashboard-analysis">
           <div className="analysis-header">
             <div>
@@ -880,7 +1287,8 @@ function OfficerDashboard({
                       </div>
                       <small>
                         {call.translationProvider}
-                        {call.translationFallbackUsed ? " fallback" : ""} · audio {call.audioAvailable ? "saved" : "missing"}
+                        {call.translationFallbackUsed ? " fallback" : ""} · audio {call.audioAvailable ? "saved" : "missing"} · agent voice{" "}
+                        {call.agentAudioCaptured ? "captured" : "not confirmed"}
                       </small>
                     </div>
                     <p>
@@ -924,14 +1332,18 @@ function OfficerDashboard({
                     ) : null}
 
                     <CategoryList categories={call.categories ?? []} />
-                    <div className="transcript-columns">
-                      <div>
-                        <h4>Original transcript</h4>
-                        <pre>{call.originalTranscript}</pre>
-                      </div>
+                    <div className="transcript-stack">
                       <div>
                         <h4>English transcript</h4>
-                        <pre>{call.englishTranscript}</pre>
+                        <HighlightedEnglishTranscript
+                          call={call}
+                          highlightedSignalId={highlightedSignalId}
+                          onSelectSignal={(signal) => playRiskSignal(call, signal)}
+                        />
+                      </div>
+                      <div>
+                        <h4>Original transcript</h4>
+                        <pre>{buildTranscriptText(call, "original")}</pre>
                       </div>
                     </div>
                   </article>
