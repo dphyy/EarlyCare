@@ -66,6 +66,52 @@ class CallWorkflowTests(unittest.TestCase):
                 main.CHECKINS_STATE_PATH = original_checkins_path
                 main.TASKS_STATE_PATH = original_tasks_path
 
+    def test_corrupt_checkin_state_is_quarantined_and_reseeded(self) -> None:
+        with TemporaryDirectory() as tmp:
+            original_state_root = main.STATE_STORAGE_ROOT
+            original_checkins_path = main.CHECKINS_STATE_PATH
+            original_tasks_path = main.TASKS_STATE_PATH
+            state_root = Path(tmp) / "state"
+            main.STATE_STORAGE_ROOT = state_root
+            main.CHECKINS_STATE_PATH = state_root / "checkins.json"
+            main.TASKS_STATE_PATH = state_root / "volunteer-tasks.json"
+            try:
+                state_root.mkdir(parents=True)
+                main.CHECKINS_STATE_PATH.write_text("{broken json", encoding="utf-8")
+
+                checkins = main._load_checkins()
+
+                self.assertEqual([checkin.id for checkin in checkins], [checkin.id for checkin in main.CHECKINS])
+                self.assertTrue(list(state_root.glob("checkins.json.corrupt-*")))
+                self.assertTrue(main.CHECKINS_STATE_PATH.read_text(encoding="utf-8").lstrip().startswith("["))
+            finally:
+                main.STATE_STORAGE_ROOT = original_state_root
+                main.CHECKINS_STATE_PATH = original_checkins_path
+                main.TASKS_STATE_PATH = original_tasks_path
+
+    def test_invalid_task_state_is_quarantined_and_reseeded(self) -> None:
+        with TemporaryDirectory() as tmp:
+            original_state_root = main.STATE_STORAGE_ROOT
+            original_checkins_path = main.CHECKINS_STATE_PATH
+            original_tasks_path = main.TASKS_STATE_PATH
+            state_root = Path(tmp) / "state"
+            main.STATE_STORAGE_ROOT = state_root
+            main.CHECKINS_STATE_PATH = state_root / "checkins.json"
+            main.TASKS_STATE_PATH = state_root / "volunteer-tasks.json"
+            try:
+                state_root.mkdir(parents=True)
+                main.TASKS_STATE_PATH.write_text(json.dumps([{"id": "missing-required-fields"}]), encoding="utf-8")
+
+                tasks = main._load_tasks()
+
+                self.assertEqual([task.id for task in tasks], [task.id for task in main.VOLUNTEER_TASKS])
+                self.assertTrue(list(state_root.glob("volunteer-tasks.json.corrupt-*")))
+                self.assertNotIn("missing-required-fields", main.TASKS_STATE_PATH.read_text(encoding="utf-8"))
+            finally:
+                main.STATE_STORAGE_ROOT = original_state_root
+                main.CHECKINS_STATE_PATH = original_checkins_path
+                main.TASKS_STATE_PATH = original_tasks_path
+
     def test_schedule_items_use_frequency_and_last_contact(self) -> None:
         with TemporaryDirectory() as tmp:
             original_state_root = main.STATE_STORAGE_ROOT

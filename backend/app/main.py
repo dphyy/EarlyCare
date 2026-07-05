@@ -5,13 +5,14 @@ from contextlib import suppress
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from datetime import datetime, timedelta, timezone
+from typing import TypeVar
 from uuid import uuid4
 
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from dotenv import load_dotenv
 
 from app.data import CHECKINS, SCENARIOS, SENIORS, VOLUNTEER_TASKS
@@ -71,6 +72,7 @@ STATE_STORAGE_ROOT = BACKEND_ROOT / "storage" / "state"
 CHECKINS_STATE_PATH = STATE_STORAGE_ROOT / "checkins.json"
 TASKS_STATE_PATH = STATE_STORAGE_ROOT / "volunteer-tasks.json"
 app = FastAPI(title="EarlyCare API", version="0.1.0")
+StateRecord = TypeVar("StateRecord", bound=BaseModel)
 
 
 def _cors_origins() -> list[str]:
@@ -183,9 +185,43 @@ def _state_json_default(path: Path, fallback: str) -> None:
     _write_text_atomic(path, fallback)
 
 
+def _state_corrupt_backup_path(path: Path) -> Path:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    for index in range(20):
+        suffix = f".{index}" if index else ""
+        candidate = path.with_name(f"{path.name}.corrupt-{stamp}{suffix}")
+        if not candidate.exists():
+            return candidate
+    return path.with_name(f"{path.name}.corrupt-{stamp}.{uuid4().hex[:8]}")
+
+
+def _quarantine_state_file(path: Path) -> Path | None:
+    if not path.exists():
+        return None
+    backup_path = _state_corrupt_backup_path(path)
+    with suppress(OSError):
+        path.replace(backup_path)
+        return backup_path
+    return None
+
+
+def _load_state_records(path: Path, defaults: list[StateRecord], model: type[StateRecord]) -> list[StateRecord]:
+    fallback_payload = [record.model_dump() for record in defaults]
+    fallback_json = json.dumps(fallback_payload, indent=2)
+    _state_json_default(path, fallback_json)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, list):
+            raise ValueError("State file must contain a JSON list")
+        return [model.model_validate(item) for item in payload]
+    except (json.JSONDecodeError, TypeError, ValueError, ValidationError):
+        _quarantine_state_file(path)
+        _write_text_atomic(path, fallback_json)
+        return [model.model_validate(item) for item in fallback_payload]
+
+
 def _load_checkins() -> list[CheckInSession]:
-    _state_json_default(CHECKINS_STATE_PATH, json.dumps([checkin.model_dump() for checkin in CHECKINS], indent=2))
-    return [CheckInSession.model_validate(item) for item in json.loads(CHECKINS_STATE_PATH.read_text(encoding="utf-8"))]
+    return _load_state_records(CHECKINS_STATE_PATH, CHECKINS, CheckInSession)
 
 
 def _save_checkins(checkins: list[CheckInSession]) -> None:
@@ -193,8 +229,7 @@ def _save_checkins(checkins: list[CheckInSession]) -> None:
 
 
 def _load_tasks() -> list[VolunteerTask]:
-    _state_json_default(TASKS_STATE_PATH, json.dumps([task.model_dump() for task in VOLUNTEER_TASKS], indent=2))
-    return [VolunteerTask.model_validate(item) for item in json.loads(TASKS_STATE_PATH.read_text(encoding="utf-8"))]
+    return _load_state_records(TASKS_STATE_PATH, VOLUNTEER_TASKS, VolunteerTask)
 
 
 def _save_tasks(tasks: list[VolunteerTask]) -> None:
