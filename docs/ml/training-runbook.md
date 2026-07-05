@@ -67,6 +67,7 @@ python3 research/speech_ml/analyze_progression_table.py \
 ```
 
 This outputs subject-level UPDRS trend summaries and exploratory voice-feature associations. Treat it as progression research only, not Parkinson's/control classification and not an app model.
+It also writes a markdown report next to the JSON output for human review.
 
 ## Dataset Shortlist
 

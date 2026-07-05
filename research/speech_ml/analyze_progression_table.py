@@ -262,6 +262,38 @@ def feature_associations(rows: list[dict[str, str]], speaker_column: str, featur
     return associations
 
 
+def mean(values: list[float]) -> float | None:
+    return sum(values) / len(values) if values else None
+
+
+def target_trend_summary(trends: list[dict[str, object]], targets: list[str]) -> dict[str, dict[str, object]]:
+    summaries: dict[str, dict[str, object]] = {}
+    for target in targets:
+        deltas: list[float] = []
+        slopes: list[float] = []
+        for trend in trends:
+            if trend.get("status") != "ok" or not isinstance(trend.get("targets"), dict):
+                continue
+            target_payload = trend["targets"].get(target)
+            if not isinstance(target_payload, dict):
+                continue
+            delta = target_payload.get("delta")
+            slope = target_payload.get("slope_per_time_unit")
+            if isinstance(delta, (int, float)):
+                deltas.append(float(delta))
+            if isinstance(slope, (int, float)):
+                slopes.append(float(slope))
+        summaries[target] = {
+            "speakers": len(deltas),
+            "mean_delta": round_or_none(mean(deltas)),
+            "mean_slope_per_time_unit": round_or_none(mean(slopes)),
+            "increasing": sum(1 for value in deltas if value > 0),
+            "decreasing": sum(1 for value in deltas if value < 0),
+            "unchanged": sum(1 for value in deltas if value == 0),
+        }
+    return summaries
+
+
 def build_report(args: argparse.Namespace, input_path: Path, selected_summary: dict[str, object] | None = None) -> dict[str, object]:
     rows = read_table(input_path)
     if not rows:
@@ -303,6 +335,7 @@ def build_report(args: argparse.Namespace, input_path: Path, selected_summary: d
         "numeric_feature_columns": features,
         "min_samples_per_speaker": args.min_samples,
         "speakers_with_trends": len(usable_trends),
+        "target_trend_summary": target_trend_summary(trends, targets),
         "speaker_trends": trends,
         "feature_associations": associations,
         "safety": {
@@ -318,6 +351,104 @@ def write_json(path: Path, payload: dict[str, object]) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n")
 
 
+def markdown_number(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value)
+
+
+def write_markdown_report(path: Path, report: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    summaries = report.get("target_trend_summary") if isinstance(report.get("target_trend_summary"), dict) else {}
+    associations = report.get("feature_associations") if isinstance(report.get("feature_associations"), dict) else {}
+    lines = [
+        "# EarlyCare Progression Analysis",
+        "",
+        "This is an offline research artifact. It is not a diagnosis model and must not be used for app routing.",
+        "",
+        "## Summary",
+        "",
+        f"- Status: {report.get('status')}",
+        f"- Input: `{report.get('input')}`",
+        f"- Dataset fetch manifest: `{report.get('dataset_fetch_manifest')}`" if report.get("dataset_fetch_manifest") else "- Dataset fetch manifest: none",
+        f"- Rows: {report.get('rows')}",
+        f"- Speakers: {report.get('speakers')}",
+        f"- Speakers with trends: {report.get('speakers_with_trends')}",
+        f"- Time column: `{report.get('time_column')}`",
+        f"- Targets: {', '.join(str(value) for value in report.get('target_columns', [])) if isinstance(report.get('target_columns'), list) else ''}",
+        "",
+        "## Target Trends",
+        "",
+        "| Target | Speakers | Mean Delta | Mean Slope / Time Unit | Increasing | Decreasing | Unchanged |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    if summaries:
+        for target, summary in summaries.items():
+            if not isinstance(summary, dict):
+                continue
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        str(target),
+                        markdown_number(summary.get("speakers")),
+                        markdown_number(summary.get("mean_delta")),
+                        markdown_number(summary.get("mean_slope_per_time_unit")),
+                        markdown_number(summary.get("increasing")),
+                        markdown_number(summary.get("decreasing")),
+                        markdown_number(summary.get("unchanged")),
+                    ]
+                )
+                + " |"
+            )
+    else:
+        lines.append("| None |  |  |  |  |  |  |")
+
+    lines.extend(["", "## Top Feature Associations", ""])
+    if associations:
+        for target, items in associations.items():
+            lines.extend(
+                [
+                    f"### {target}",
+                    "",
+                    "| Feature | Subject-Centered Pearson | Row-Level Pearson | Rows | Centered Rows |",
+                    "| --- | ---: | ---: | ---: | ---: |",
+                ]
+            )
+            if isinstance(items, list) and items:
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    lines.append(
+                        "| "
+                        + " | ".join(
+                            [
+                                str(item.get("feature")),
+                                markdown_number(item.get("subject_centered_pearson")),
+                                markdown_number(item.get("row_level_pearson")),
+                                markdown_number(item.get("rows")),
+                                markdown_number(item.get("centered_rows")),
+                            ]
+                        )
+                        + " |"
+                    )
+            else:
+                lines.append("| None |  |  |  |  |")
+            lines.append("")
+
+    safety = report.get("safety") if isinstance(report.get("safety"), dict) else {}
+    lines.extend(
+        [
+            "## Safety",
+            "",
+            f"- Intended use: {safety.get('intended_use', '')}",
+            f"- Excluded use: {safety.get('excluded_use', '')}",
+            f"- Note: {safety.get('note', '')}",
+        ]
+    )
+    path.write_text("\n".join(lines) + "\n")
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Analyze progression-only voice feature tables such as UCI Parkinsons Telemonitoring.")
     input_group = parser.add_mutually_exclusive_group(required=True)
@@ -325,6 +456,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     input_group.add_argument("--dataset-fetch-manifest", type=Path, help="dataset_fetch_manifest.json with a progression_ready table.")
     parser.add_argument("--fetch-table", help="Table path inside --dataset-fetch-manifest. Defaults to the first progression-ready table.")
     parser.add_argument("--output", type=Path, default=Path("research/artifacts/progression_analysis.json"))
+    parser.add_argument("--report-output", type=Path, help="Markdown report output. Defaults to --output with .md suffix.")
     parser.add_argument("--speaker-column", help="Speaker/subject column. Auto-detected when possible.")
     parser.add_argument("--time-column", help="Time column. Auto-detected when possible.")
     parser.add_argument("--target-columns", help="Comma-separated UPDRS target columns. Auto-detected when possible.")
@@ -335,6 +467,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--min-samples must be at least 2")
     if args.top_k < 1:
         parser.error("--top-k must be at least 1")
+    if args.report_output is None:
+        args.report_output = args.output.with_suffix(".md")
     return args
 
 
@@ -350,7 +484,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit("No input table selected")
     report = build_report(args, input_path, selected_summary)
     write_json(args.output, report)
+    write_markdown_report(args.report_output, report)
     print(f"wrote progression analysis to {args.output} ({report['status']})")
+    print(f"wrote progression report to {args.report_output}")
     return 0
 
 

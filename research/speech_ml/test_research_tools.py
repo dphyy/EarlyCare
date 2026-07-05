@@ -261,11 +261,16 @@ class ResearchToolTests(unittest.TestCase):
             self.assertEqual(report["time_column"], "test_time")
             self.assertEqual(report["target_columns"], ["motor_UPDRS", "total_UPDRS"])
             self.assertEqual(report["speakers_with_trends"], 2)
+            self.assertEqual(report["target_trend_summary"]["motor_UPDRS"]["mean_delta"], 3.0)
             trends = {item["speaker_id"]: item for item in report["speaker_trends"]}
             self.assertEqual(trends["1"]["targets"]["motor_UPDRS"]["slope_per_time_unit"], 2.0)
             self.assertEqual(trends["2"]["targets"]["total_UPDRS"]["delta"], 2.0)
             self.assertIn("Jitter(%)", [item["feature"] for item in report["feature_associations"]["motor_UPDRS"]])
             self.assertIn("diagnosis", report["safety"]["excluded_use"])
+            markdown = output_path.with_suffix(".md").read_text()
+            self.assertIn("EarlyCare Progression Analysis", markdown)
+            self.assertIn("Target Trends", markdown)
+            self.assertIn("not a diagnosis model", markdown)
 
     def test_analyze_progression_table_uses_fetch_manifest_and_rejects_classifier_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -309,6 +314,7 @@ class ResearchToolTests(unittest.TestCase):
             report = json.loads(output_path.read_text())
             self.assertEqual(report["dataset_fetch_manifest"], str(fetch_manifest_path))
             self.assertEqual(report["selected_table_summary"]["path"], "parkinsons_updrs.data")
+            self.assertTrue(output_path.with_suffix(".md").exists())
 
             classifier_manifest_path = root / "classifier_manifest.json"
             classifier_manifest_path.write_text(

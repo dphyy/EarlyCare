@@ -49,6 +49,7 @@ python3 research/speech_ml/analyze_progression_table.py \
 ```
 
 This writes subject-level UPDRS trend summaries and exploratory voice-feature associations. It is not a classifier and must not be used for diagnosis or app routing.
+The analyzer also writes a markdown report next to the JSON output unless `--report-output` is provided.
 
 After extraction, run an experiment directly from a fetch manifest. The runner selects the first `classification_ready=true` table and refuses progression-only manifests:
 
