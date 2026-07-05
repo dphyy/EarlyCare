@@ -152,6 +152,10 @@ def read_json_if_exists(path: Path) -> dict[str, object] | None:
     return json.loads(path.read_text())
 
 
+def skipped_stage(reason: str) -> dict[str, object]:
+    return {"status": "skipped", "reason": reason}
+
+
 def run_existing_audit(args: argparse.Namespace) -> int:
     values = [
         "--artifacts-dir",
@@ -288,8 +292,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.audit and not args.run_ready and not args.dry_run and not fetch_failed:
         audit_code = run_existing_audit(args)
 
-    ready_run = read_json_if_exists(args.ready_run_report)
-    audit_report = read_json_if_exists(args.audit_json_output)
+    if args.run_ready and fetch_failed:
+        ready_run = skipped_stage("fetch failed before ready experiments")
+    elif args.run_ready:
+        ready_run = read_json_if_exists(args.ready_run_report) or skipped_stage("ready experiment report was not written")
+    else:
+        ready_run = {"status": "not-requested"}
+
+    if not args.audit:
+        audit_report = {"status": "not-requested"}
+    elif fetch_failed:
+        audit_report = skipped_stage("fetch failed before audit")
+    elif args.dry_run:
+        audit_report = skipped_stage("dry-run")
+    elif args.run_ready:
+        audit_report = read_json_if_exists(args.audit_json_output) or skipped_stage("ready experiment audit report was not written")
+    else:
+        audit_report = read_json_if_exists(args.audit_json_output) or skipped_stage("audit report was not written")
     report = {
         "generated_at": utc_now(),
         "dry_run": args.dry_run,

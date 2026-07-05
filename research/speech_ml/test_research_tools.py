@@ -602,6 +602,64 @@ class ResearchToolTests(unittest.TestCase):
             self.assertEqual(report["readiness_after"]["counts"]["trainable_now"], 0)
             self.assertIn("not a validated app model", (output_dir / "training_cycle_report.md").read_text())
 
+    def test_run_training_cycle_does_not_reuse_stale_stage_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            registry_path = root / "registry.json"
+            output_dir = root / "artifacts"
+            output_dir.mkdir()
+            datasets_root = root / "datasets"
+            registry_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "use_rules": ["no diagnosis"],
+                        "datasets": [
+                            {
+                                "id": "uci-parkinson-speech",
+                                "name": "UCI Parkinson Speech",
+                                "status": "feature-only",
+                                "target": "parkinsons-watch",
+                                "source_urls": ["https://example.com/uci"],
+                                "labels": "pd/control",
+                                "language": "Turkish",
+                                "tasks": ["vowels"],
+                                "participants": "sample",
+                                "raw_audio": "no-feature-table",
+                                "fetcher_dataset_id": "uci-parkinson-speech",
+                                "training_mode": "feature_classification_smoke",
+                                "earlycare_use": "feature sanity check",
+                                "required_before_training": ["fetch"],
+                            }
+                        ],
+                    }
+                )
+                + "\n"
+            )
+            (output_dir / "ready_experiments_run.json").write_text(json.dumps({"actions_succeeded": 99, "actions_failed": 0}) + "\n")
+            (output_dir / "model_artifact_audit.json").write_text(
+                json.dumps({"counts": {"validated_ready": 4, "research_only": 99}}) + "\n"
+            )
+
+            exit_code = run_training_cycle.main(
+                [
+                    "--registry",
+                    str(registry_path),
+                    "--datasets-root",
+                    str(datasets_root),
+                    "--output-dir",
+                    str(output_dir),
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            report = json.loads((output_dir / "training_cycle_report.json").read_text())
+            self.assertEqual(report["ready_run"], {"status": "not-requested"})
+            self.assertEqual(report["audit"], {"status": "not-requested"})
+            markdown = (output_dir / "training_cycle_report.md").read_text()
+            self.assertIn("Ready actions succeeded: 0", markdown)
+            self.assertIn("Research-only artifacts: 0", markdown)
+
     def test_run_training_cycle_executes_ready_training_and_audit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
