@@ -87,7 +87,7 @@ Speech ML can add support through slower response, large acute baseline deviatio
 | Feature extractor interface | Done | `backend/app/speech_features.py`, `backend/tests/test_speech_features.py` |
 | Offline embedding job | Done | `research/speech_ml/extract_embeddings.py`, `research/speech_ml/README.md` |
 | Evaluation harness | Done | `research/speech_ml/evaluate_baseline.py`, `research/speech_ml/metrics.md` |
-| App integration | Pending | Add model provenance and optional offline enrichment in saved call records. |
+| App integration | Done | Saved calls store `speechModelProvenance`; `/calls/{call_id}/speech-enrichment` accepts offline embedding rows. |
 | Safety gate | Partially done | `docs/ml/model-card-template.md` exists; every model-backed UI change still needs release-gate review. |
 
 ### Task 1: Data Registry

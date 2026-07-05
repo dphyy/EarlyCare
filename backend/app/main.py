@@ -23,6 +23,8 @@ from app.models import (
     SavedCallResponse,
     Scenario,
     ScenarioRunResponse,
+    SpeechEnrichmentRequest,
+    SpeechModelProvenance,
     Senior,
     SpeechProfile,
     SpeechDeviationRequest,
@@ -172,6 +174,64 @@ def _estimate_current_speech_profile(
             completed_at=completed_at or _now_iso(),
             segments=segments,
         )
+    )
+
+
+def _demo_speech_provenance(generated_at: str | None = None) -> SpeechModelProvenance:
+    return SpeechModelProvenance(
+        runtimeMode="demo metrics",
+        featureExtractor="transcript timing metrics",
+        modelName="EarlyCare demo speech metrics",
+        generatedAt=generated_at or _now_iso(),
+        validated=False,
+        notes=[
+            "Fast call-save path calculated from transcript timestamps and patient segments.",
+            "No diagnostic classifier or model weights were used.",
+        ],
+    )
+
+
+def _str_from_provenance(provenance: dict[str, object], *keys: str) -> str | None:
+    for key in keys:
+        value = provenance.get(key)
+        if value is not None and str(value).strip():
+            return str(value)
+    return None
+
+
+def _speech_profile_from_enrichment(call: CallRecord, request: SpeechEnrichmentRequest) -> SpeechProfile:
+    profile = request.speechMetrics or call.currentSpeechProfile
+    if profile is None:
+        raise HTTPException(status_code=400, detail="Speech enrichment needs speech_metrics or an existing currentSpeechProfile")
+    embedding = request.embedding or profile.embedding
+    if embedding is None:
+        raise HTTPException(status_code=400, detail="Speech enrichment needs an embedding")
+    return profile.model_copy(update={"embedding": embedding, "updatedAt": profile.updatedAt or _now_iso()})
+
+
+def _speech_provenance_from_enrichment(request: SpeechEnrichmentRequest) -> SpeechModelProvenance:
+    provenance = request.provenance
+    runtime_mode = request.runtimeMode
+    validated = runtime_mode == "validated model"
+    model_name = request.modelName or _str_from_provenance(provenance, "model_name", "model") or "offline speech embedding"
+    feature_extractor = request.featureExtractor or _str_from_provenance(provenance, "model_name", "model") or model_name
+    generated_at = _str_from_provenance(provenance, "extracted_at", "generated_at") or _now_iso()
+    artifact_uri = request.artifactUri or _str_from_provenance(provenance, "artifact_uri", "artifact", "source_id")
+    notes = [
+        "Offline enrichment is stored as decision-support context.",
+        "Unvalidated enrichment does not change emergency routing by itself.",
+    ]
+    if not validated:
+        notes.append("Model-card release gate is required before this can be treated as a validated model.")
+    return SpeechModelProvenance(
+        runtimeMode=runtime_mode,
+        featureExtractor=feature_extractor,
+        modelName=model_name,
+        modelVersion=request.modelVersion or _str_from_provenance(provenance, "model_version"),
+        artifactUri=artifact_uri,
+        generatedAt=generated_at,
+        validated=validated,
+        notes=notes,
     )
 
 
@@ -652,13 +712,17 @@ def _load_call_record(path: Path) -> CallRecord:
 
 
 def _enrich_call_record(call: CallRecord) -> CallRecord:
+    updates: dict[str, object] = {}
+    if call.currentSpeechProfile and call.speechModelProvenance is None:
+        updates["speechModelProvenance"] = _demo_speech_provenance(call.currentSpeechProfile.updatedAt or call.completedAt)
     if call.categories and call.escalationPlan:
-        return call
+        return call.model_copy(update=updates) if updates else call
     senior = get_senior(call.seniorId)
     symptoms = detect_symptoms_from_text(call.englishTranscript or call.originalTranscript)
     categories = build_conversation_categories(call.englishTranscript or call.originalTranscript, symptoms, call.riskAssessment, senior)
     escalation_plan = build_escalation_plan(call.riskAssessment, categories, senior)
-    return call.model_copy(update={"categories": categories, "escalationPlan": escalation_plan})
+    updates.update({"categories": categories, "escalationPlan": escalation_plan})
+    return call.model_copy(update=updates)
 
 
 @app.get("/health")
@@ -906,6 +970,7 @@ async def save_call(
         audioAvailable=audio_file_path is not None,
         agentAudioCaptured=agentAudioCaptured,
         currentSpeechProfile=current_speech_profile,
+        speechModelProvenance=_demo_speech_provenance(current_speech_profile.updatedAt or completedAt) if current_speech_profile else None,
         transcriptSegments=translation.segments,
         riskSignals=risk_signals,
         aiRiskFallbackUsed=ai_fallback_used,
@@ -917,6 +982,25 @@ async def save_call(
     _call_metadata_path(call_id).write_text(call.model_dump_json(indent=2))
     _upsert_task_for_call(call, senior)
     return SavedCallResponse(call=call)
+
+
+@app.patch("/calls/{call_id}/speech-enrichment", response_model=CallRecord)
+def enrich_call_speech(call_id: str, request: SpeechEnrichmentRequest) -> CallRecord:
+    path = _call_metadata_path(call_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Call not found")
+
+    call = _load_call_record(path)
+    current_speech_profile = _speech_profile_from_enrichment(call, request)
+    speech_model_provenance = _speech_provenance_from_enrichment(request)
+    updated = call.model_copy(
+        update={
+            "currentSpeechProfile": current_speech_profile,
+            "speechModelProvenance": speech_model_provenance,
+        }
+    )
+    path.write_text(updated.model_dump_json(indent=2))
+    return _enrich_call_record(updated)
 
 
 @app.post("/checkins/{checkin_id}/complete", response_model=CheckInSession)

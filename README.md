@@ -26,6 +26,7 @@ Older adults living alone may go days without anyone noticing a fall, head impac
 | Inline risk highlights | Uses OpenAI structured output to detect patient-only risk signals and highlights exact English evidence inline. |
 | Audio verification | Clicking a highlighted patient phrase seeks playback to immediately after the previous agent question, so caregivers can hear the patient answer in context. |
 | Neurological watch | Flags speech and symptom patterns that may justify earlier follow-up for Parkinson's watch or post-fall/concussion review without presenting diagnosis. |
+| Speech provenance | Labels speech timing as `demo metrics`, `offline embedding`, or `validated model`, with offline enrichment kept separate from live call saving. |
 | Volunteer workflow | Creates hackathon-scope follow-up tasks for missed check-ins and elevated risk, with acknowledge/close actions backed by the API. |
 | Safety stance | Avoids diagnosis language and frames alerts as prompts for volunteer or caregiver follow-up. |
 

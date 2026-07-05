@@ -49,6 +49,7 @@ import type {
   RiskSignal,
   Scenario,
   Senior,
+  SpeechModelProvenance,
   TranscriptMessage,
   VolunteerTask,
   TranscriptSegment
@@ -566,10 +567,63 @@ function baselineFromCalls(senior: Senior, calls: CallRecord[]): { profile: Seni
   return { profile: senior.baselineSpeechProfile, source: "Default baseline until recordings are available" };
 }
 
+function speechProvenanceFor(call: CallRecord | null): SpeechModelProvenance | null {
+  if (call?.speechModelProvenance) return call.speechModelProvenance;
+  if (!call?.currentSpeechProfile) return null;
+  return {
+    runtimeMode: "demo metrics",
+    featureExtractor: "transcript timing metrics",
+    modelName: "EarlyCare demo speech metrics",
+    generatedAt: call.currentSpeechProfile.updatedAt ?? call.completedAt,
+    validated: false,
+    notes: ["No diagnostic classifier or model weights were used."]
+  };
+}
+
+function provenanceClassName(provenance: SpeechModelProvenance | null): string {
+  if (!provenance) return "provenance-none";
+  return `provenance-${provenance.runtimeMode.replaceAll(" ", "-")}`;
+}
+
+function speechModelModeLabel(mode: SpeechModelProvenance["runtimeMode"]): string {
+  if (mode === "demo metrics") return "demo metrics";
+  if (mode === "offline embedding") return "offline embedding";
+  return "validated model";
+}
+
+function SpeechProvenanceSummary({ provenance, compact = false }: { provenance: SpeechModelProvenance | null; compact?: boolean }) {
+  if (!provenance) {
+    return (
+      <div className={`speech-provenance-card ${compact ? "compact" : ""} provenance-none`}>
+        <Brain size={17} />
+        <div>
+          <strong>speech model not available</strong>
+          <small>No speech timing profile has been saved for this call.</small>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className={`speech-provenance-card ${compact ? "compact" : ""} ${provenanceClassName(provenance)}`}>
+      <Brain size={17} />
+      <div>
+        <strong>
+          {speechModelModeLabel(provenance.runtimeMode)} · {provenance.modelName}
+        </strong>
+        <small>
+          {provenance.featureExtractor}
+          {provenance.validated ? " · validated model card" : " · no diagnosis"}
+        </small>
+      </div>
+    </div>
+  );
+}
+
 function SpeechTimingPanel({ senior, call, calls }: { senior: Senior; call: CallRecord | null; calls: CallRecord[] }) {
   const baselineState = baselineFromCalls(senior, calls);
   const baseline = baselineState.profile;
   const current = call?.currentSpeechProfile ?? null;
+  const provenance = speechProvenanceFor(call);
   const rows = [
     { label: "Speech rate", baseline: `${Math.round(baseline.speechRate)} wpm`, current: formatMetric(current?.speechRate, " wpm") },
     { label: "Average pause", baseline: `${Math.round(baseline.avgPauseMs)} ms`, current: formatMetric(current?.avgPauseMs, " ms") },
@@ -582,8 +636,12 @@ function SpeechTimingPanel({ senior, call, calls }: { senior: Senior; call: Call
     <section className="speech-timing-panel">
       <div className="panel-heading compact-heading">
         <h3>Speech timing</h3>
-        <span>{baselineState.source}</span>
+        <span className="speech-heading-meta">
+          <span>{baselineState.source}</span>
+          <span className={`provenance-chip ${provenanceClassName(provenance)}`}>{provenance ? speechModelModeLabel(provenance.runtimeMode) : "not available"}</span>
+        </span>
       </div>
+      <SpeechProvenanceSummary provenance={provenance} compact />
       <div className="speech-metric-grid">
         {rows.map((row) => (
           <div className="speech-metric" key={row.label}>
@@ -1278,6 +1336,7 @@ function OfficerDashboard({
               {selectedCalls.map((call) => {
                 const audioUrl = getCallAudioUrl(call);
                 const riskSignals = call.riskSignals ?? [];
+                const provenance = speechProvenanceFor(call);
                 return (
                   <article className="call-record" key={call.id}>
                     <div className="call-record-header">
@@ -1294,6 +1353,7 @@ function OfficerDashboard({
                     <p>
                       <strong>Recommended action:</strong> {call.recommendedAction}
                     </p>
+                    <SpeechProvenanceSummary provenance={provenance} compact />
 
                     <div className="recording-player">
                       <h4>Original recording</h4>

@@ -1,6 +1,7 @@
 export type RiskLevel = "Green" | "Watch" | "Amber" | "Red";
 export type CheckInStatus = "Checked in" | "Missed" | "Needs follow-up" | "Urgent";
 export type Language = "English" | "Mandarin" | "Malay" | "Tamil" | "Singlish/Dialect";
+export type SpeechModelMode = "demo metrics" | "offline embedding" | "validated model";
 export type ConversationCategoryId =
   | "mental_wellbeing"
   | "fall_head_impact"
@@ -19,6 +20,17 @@ export interface SpeechProfile {
   phraseAccuracy: number;
   embedding?: number[];
   updatedAt: string;
+}
+
+export interface SpeechModelProvenance {
+  runtimeMode: SpeechModelMode;
+  featureExtractor: string;
+  modelName: string;
+  modelVersion?: string | null;
+  artifactUri?: string | null;
+  generatedAt: string;
+  validated: boolean;
+  notes: string[];
 }
 
 export interface Senior {
@@ -140,6 +152,7 @@ export interface CallRecord {
   audioAvailable: boolean;
   agentAudioCaptured?: boolean;
   currentSpeechProfile?: SpeechProfile | null;
+  speechModelProvenance?: SpeechModelProvenance | null;
   transcriptSegments?: TranscriptSegment[];
   riskSignals?: RiskSignal[];
   aiRiskFallbackUsed?: boolean;

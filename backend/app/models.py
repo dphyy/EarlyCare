@@ -1,10 +1,11 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 RiskLevel = Literal["Green", "Watch", "Amber", "Red"]
 Language = Literal["English", "Mandarin", "Malay", "Tamil", "Singlish/Dialect"]
+SpeechModelMode = Literal["demo metrics", "offline embedding", "validated model"]
 ConversationCategoryId = Literal[
     "mental_wellbeing",
     "fall_head_impact",
@@ -26,6 +27,17 @@ class SpeechProfile(BaseModel):
     phraseAccuracy: float
     embedding: list[float] | None = None
     updatedAt: str | None = None
+
+
+class SpeechModelProvenance(BaseModel):
+    runtimeMode: SpeechModelMode
+    featureExtractor: str
+    modelName: str
+    modelVersion: str | None = None
+    artifactUri: str | None = None
+    generatedAt: str
+    validated: bool = False
+    notes: list[str] = Field(default_factory=list)
 
 
 class Senior(BaseModel):
@@ -133,6 +145,19 @@ class SpeechDeviationRequest(BaseModel):
     symptoms: Symptoms = Symptoms()
 
 
+class SpeechEnrichmentRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    runtimeMode: SpeechModelMode = "offline embedding"
+    featureExtractor: str | None = None
+    modelName: str | None = None
+    modelVersion: str | None = None
+    artifactUri: str | None = None
+    embedding: list[float] | None = None
+    speechMetrics: SpeechProfile | None = Field(default=None, alias="speech_metrics")
+    provenance: dict[str, object] = Field(default_factory=dict)
+
+
 class ProviderResult(BaseModel):
     provider: str
     language: str
@@ -189,6 +214,7 @@ class CallRecord(BaseModel):
     audioAvailable: bool
     agentAudioCaptured: bool = False
     currentSpeechProfile: SpeechProfile | None = None
+    speechModelProvenance: SpeechModelProvenance | None = None
     transcriptSegments: list[TranscriptSegment] = []
     riskSignals: list[RiskSignal] = []
     aiRiskFallbackUsed: bool = False

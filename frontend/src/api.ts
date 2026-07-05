@@ -1,5 +1,5 @@
 import { scenarios, seniors, sessions, volunteerTasks } from "./data";
-import type { CallRecord, CheckInSession, Scenario, ScenarioRunResponse, Senior, VolunteerTask } from "./types";
+import type { CallRecord, CheckInSession, Scenario, ScenarioRunResponse, Senior, SpeechModelMode, SpeechProfile, VolunteerTask } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string | undefined;
 
@@ -93,6 +93,33 @@ export async function saveCall(formData: FormData): Promise<CallRecord | null> {
     if (!response.ok) throw new Error(`Request failed: ${response.status}`);
     const payload = (await response.json()) as { call: CallRecord };
     return payload.call;
+  } catch {
+    return null;
+  }
+}
+
+export interface SpeechEnrichmentPayload {
+  runtimeMode?: SpeechModelMode;
+  featureExtractor?: string;
+  modelName?: string;
+  modelVersion?: string;
+  artifactUri?: string;
+  embedding?: number[];
+  speech_metrics?: SpeechProfile;
+  provenance?: Record<string, unknown>;
+}
+
+export async function enrichCallSpeech(callId: string, payload: SpeechEnrichmentPayload): Promise<CallRecord | null> {
+  if (!API_BASE_URL) return null;
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/calls/${callId}/speech-enrichment`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+    return (await response.json()) as CallRecord;
   } catch {
     return null;
   }

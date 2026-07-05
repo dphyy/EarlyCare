@@ -1,10 +1,13 @@
 import unittest
 from pathlib import Path
 import json
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
+from fastapi.testclient import TestClient
+
 from app import main, providers
-from app.models import ProviderResult, TranscriptSegment
+from app.models import ProviderResult, RiskAssessment, SpeechProfile, TranscriptMessage, TranscriptSegment
 
 
 class CallWorkflowTests(unittest.TestCase):
@@ -278,6 +281,125 @@ class CallWorkflowTests(unittest.TestCase):
         attached = main._attach_segment_timestamps(signals, segments)
 
         self.assertEqual(attached, [])
+
+    def test_enrich_call_record_adds_demo_speech_provenance_for_older_metadata(self) -> None:
+        call = main.CallRecord(
+            id="call-legacy",
+            seniorId="s-001",
+            seniorName="Mdm Tan Bee Hoon",
+            startedAt="2026-07-04T10:00:00+08:00",
+            completedAt="2026-07-04T10:05:00+08:00",
+            status="Complete",
+            riskLevel="Green",
+            originalTranscript="Patient: I am okay.",
+            englishTranscript="Patient: I am okay.",
+            transcriptMessages=[TranscriptMessage(role="Senior", text="I am okay.", timestamp="2026-07-04T10:01:00+08:00")],
+            translationProvider="test",
+            translationFallbackUsed=False,
+            audioAvailable=False,
+            currentSpeechProfile=SpeechProfile(
+                speechRate=120,
+                avgPauseMs=500,
+                responseLatencyMs=1000,
+                pitchVariability=0.5,
+                phraseAccuracy=0.95,
+                updatedAt="2026-07-04T10:05:00+08:00",
+            ),
+            riskAssessment=RiskAssessment(
+                speechDeviationScore=0,
+                parkinsonsWatchScore=0,
+                postFallConcernScore=0,
+                missedCheckInScore=0,
+                riskLevel="Green",
+                reasons=["No concerning symptoms and speech remains close to baseline"],
+            ),
+            recommendedAction="Continue routine scheduled check-ins.",
+        )
+
+        enriched = main._enrich_call_record(call)
+
+        self.assertIsNotNone(enriched.speechModelProvenance)
+        assert enriched.speechModelProvenance is not None
+        self.assertEqual(enriched.speechModelProvenance.runtimeMode, "demo metrics")
+        self.assertFalse(enriched.speechModelProvenance.validated)
+
+    def test_speech_enrichment_endpoint_stores_offline_embedding_without_changing_risk(self) -> None:
+        with TemporaryDirectory() as tmp:
+            original_storage_root = main.CALL_STORAGE_ROOT
+            main.CALL_STORAGE_ROOT = Path(tmp)
+            call_dir = main.CALL_STORAGE_ROOT / "call-enrich"
+            call_dir.mkdir(parents=True)
+            try:
+                call = main.CallRecord(
+                    id="call-enrich",
+                    seniorId="s-001",
+                    seniorName="Mdm Tan Bee Hoon",
+                    startedAt="2026-07-04T10:00:00+08:00",
+                    completedAt="2026-07-04T10:05:00+08:00",
+                    status="Complete",
+                    riskLevel="Green",
+                    originalTranscript="Patient: I am okay.",
+                    englishTranscript="Patient: I am okay.",
+                    transcriptMessages=[TranscriptMessage(role="Senior", text="I am okay.", timestamp="2026-07-04T10:01:00+08:00")],
+                    translationProvider="test",
+                    translationFallbackUsed=False,
+                    audioAvailable=False,
+                    currentSpeechProfile=SpeechProfile(
+                        speechRate=120,
+                        avgPauseMs=500,
+                        responseLatencyMs=1000,
+                        pitchVariability=0.5,
+                        phraseAccuracy=0.95,
+                        updatedAt="2026-07-04T10:05:00+08:00",
+                    ),
+                    riskAssessment=RiskAssessment(
+                        speechDeviationScore=12,
+                        parkinsonsWatchScore=0,
+                        postFallConcernScore=0,
+                        missedCheckInScore=0,
+                        riskLevel="Green",
+                        reasons=["No concerning symptoms and speech remains close to baseline"],
+                    ),
+                    recommendedAction="Continue routine scheduled check-ins.",
+                )
+                (call_dir / "metadata.json").write_text(call.model_dump_json(indent=2))
+                client = TestClient(main.app)
+
+                response = client.patch(
+                    "/calls/call-enrich/speech-enrichment",
+                    json={
+                        "embedding": [0.1, 0.2, 0.3],
+                        "speech_metrics": {
+                            "speechRate": 118,
+                            "avgPauseMs": 520,
+                            "responseLatencyMs": 990,
+                            "pitchVariability": 0.48,
+                            "phraseAccuracy": 0.94,
+                            "embedding": [0.1, 0.2, 0.3],
+                            "updatedAt": "2026-07-04T10:06:00+08:00",
+                        },
+                        "provenance": {
+                            "model": "demo",
+                            "model_name": "demo-standard-library",
+                            "source_id": "sample-row-1",
+                            "extracted_at": "2026-07-04T10:06:00+08:00",
+                        },
+                    },
+                )
+
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                self.assertEqual(payload["currentSpeechProfile"]["embedding"], [0.1, 0.2, 0.3])
+                self.assertEqual(payload["speechModelProvenance"]["runtimeMode"], "offline embedding")
+                self.assertEqual(payload["speechModelProvenance"]["modelName"], "demo-standard-library")
+                self.assertFalse(payload["speechModelProvenance"]["validated"])
+                self.assertEqual(payload["riskAssessment"]["speechDeviationScore"], 12)
+
+                stored = main._load_call_record(call_dir / "metadata.json")
+                self.assertEqual(stored.currentSpeechProfile.embedding, [0.1, 0.2, 0.3])
+                self.assertEqual(stored.speechModelProvenance.runtimeMode, "offline embedding")
+            finally:
+                main.CALL_STORAGE_ROOT = original_storage_root
 
 
 if __name__ == "__main__":
