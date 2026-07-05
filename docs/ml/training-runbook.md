@@ -48,6 +48,18 @@ python3 research/speech_ml/dataset_registry.py \
 
 The registry report checks `research/speech_ml/dataset_registry.json` plus any local `dataset_fetch_manifest.json` files under `research/datasets/`. It separates feature-baseline training, progression analysis, access-needed raw-audio work, and literature-only concussion evidence.
 
+For the safest full planning and training entrypoint, use the training-cycle runner:
+
+```bash
+python3 research/speech_ml/run_training_cycle.py \
+  --fetch-supported \
+  --run-ready \
+  --audit \
+  --dry-run
+```
+
+Remove `--dry-run` only when the report shows the intended fetches and training jobs. Add `--include-progression` when UPDRS progression reports are needed. This writes a dataset readiness report, ready-experiment report, artifact audit, and cycle summary under ignored `research/artifacts/`.
+
 After supported datasets are fetched locally, run all locally ready feature-baseline experiments with:
 
 ```bash
@@ -122,6 +134,14 @@ It also writes a markdown report next to the JSON output for human review.
 | Bridge2AI Voice | Track for future broad voice-health features. | Public feature-level analysis; raw audio only after institutional sign-off. | Not a quick hackathon training source. |
 | TBIBank / Coelho | Access-needed for language/discourse research. | Chronic TBI communication research only. | Not acute concussion detection. |
 | Concussion speech studies | Literature-only for now. | Do not train product model yet. | Several papers report promising speech features, but app-ready public raw-audio datasets are not clearly available. |
+
+## Cloud GPU Use
+
+GMI Cloud can help with heavy raw-audio embedding extraction after dataset access is approved. It is not needed for the current feature-table baselines or the live app.
+
+Use GMI for `--model wavlm`, `--model wav2vec2`, or `--model meralion` runs over approved raw audio. Do not upload restricted voice datasets unless the dataset terms allow cloud processing. Keep all cloud outputs under ignored `research/artifacts/`, audit them, and bring back only the artifacts needed for review.
+
+See `docs/ml/cloud-training.md` for the GMI workflow and cost-control rules.
 
 ## Training Commands
 

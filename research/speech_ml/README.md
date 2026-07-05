@@ -24,6 +24,18 @@ python3 research/speech_ml/dataset_registry.py \
 
 The registry lives at `research/speech_ml/dataset_registry.json`. The report also inspects local `dataset_fetch_manifest.json` files under `research/datasets/` and marks datasets as feature-baseline trainable, progression-analysis ready, access-needed, or literature-only.
 
+Run the full local planning/training cycle when you want one safe entrypoint:
+
+```bash
+python3 research/speech_ml/run_training_cycle.py \
+  --fetch-supported \
+  --run-ready \
+  --audit \
+  --dry-run
+```
+
+Remove `--dry-run` only after reviewing the planned fetch and training actions. The cycle runner writes dataset readiness, ready-experiment, audit, and cycle-summary reports under ignored `research/artifacts/`.
+
 After local datasets have been fetched, run every locally ready feature-baseline experiment:
 
 ```bash
@@ -230,6 +242,8 @@ python3 research/speech_ml/extract_embeddings.py --model wav2vec2
 ```
 
 Those modes require optional `torch`, `transformers`, and `soundfile` packages in a separate research environment. Do not add those packages to the FastAPI runtime unless latency and deployment cost have been measured.
+
+Cloud GPUs such as GMI Cloud are useful only for these heavy raw-audio embedding runs after dataset access is approved. They are not needed for UCI feature-table baselines or the live app. See `docs/ml/cloud-training.md`.
 
 ## Train Baseline
 

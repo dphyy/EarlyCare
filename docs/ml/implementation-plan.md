@@ -95,12 +95,14 @@ Speech ML can add support through slower response, large acute baseline deviatio
 | Offline baseline trainer | Done | `research/speech_ml/train_baseline.py`, `docs/ml/training-runbook.md` |
 | Offline experiment runner | Done | `research/speech_ml/run_experiment.py`, `research/speech_ml/test_research_tools.py`; accepts reviewed manifests, raw feature tables, and classifier-ready dataset fetch manifests. |
 | Ready experiment runner | Done | `research/speech_ml/run_ready_experiments.py`; consumes dataset readiness, runs locally ready feature-baseline experiments, optionally runs progression-only analyses, and can audit generated artifacts in the same command. |
+| Training cycle runner | Done | `research/speech_ml/run_training_cycle.py`; plans/fetches supported public datasets, writes readiness reports, runs locally ready experiments, and audits outputs through one safe entrypoint. |
 | Model artifact audit | Done | `research/speech_ml/audit_model_artifacts.py`; reviews generated artifacts and blocks validated-model handoff unless the full release gate is complete. |
 | Audited app payload export | Done | `research/speech_ml/make_experiment_payload.py`; builds app enrichment payloads from audited experiment artifacts and refuses unsafe validated-model handoff. |
 | Enrichment payload bridge | Done | `research/speech_ml/make_enrichment_payload.py`; `backend/tests/test_call_workflow.py` patches a generated payload into `/calls/{call_id}/speech-enrichment`. |
 | Evaluation harness | Done | `research/speech_ml/evaluate_baseline.py`, `research/speech_ml/metrics.md` |
 | App integration | Done | Saved calls store `speechModelProvenance`; `/calls/{call_id}/speech-enrichment` accepts offline embedding rows. |
 | Safety gate | Done | Validated enrichment requires `modelCard`; `pnpm safety:copy` blocks diagnosis-style UI and README copy. |
+| Cloud GPU guidance | Done | `docs/ml/cloud-training.md`; frames GMI Cloud as optional heavy raw-audio research compute, not an app dependency or feature-table requirement. |
 
 ### Task 1: Data Registry
 
