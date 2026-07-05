@@ -84,6 +84,7 @@ Speech ML can add support through slower response, large acute baseline deviatio
 | Task | Status | Evidence |
 | --- | --- | --- |
 | Data registry | Done | `docs/ml/dataset-registry.md` |
+| Public dataset fetcher | Done | `research/speech_ml/fetch_public_datasets.py`; fetches supported UCI feature datasets into ignored local folders and records extraction notes. |
 | Dataset manifest prep | Done | `research/speech_ml/prepare_manifest.py`, `research/speech_ml/test_research_tools.py` |
 | Feature extractor interface | Done | `backend/app/speech_features.py`, `backend/tests/test_speech_features.py` |
 | Offline embedding job | Done | `research/speech_ml/extract_embeddings.py`, `research/speech_ml/README.md` |

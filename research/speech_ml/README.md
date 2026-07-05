@@ -12,6 +12,32 @@ The product does not need ML for the core MVP. These scripts only support option
 
 Do not use these scripts to claim Parkinson's disease, concussion, TBI, stroke, depression, or any other diagnosis.
 
+## Fetch Public Feature Datasets
+
+Download supported public feature-only datasets into ignored local folders:
+
+```bash
+python3 research/speech_ml/fetch_public_datasets.py \
+  --dataset uci-parkinson-speech
+```
+
+The fetcher writes `dataset_fetch_manifest.json` under `research/datasets/<dataset>/` with the source URL, table candidates, nested archives, and extraction notes.
+
+UCI's Parkinson speech package currently downloads as a zip containing a `.rar`. Python cannot extract that nested archive without an external tool, so the fetcher writes `EXTRACTION_REQUIRED.md` when `unar`, `unrar`, or `7z` is not available. After installing one of those tools, re-run with:
+
+```bash
+python3 research/speech_ml/fetch_public_datasets.py \
+  --dataset uci-parkinson-speech \
+  --allow-external-extractors
+```
+
+To fetch the UCI Parkinsons Telemonitoring feature table for longitudinal/progression analysis:
+
+```bash
+python3 research/speech_ml/fetch_public_datasets.py \
+  --dataset uci-parkinsons-telemonitoring
+```
+
 ## Manifest Format
 
 Create a CSV or JSONL manifest under `research/datasets/`:

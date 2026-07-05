@@ -5,6 +5,7 @@ import struct
 import tempfile
 import unittest
 import wave
+import zipfile
 from pathlib import Path
 
 from research.speech_ml import (
@@ -12,6 +13,7 @@ from research.speech_ml import (
     convert_feature_table,
     evaluate_baseline,
     extract_embeddings,
+    fetch_public_datasets,
     make_enrichment_payload,
     prepare_manifest,
     run_experiment,
@@ -103,6 +105,73 @@ class ResearchToolTests(unittest.TestCase):
             rows_by_speaker = {row["speaker_id"]: row for row in rows}
             self.assertEqual(rows_by_speaker["77"]["label"], "pd")
             self.assertEqual(rows_by_speaker["88"]["label"], "control")
+
+    def test_fetch_public_dataset_extracts_table_and_writes_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_zip = root / "source.zip"
+            output_root = root / "datasets"
+            with zipfile.ZipFile(source_zip, "w") as archive:
+                archive.writestr("training_data.csv", "Subject id,Jitter,class information\n1,0.2,1\n")
+                archive.writestr("notes/readme.txt", "sample")
+
+            exit_code = fetch_public_datasets.main(
+                [
+                    "--dataset",
+                    "uci-parkinson-speech",
+                    "--source-url",
+                    source_zip.resolve().as_uri(),
+                    "--output-root",
+                    str(output_root),
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            manifest_path = output_root / "uci-parkinson-speech" / "dataset_fetch_manifest.json"
+            manifest = json.loads(manifest_path.read_text())
+            self.assertEqual(manifest["dataset_id"], "uci-parkinson-speech")
+            self.assertEqual(manifest["table_candidates"], ["training_data.csv"])
+            self.assertEqual(manifest["nested_archives"], [])
+            self.assertTrue((output_root / "uci-parkinson-speech" / "training_data.csv").exists())
+
+    def test_fetch_public_dataset_flags_nested_rar_without_external_extractor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_zip = root / "source.zip"
+            output_root = root / "datasets"
+            with zipfile.ZipFile(source_zip, "w") as archive:
+                archive.writestr("Parkinson_Multiple_Sound_Recording.rar", b"not-a-real-rar")
+
+            exit_code = fetch_public_datasets.main(
+                [
+                    "--dataset",
+                    "uci-parkinson-speech",
+                    "--source-url",
+                    source_zip.resolve().as_uri(),
+                    "--output-root",
+                    str(output_root),
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            dataset_root = output_root / "uci-parkinson-speech"
+            manifest = json.loads((dataset_root / "dataset_fetch_manifest.json").read_text())
+            self.assertEqual(manifest["table_candidates"], [])
+            self.assertEqual(manifest["nested_archives"], ["Parkinson_Multiple_Sound_Recording.rar"])
+            self.assertTrue((dataset_root / "EXTRACTION_REQUIRED.md").exists())
+            self.assertIn("Nested archive extraction required", manifest["notes"][0])
+
+    def test_fetch_public_dataset_rejects_unsafe_zip_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_zip = root / "unsafe.zip"
+            with zipfile.ZipFile(source_zip, "w") as archive:
+                archive.writestr("../escape.csv", "x,y\n1,2\n")
+
+            with self.assertRaises(ValueError) as raised:
+                fetch_public_datasets.safe_extract_zip(source_zip, root / "datasets")
+
+            self.assertIn("Unsafe archive path", str(raised.exception))
 
     def test_run_experiment_writes_artifacts_and_report(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -38,6 +38,15 @@ Keep data local only:
 - Derived embeddings/models/reports: `research/artifacts/`
 - Never commit dataset files, embeddings, model artifacts, or subject exports.
 
+For supported public feature-only datasets, start with the local fetcher:
+
+```bash
+python3 research/speech_ml/fetch_public_datasets.py \
+  --dataset uci-parkinson-speech
+```
+
+The fetcher writes `dataset_fetch_manifest.json` with source URL, table candidates, nested archives, and extraction notes. UCI's Parkinson speech package currently contains a nested `.rar`; install `unar`, `unrar`, or `7z` and re-run with `--allow-external-extractors` if the manifest says extraction is still required.
+
 ## Dataset Shortlist
 
 | Dataset | Action | Training Use | Notes |
