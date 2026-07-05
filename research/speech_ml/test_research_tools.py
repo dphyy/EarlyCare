@@ -7,7 +7,7 @@ import unittest
 import wave
 from pathlib import Path
 
-from research.speech_ml import evaluate_baseline, extract_embeddings, prepare_manifest, train_baseline
+from research.speech_ml import evaluate_baseline, extract_embeddings, prepare_manifest, run_experiment, train_baseline
 
 
 def write_wav(path: Path, frequency: float) -> None:
@@ -94,6 +94,80 @@ class ResearchToolTests(unittest.TestCase):
             rows_by_speaker = {row["speaker_id"]: row for row in rows}
             self.assertEqual(rows_by_speaker["77"]["label"], "pd")
             self.assertEqual(rows_by_speaker["88"]["label"], "control")
+
+    def test_run_experiment_writes_artifacts_and_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audio_root = root / "datasets" / "sample"
+            manifest_path = root / "datasets" / "sample_manifest.csv"
+            output_dir = root / "artifacts"
+            write_wav(audio_root / "pd" / "pd-001" / "ddk" / "a.wav", 220)
+            write_wav(audio_root / "pd" / "pd-002" / "ddk" / "a.wav", 240)
+            write_wav(audio_root / "control" / "control-001" / "ddk" / "a.wav", 260)
+            write_wav(audio_root / "control" / "control-002" / "ddk" / "a.wav", 280)
+            prepare_manifest.main(
+                [
+                    "--audio-root",
+                    str(audio_root),
+                    "--output",
+                    str(manifest_path),
+                    "--dataset",
+                    "SampleSet",
+                    "--language",
+                    "English",
+                ]
+            )
+
+            exit_code = run_experiment.main(
+                [
+                    "--manifest",
+                    str(manifest_path),
+                    "--audio-root",
+                    str(audio_root),
+                    "--output-dir",
+                    str(output_dir),
+                    "--experiment-name",
+                    "demo-run",
+                    "--test-fraction",
+                    "0.5",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            embeddings_path = output_dir / "demo-run_embeddings.jsonl"
+            evaluation_path = output_dir / "demo-run_eval.json"
+            model_path = output_dir / "demo-run_baseline_model.json"
+            report_path = output_dir / "demo-run_experiment.md"
+            self.assertTrue(embeddings_path.exists())
+            self.assertEqual(len(embeddings_path.read_text().splitlines()), 4)
+            self.assertEqual(json.loads(evaluation_path.read_text())["status"], "ok")
+            self.assertEqual(json.loads(model_path.read_text())["status"], "ok")
+            report = report_path.read_text()
+            self.assertIn("offline research only", report)
+            self.assertIn("Rows needing review: 0", report)
+
+    def test_run_experiment_refuses_unreviewed_manifest_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest_path = root / "manifest.csv"
+            with manifest_path.open("w", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=["dataset", "speaker_id", "label", "task", "audio_path", "review_status"])
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "dataset": "sample",
+                        "speaker_id": "unknown-001",
+                        "label": "unknown",
+                        "task": "ddk",
+                        "audio_path": "unknown.wav",
+                        "review_status": "needs-review",
+                    }
+                )
+
+            with self.assertRaises(SystemExit) as raised:
+                run_experiment.main(["--manifest", str(manifest_path), "--audio-root", str(root)])
+
+            self.assertIn("needs-review", str(raised.exception))
 
     def test_extract_embeddings_writes_backend_compatible_jsonl(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

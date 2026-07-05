@@ -38,6 +38,23 @@ python3 research/speech_ml/prepare_manifest.py \
 
 The preparer infers `label`, `speaker_id`, and `task` from path names, then marks uncertain rows as `needs-review`. Review and fix those rows before extraction or training.
 
+The manifest `audio_path` values are relative to the `--audio-root` used above. Use the same audio root when extracting embeddings or running experiments.
+
+## Run an Experiment
+
+Run extraction, speaker-level evaluation, baseline training, and a markdown experiment report:
+
+```bash
+python3 research/speech_ml/run_experiment.py \
+  --manifest research/datasets/neurovoz_manifest.csv \
+  --audio-root research/datasets/NeuroVoz \
+  --output-dir research/artifacts \
+  --experiment-name neurovoz-demo \
+  --model demo
+```
+
+The runner refuses manifests with `review_status=needs-review` unless `--allow-review-rows` is explicitly passed.
+
 ## Extract Embeddings
 
 Smoke-test the pipeline with the standard-library demo extractor:

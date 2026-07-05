@@ -89,10 +89,12 @@ def infer_speaker_id(relative_path: Path, label: str, speaker_regex: str | None 
     ignored = {"pd", "control", "controls", "healthy", "hc", "normal", "patient", "patients"} | DEFAULT_TASK_TOKENS
     for part in relative_path.parts[:-1]:
         tokens = split_tokens(part)
-        if not tokens or any(token in ignored for token in tokens):
+        if not tokens:
             continue
         if any(char.isdigit() for char in part):
             return part
+        if any(token in ignored for token in tokens):
+            continue
 
     stem_tokens = split_tokens(relative_path.stem)
     for token in stem_tokens:

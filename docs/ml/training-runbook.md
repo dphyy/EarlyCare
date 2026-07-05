@@ -65,12 +65,27 @@ python3 research/speech_ml/prepare_manifest.py \
 
 Open the manifest and manually review any row with `review_status=needs-review` before extraction or training. The script infers labels and speaker IDs from folder/file names; it does not prove clinical truth.
 
+Run the full offline experiment:
+
+```bash
+python3 research/speech_ml/run_experiment.py \
+  --manifest research/datasets/neurovoz_manifest.csv \
+  --audio-root research/datasets/NeuroVoz \
+  --output-dir research/artifacts \
+  --experiment-name neurovoz-demo \
+  --model demo
+```
+
+The runner writes embeddings, a speaker-level evaluation JSON file, a baseline model artifact, and a markdown experiment report. It refuses `needs-review` manifest rows unless `--allow-review-rows` is explicitly passed.
+
+Manual commands are still available when a step needs to be inspected separately.
+
 Extract embeddings:
 
 ```bash
 python3 research/speech_ml/extract_embeddings.py \
   --manifest research/datasets/neurovoz_manifest.csv \
-  --audio-root research/datasets \
+  --audio-root research/datasets/NeuroVoz \
   --model demo \
   --output research/artifacts/neurovoz_embeddings.jsonl
 ```
