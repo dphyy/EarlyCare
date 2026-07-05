@@ -11,6 +11,7 @@ import zipfile
 from pathlib import Path
 
 from research.speech_ml import (
+    analyze_progression_table,
     build_personal_baselines,
     convert_feature_table,
     evaluate_baseline,
@@ -41,6 +42,16 @@ class ResearchToolTests(unittest.TestCase):
     def test_run_experiment_script_help_works_from_repo_root(self) -> None:
         result = subprocess.run(
             [sys.executable, "research/speech_ml/run_experiment.py", "--help"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertIn("--dataset-fetch-manifest", result.stdout)
+
+    def test_analyze_progression_script_help_works_from_repo_root(self) -> None:
+        result = subprocess.run(
+            [sys.executable, "research/speech_ml/analyze_progression_table.py", "--help"],
             check=True,
             capture_output=True,
             text=True,
@@ -225,6 +236,98 @@ class ResearchToolTests(unittest.TestCase):
                 fetch_public_datasets.safe_extract_zip(source_zip, root / "datasets")
 
             self.assertIn("Unsafe archive path", str(raised.exception))
+
+    def test_analyze_progression_table_writes_trends_and_associations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            input_path = root / "parkinsons_updrs.data"
+            output_path = root / "progression.json"
+            input_path.write_text(
+                "subject#,test_time,motor_UPDRS,total_UPDRS,Jitter(%),Shimmer\n"
+                "1,0,20,30,0.10,0.20\n"
+                "1,1,22,32,0.20,0.30\n"
+                "1,2,24,34,0.30,0.40\n"
+                "2,0,10,15,0.05,0.10\n"
+                "2,1,11,16,0.06,0.11\n"
+                "2,2,12,17,0.07,0.12\n"
+            )
+
+            exit_code = analyze_progression_table.main(["--input", str(input_path), "--output", str(output_path)])
+
+            self.assertEqual(exit_code, 0)
+            report = json.loads(output_path.read_text())
+            self.assertEqual(report["status"], "ok")
+            self.assertEqual(report["speaker_column"], "subject#")
+            self.assertEqual(report["time_column"], "test_time")
+            self.assertEqual(report["target_columns"], ["motor_UPDRS", "total_UPDRS"])
+            self.assertEqual(report["speakers_with_trends"], 2)
+            trends = {item["speaker_id"]: item for item in report["speaker_trends"]}
+            self.assertEqual(trends["1"]["targets"]["motor_UPDRS"]["slope_per_time_unit"], 2.0)
+            self.assertEqual(trends["2"]["targets"]["total_UPDRS"]["delta"], 2.0)
+            self.assertIn("Jitter(%)", [item["feature"] for item in report["feature_associations"]["motor_UPDRS"]])
+            self.assertIn("diagnosis", report["safety"]["excluded_use"])
+
+    def test_analyze_progression_table_uses_fetch_manifest_and_rejects_classifier_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dataset_root = root / "datasets" / "uci-parkinsons-telemonitoring"
+            dataset_root.mkdir(parents=True)
+            table_path = dataset_root / "parkinsons_updrs.data"
+            output_path = root / "progression.json"
+            table_path.write_text(
+                "subject#,test_time,motor_UPDRS,total_UPDRS,Jitter(%)\n"
+                "1,0,20,30,0.10\n"
+                "1,1,22,32,0.20\n"
+                "2,0,10,15,0.05\n"
+                "2,1,12,17,0.08\n"
+            )
+            fetch_manifest_path = dataset_root / "dataset_fetch_manifest.json"
+            fetch_manifest_path.write_text(
+                json.dumps(
+                    {
+                        "dataset_id": "uci-parkinsons-telemonitoring",
+                        "name": "UCI Parkinsons Telemonitoring",
+                        "table_summaries": [
+                            {
+                                "path": "parkinsons_updrs.data",
+                                "speaker_column": "subject#",
+                                "updrs_columns": ["motor_UPDRS", "total_UPDRS"],
+                                "classification_ready": False,
+                                "progression_ready": True,
+                            }
+                        ],
+                    }
+                )
+                + "\n"
+            )
+
+            exit_code = analyze_progression_table.main(
+                ["--dataset-fetch-manifest", str(fetch_manifest_path), "--output", str(output_path)]
+            )
+
+            self.assertEqual(exit_code, 0)
+            report = json.loads(output_path.read_text())
+            self.assertEqual(report["dataset_fetch_manifest"], str(fetch_manifest_path))
+            self.assertEqual(report["selected_table_summary"]["path"], "parkinsons_updrs.data")
+
+            classifier_manifest_path = root / "classifier_manifest.json"
+            classifier_manifest_path.write_text(
+                json.dumps(
+                    {
+                        "table_summaries": [
+                            {
+                                "path": "training_data.csv",
+                                "classification_ready": True,
+                                "progression_ready": False,
+                            }
+                        ]
+                    }
+                )
+                + "\n"
+            )
+            with self.assertRaises(SystemExit) as raised:
+                analyze_progression_table.main(["--dataset-fetch-manifest", str(classifier_manifest_path), "--output", str(output_path)])
+            self.assertIn("No progression_ready table", str(raised.exception))
 
     def test_run_experiment_writes_artifacts_and_report(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

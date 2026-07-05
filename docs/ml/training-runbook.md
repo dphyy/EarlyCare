@@ -58,6 +58,16 @@ python3 research/speech_ml/run_experiment.py \
 
 The runner refuses fetch manifests with no `classification_ready=true` table, including progression-only Telemonitoring manifests.
 
+For UCI Parkinsons Telemonitoring, run progression analysis instead:
+
+```bash
+python3 research/speech_ml/analyze_progression_table.py \
+  --dataset-fetch-manifest research/datasets/uci-parkinsons-telemonitoring/dataset_fetch_manifest.json \
+  --output research/artifacts/uci-telemonitoring_progression.json
+```
+
+This outputs subject-level UPDRS trend summaries and exploratory voice-feature associations. Treat it as progression research only, not Parkinson's/control classification and not an app model.
+
 ## Dataset Shortlist
 
 | Dataset | Action | Training Use | Notes |

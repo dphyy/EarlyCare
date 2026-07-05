@@ -40,6 +40,16 @@ python3 research/speech_ml/fetch_public_datasets.py \
 
 Telemonitoring tables should show `progression_ready=true` and `classification_ready=false`; do not pass them into the PD/control classifier flow.
 
+Analyze the progression-only table separately:
+
+```bash
+python3 research/speech_ml/analyze_progression_table.py \
+  --dataset-fetch-manifest research/datasets/uci-parkinsons-telemonitoring/dataset_fetch_manifest.json \
+  --output research/artifacts/uci-telemonitoring_progression.json
+```
+
+This writes subject-level UPDRS trend summaries and exploratory voice-feature associations. It is not a classifier and must not be used for diagnosis or app routing.
+
 After extraction, run an experiment directly from a fetch manifest. The runner selects the first `classification_ready=true` table and refuses progression-only manifests:
 
 ```bash
