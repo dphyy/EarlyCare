@@ -185,7 +185,7 @@ def _state_json_default(path: Path, fallback: str) -> None:
     _write_text_atomic(path, fallback)
 
 
-def _state_corrupt_backup_path(path: Path) -> Path:
+def _corrupt_backup_path(path: Path) -> Path:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     for index in range(20):
         suffix = f".{index}" if index else ""
@@ -195,10 +195,10 @@ def _state_corrupt_backup_path(path: Path) -> Path:
     return path.with_name(f"{path.name}.corrupt-{stamp}.{uuid4().hex[:8]}")
 
 
-def _quarantine_state_file(path: Path) -> Path | None:
+def _quarantine_corrupt_file(path: Path) -> Path | None:
     if not path.exists():
         return None
-    backup_path = _state_corrupt_backup_path(path)
+    backup_path = _corrupt_backup_path(path)
     with suppress(OSError):
         path.replace(backup_path)
         return backup_path
@@ -215,7 +215,7 @@ def _load_state_records(path: Path, defaults: list[StateRecord], model: type[Sta
             raise ValueError("State file must contain a JSON list")
         return [model.model_validate(item) for item in payload]
     except (json.JSONDecodeError, TypeError, ValueError, ValidationError):
-        _quarantine_state_file(path)
+        _quarantine_corrupt_file(path)
         _write_text_atomic(path, fallback_json)
         return [model.model_validate(item) for item in fallback_payload]
 
@@ -249,7 +249,13 @@ def _aware_datetime(value: datetime) -> datetime:
 def _load_calls() -> list[CallRecord]:
     if not CALL_STORAGE_ROOT.exists():
         return []
-    return [_load_call_record(path) for path in CALL_STORAGE_ROOT.glob("*/metadata.json")]
+    calls: list[CallRecord] = []
+    for path in sorted(CALL_STORAGE_ROOT.glob("*/metadata.json")):
+        try:
+            calls.append(_load_call_record(path))
+        except (OSError, ValueError, ValidationError):
+            _quarantine_corrupt_file(path)
+    return calls
 
 
 def _latest_schedule_contact(

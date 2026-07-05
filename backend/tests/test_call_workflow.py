@@ -648,6 +648,50 @@ class CallWorkflowTests(unittest.TestCase):
         self.assertEqual(enriched.speechModelProvenance.runtimeMode, "demo metrics")
         self.assertFalse(enriched.speechModelProvenance.validated)
 
+    def test_load_calls_quarantines_corrupt_metadata_and_returns_valid_records(self) -> None:
+        with TemporaryDirectory() as tmp:
+            original_storage_root = main.CALL_STORAGE_ROOT
+            main.CALL_STORAGE_ROOT = Path(tmp)
+            good_dir = main.CALL_STORAGE_ROOT / "call-good"
+            bad_dir = main.CALL_STORAGE_ROOT / "call-bad"
+            good_dir.mkdir(parents=True)
+            bad_dir.mkdir(parents=True)
+            try:
+                call = main.CallRecord(
+                    id="call-good",
+                    seniorId="s-001",
+                    seniorName="Mdm Tan Bee Hoon",
+                    startedAt="2026-07-04T10:00:00+08:00",
+                    completedAt="2026-07-04T10:05:00+08:00",
+                    status="Complete",
+                    riskLevel="Green",
+                    originalTranscript="Patient: I am okay.",
+                    englishTranscript="Patient: I am okay.",
+                    transcriptMessages=[TranscriptMessage(role="Senior", text="I am okay.", timestamp="2026-07-04T10:01:00+08:00")],
+                    translationProvider="test",
+                    translationFallbackUsed=False,
+                    audioAvailable=False,
+                    riskAssessment=RiskAssessment(
+                        speechDeviationScore=0,
+                        parkinsonsWatchScore=0,
+                        postFallConcernScore=0,
+                        missedCheckInScore=0,
+                        riskLevel="Green",
+                        reasons=["No concerning symptoms and speech remains close to baseline"],
+                    ),
+                    recommendedAction="Continue routine scheduled check-ins.",
+                )
+                (good_dir / "metadata.json").write_text(call.model_dump_json(indent=2), encoding="utf-8")
+                (bad_dir / "metadata.json").write_text("{broken json", encoding="utf-8")
+
+                calls = main._load_calls()
+
+                self.assertEqual([item.id for item in calls], ["call-good"])
+                self.assertFalse((bad_dir / "metadata.json").exists())
+                self.assertTrue(list(bad_dir.glob("metadata.json.corrupt-*")))
+            finally:
+                main.CALL_STORAGE_ROOT = original_storage_root
+
     def test_speech_enrichment_keeps_existing_metadata_when_atomic_replace_fails(self) -> None:
         with TemporaryDirectory() as tmp:
             original_storage_root = main.CALL_STORAGE_ROOT
