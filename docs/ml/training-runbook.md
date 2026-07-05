@@ -57,6 +57,15 @@ python3 research/speech_ml/run_ready_experiments.py \
 
 Preview first with `--dry-run`. Add `--include-progression` only when you also want progression-only reports such as UCI Parkinsons Telemonitoring; those reports are not PD/control classifier training.
 
+After experiments run, audit the generated artifacts before app handoff:
+
+```bash
+python3 research/speech_ml/audit_model_artifacts.py \
+  --artifacts-dir research/artifacts
+```
+
+The audit writes `model_artifact_audit.md` and `model_artifact_audit.json`. Use `--require-validated` only for a release gate; it fails unless every selected experiment has passed the full model-card gate. Most hackathon/research runs should remain `research-only`.
+
 For supported public feature-only datasets, start with the local fetcher:
 
 ```bash

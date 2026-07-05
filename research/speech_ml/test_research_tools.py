@@ -12,6 +12,7 @@ from pathlib import Path
 
 from research.speech_ml import (
     analyze_progression_table,
+    audit_model_artifacts,
     build_personal_baselines,
     convert_feature_table,
     dataset_registry,
@@ -80,6 +81,16 @@ class ResearchToolTests(unittest.TestCase):
         )
 
         self.assertIn("--include-progression", result.stdout)
+
+    def test_audit_model_artifacts_script_help_works_from_repo_root(self) -> None:
+        result = subprocess.run(
+            [sys.executable, "research/speech_ml/audit_model_artifacts.py", "--help"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertIn("--require-validated", result.stdout)
 
     def test_dataset_registry_reports_fetch_manifest_readiness(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -407,6 +418,123 @@ class ResearchToolTests(unittest.TestCase):
             self.assertEqual(report["actions_failed"], 0)
             self.assertEqual(json.loads((output_dir / "ready-uci-parkinson-speech_eval.json").read_text())["status"], "ok")
             self.assertEqual(json.loads((output_dir / "ready-uci-parkinson-speech_baseline_model.json").read_text())["status"], "ok")
+
+    def test_audit_model_artifacts_reports_research_only_and_validated_blocked(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            artifacts = root / "artifacts"
+            artifacts.mkdir()
+            prefix = "sample-run"
+            (artifacts / f"{prefix}_embeddings.jsonl").write_text(json.dumps({"speaker_id": "s-1", "embedding": [0.1]}) + "\n")
+            (artifacts / f"{prefix}_eval.json").write_text(
+                json.dumps(
+                    {
+                        "status": "ok",
+                        "split": {"speaker_leakage": False, "train_speakers": ["p1", "c1"], "test_speakers": ["p2", "c2"]},
+                        "metrics": {
+                            "balanced_accuracy": 0.75,
+                            "sensitivity": 1.0,
+                            "specificity": 0.5,
+                            "roc_auc": 0.5,
+                        },
+                    }
+                )
+                + "\n"
+            )
+            (artifacts / f"{prefix}_baseline_model.json").write_text(
+                json.dumps({"status": "ok", "model_type": "speaker-centroid-baseline", "train_balanced_accuracy": 1.0}) + "\n"
+            )
+            (artifacts / f"{prefix}_personal_baselines.json").write_text(json.dumps({"status": "insufficient-data"}) + "\n")
+            (artifacts / f"{prefix}_experiment.md").write_text("# report\n")
+            (artifacts / f"{prefix}_model_card.md").write_text("# card\n")
+            (artifacts / f"{prefix}_model_card_gate.json").write_text(
+                json.dumps(
+                    {
+                        "datasetAccessReviewed": False,
+                        "speakerSplitVerified": True,
+                        "evaluationMetricsRecorded": True,
+                        "subgroupChecksReviewed": False,
+                        "failureModesDocumented": False,
+                        "uiCopyReviewed": False,
+                        "humanFollowUpActionDefined": False,
+                        "rollbackPathDocumented": False,
+                        "humanFollowUpAction": None,
+                    }
+                )
+                + "\n"
+            )
+
+            exit_code = audit_model_artifacts.main(["--artifacts-dir", str(artifacts), "--experiment", prefix])
+
+            self.assertEqual(exit_code, 0)
+            report = json.loads((artifacts / "model_artifact_audit.json").read_text())
+            audit = report["experiments"][0]
+            self.assertEqual(audit["release_status"], "research-only")
+            self.assertFalse(audit["validated_model_allowed"])
+            self.assertTrue(audit["offline_embedding_allowed"])
+            self.assertIn("datasetAccessReviewed", audit["gate"]["missing"])
+            markdown = (artifacts / "model_artifact_audit.md").read_text()
+            self.assertIn("Speech Model Artifact Audit", markdown)
+            self.assertIn("Research-only", markdown)
+
+            blocked_code = audit_model_artifacts.main(
+                ["--artifacts-dir", str(artifacts), "--experiment", prefix, "--require-validated"]
+            )
+            self.assertEqual(blocked_code, 1)
+
+    def test_audit_model_artifacts_allows_completed_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            artifacts = root / "artifacts"
+            artifacts.mkdir()
+            prefix = "validated-run"
+            (artifacts / f"{prefix}_embeddings.jsonl").write_text(json.dumps({"speaker_id": "s-1", "embedding": [0.1]}) + "\n")
+            (artifacts / f"{prefix}_eval.json").write_text(
+                json.dumps(
+                    {
+                        "status": "ok",
+                        "split": {"speaker_leakage": False, "train_speakers": ["p1", "c1"], "test_speakers": ["p2", "c2"]},
+                        "metrics": {
+                            "balanced_accuracy": 0.75,
+                            "sensitivity": 1.0,
+                            "specificity": 0.5,
+                            "roc_auc": 0.5,
+                        },
+                    }
+                )
+                + "\n"
+            )
+            (artifacts / f"{prefix}_baseline_model.json").write_text(
+                json.dumps({"status": "ok", "model_type": "speaker-centroid-baseline", "train_balanced_accuracy": 1.0}) + "\n"
+            )
+            (artifacts / f"{prefix}_personal_baselines.json").write_text(json.dumps({"status": "ok"}) + "\n")
+            (artifacts / f"{prefix}_experiment.md").write_text("# report\n")
+            (artifacts / f"{prefix}_model_card.md").write_text("# card\n")
+            (artifacts / f"{prefix}_model_card_gate.json").write_text(
+                json.dumps(
+                    {
+                        "datasetAccessReviewed": True,
+                        "speakerSplitVerified": True,
+                        "evaluationMetricsRecorded": True,
+                        "subgroupChecksReviewed": True,
+                        "failureModesDocumented": True,
+                        "uiCopyReviewed": True,
+                        "humanFollowUpActionDefined": True,
+                        "rollbackPathDocumented": True,
+                        "humanFollowUpAction": "Review the speech deviation with the call transcript and arrange human follow-up.",
+                    }
+                )
+                + "\n"
+            )
+
+            exit_code = audit_model_artifacts.main(
+                ["--artifacts-dir", str(artifacts), "--experiment", prefix, "--require-validated"]
+            )
+
+            self.assertEqual(exit_code, 0)
+            report = json.loads((artifacts / "model_artifact_audit.json").read_text())
+            self.assertEqual(report["counts"]["validated_ready"], 1)
+            self.assertTrue(report["experiments"][0]["validated_model_allowed"])
 
     def test_prepare_manifest_infers_rows_from_audio_folders(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

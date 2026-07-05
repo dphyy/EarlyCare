@@ -33,6 +33,15 @@ python3 research/speech_ml/run_ready_experiments.py \
 
 Use `--dry-run` to preview commands first. Add `--include-progression` when you also want progression-only analysis reports; those are not classifier training.
 
+Audit generated artifacts before any app handoff:
+
+```bash
+python3 research/speech_ml/audit_model_artifacts.py \
+  --artifacts-dir research/artifacts
+```
+
+This writes `model_artifact_audit.md` and `model_artifact_audit.json`. A trained artifact remains research-only unless every model-card gate is complete and safe human follow-up wording is present.
+
 ## Fetch Public Feature Datasets
 
 Download supported public feature-only datasets into ignored local folders:
