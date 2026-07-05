@@ -332,8 +332,23 @@ export const sessions: CheckInSession[] = [
       riskLevel: "Green",
       reasons: ["Speech remains close to baseline", "No fall or head-impact symptoms reported"]
     },
-    categories: [],
-    escalationPlan: []
+    categories: [
+      {
+        id: "medication_food_water",
+        label: "Medication / food / water",
+        severity: "Green",
+        evidence: ["Medication, food, or water status mentioned."],
+        recommendedAction: "Confirm medication, food, and water intake. Escalate if intake is poor or medication has been missed."
+      }
+    ],
+    escalationPlan: [
+      { id: "routine-note", label: "Routine note", status: "Complete", detail: "Check-in evidence is recorded in the senior profile." },
+      { id: "app-notification", label: "App notification", status: "Standby", detail: "Show the care-team alert in EarlyCare when any Watch, Amber, Red, or missed-check-in signal appears." },
+      { id: "retry-call", label: "Retry call", status: "Standby", detail: "Retry once when a scheduled check-in is missed before escalating to an in-person follow-up." },
+      { id: "notify-caregiver-neighbour", label: "Notify caregiver / neighbour", status: "Standby", detail: "Notify Son: Hafiz. Neighbour contact: Neighbour: Encik Salleh, unit 03-018." },
+      { id: "volunteer-social-task", label: "Volunteer / social-service task", status: "Standby", detail: "Assign a befriender, volunteer, or Active Ageing Centre style follow-up task." },
+      { id: "emergency-alert", label: "Emergency alert", status: "Standby", detail: "Use only for red danger signs such as confusion, repeated vomiting, slurred speech, weakness, numbness, or cannot be woken after head/body impact." }
+    ]
   },
   {
     id: "c-102",
@@ -354,8 +369,30 @@ export const sessions: CheckInSession[] = [
       riskLevel: "Red",
       reasons: ["Fall with head impact", "Confusion and weakness reported", "Large speech deviation from baseline"]
     },
-    categories: [],
-    escalationPlan: []
+    categories: [
+      {
+        id: "fall_head_impact",
+        label: "Fall / head impact / whiplash",
+        severity: "Amber",
+        evidence: ["Fall reported.", "Head impact reported."],
+        recommendedAction: "Ask what happened, whether the head or body was hit, and whether the senior can move safely."
+      },
+      {
+        id: "concussion_danger",
+        label: "Possible concussion danger signs",
+        severity: "Red",
+        evidence: ["Confusion reported.", "Weakness or numbness reported.", "Headache or dizziness after impact reported."],
+        recommendedAction: "For red danger signs after a bump, blow, jolt, or fall, escalate for urgent medical help."
+      }
+    ],
+    escalationPlan: [
+      { id: "routine-note", label: "Routine note", status: "Complete", detail: "Check-in evidence is recorded in the senior profile." },
+      { id: "app-notification", label: "App notification", status: "Triggered", detail: "Show the care-team alert in EarlyCare when any Watch, Amber, Red, or missed-check-in signal appears." },
+      { id: "retry-call", label: "Retry call", status: "Standby", detail: "Retry once when a scheduled check-in is missed before escalating to an in-person follow-up." },
+      { id: "notify-caregiver-neighbour", label: "Notify caregiver / neighbour", status: "Triggered", detail: "Notify Daughter: Mei Ling. Neighbour contact: Neighbour: Mr Lee, unit 08-112." },
+      { id: "volunteer-social-task", label: "Volunteer / social-service task", status: "Triggered", detail: "Assign a befriender, volunteer, or Active Ageing Centre style follow-up task." },
+      { id: "emergency-alert", label: "Emergency alert", status: "Triggered", detail: "Use only for red danger signs such as confusion, repeated vomiting, slurred speech, weakness, numbness, or cannot be woken after head/body impact." }
+    ]
   }
 ];
 
@@ -413,7 +450,9 @@ export const volunteerTasks: VolunteerTask[] = [
     recommendedAction: "Call caregiver and coordinate urgent medical assessment.",
     assignedTo: "SGO-style volunteer team A",
     status: "Open",
-    createdAt: "2026-07-04T09:05:00+08:00"
+    createdAt: "2026-07-04T09:05:00+08:00",
+    sourceSessionId: "c-102",
+    escalationStep: "emergency-alert"
   },
   {
     id: "t-002",

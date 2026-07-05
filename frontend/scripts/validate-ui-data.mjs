@@ -51,8 +51,19 @@ const missingCategories = requiredCategoryIds.filter((id) => !typeSource.include
 const missingHooks = requiredUiHooks.filter((hook) => !mainSource.includes(hook));
 const missingTypes = ["CallPlan", "CheckInScheduleItem", "SeniorRecord", "SpeechModelProvenance", "speechModelProvenance"].filter((hook) => !typeSource.includes(hook));
 const missingApiHooks = ["fetchCallPlans", "fetchSchedule", "fetchSeniorRecords"].filter((hook) => !mainSource.includes(hook));
+const sessionsSource = dataSource.slice(dataSource.indexOf("export const sessions"), dataSource.indexOf("export const scheduleItems"));
+const emptySeedSessionFields = ["categories: []", "escalationPlan: []"].filter((field) => sessionsSource.includes(field));
+const missingSeedSessionEvidence = [
+  'id: "medication_food_water"',
+  'id: "fall_head_impact"',
+  'id: "concussion_danger"',
+  'id: "emergency-alert"'
+].filter((hook) => !sessionsSource.includes(hook));
+const missingSeedTaskLinks = [
+  'sourceSessionId: "c-102"'
+].filter((hook) => !dataSource.includes(hook));
 
-if (missingScenarios.length || missingCategories.length || missingHooks.length || missingTypes.length || missingApiHooks.length) {
+if (missingScenarios.length || missingCategories.length || missingHooks.length || missingTypes.length || missingApiHooks.length || emptySeedSessionFields.length || missingSeedSessionEvidence.length || missingSeedTaskLinks.length) {
   console.error(
     JSON.stringify(
       {
@@ -60,7 +71,10 @@ if (missingScenarios.length || missingCategories.length || missingHooks.length |
         missingCategories,
         missingHooks,
         missingTypes,
-        missingApiHooks
+        missingApiHooks,
+        emptySeedSessionFields,
+        missingSeedSessionEvidence,
+        missingSeedTaskLinks
       },
       null,
       2
