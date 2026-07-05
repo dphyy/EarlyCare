@@ -94,6 +94,7 @@ Speech ML can add support through slower response, large acute baseline deviatio
 | Personal-baseline builder | Done | `research/speech_ml/build_personal_baselines.py`, `research/speech_ml/run_experiment.py`, `research/speech_ml/test_research_tools.py` |
 | Offline baseline trainer | Done | `research/speech_ml/train_baseline.py`, `docs/ml/training-runbook.md` |
 | Offline experiment runner | Done | `research/speech_ml/run_experiment.py`, `research/speech_ml/test_research_tools.py`; accepts reviewed manifests, raw feature tables, and classifier-ready dataset fetch manifests. |
+| Ready experiment runner | Done | `research/speech_ml/run_ready_experiments.py`; consumes dataset readiness, runs locally ready feature-baseline experiments, and optionally runs progression-only analyses. |
 | Enrichment payload bridge | Done | `research/speech_ml/make_enrichment_payload.py`; `backend/tests/test_call_workflow.py` patches a generated payload into `/calls/{call_id}/speech-enrichment`. |
 | Evaluation harness | Done | `research/speech_ml/evaluate_baseline.py`, `research/speech_ml/metrics.md` |
 | App integration | Done | Saved calls store `speechModelProvenance`; `/calls/{call_id}/speech-enrichment` accepts offline embedding rows. |

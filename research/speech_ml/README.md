@@ -24,6 +24,15 @@ python3 research/speech_ml/dataset_registry.py \
 
 The registry lives at `research/speech_ml/dataset_registry.json`. The report also inspects local `dataset_fetch_manifest.json` files under `research/datasets/` and marks datasets as feature-baseline trainable, progression-analysis ready, access-needed, or literature-only.
 
+After local datasets have been fetched, run every locally ready feature-baseline experiment:
+
+```bash
+python3 research/speech_ml/run_ready_experiments.py \
+  --output-dir research/artifacts
+```
+
+Use `--dry-run` to preview commands first. Add `--include-progression` when you also want progression-only analysis reports; those are not classifier training.
+
 ## Fetch Public Feature Datasets
 
 Download supported public feature-only datasets into ignored local folders:

@@ -48,6 +48,15 @@ python3 research/speech_ml/dataset_registry.py \
 
 The registry report checks `research/speech_ml/dataset_registry.json` plus any local `dataset_fetch_manifest.json` files under `research/datasets/`. It separates feature-baseline training, progression analysis, access-needed raw-audio work, and literature-only concussion evidence.
 
+After supported datasets are fetched locally, run all locally ready feature-baseline experiments with:
+
+```bash
+python3 research/speech_ml/run_ready_experiments.py \
+  --output-dir research/artifacts
+```
+
+Preview first with `--dry-run`. Add `--include-progression` only when you also want progression-only reports such as UCI Parkinsons Telemonitoring; those reports are not PD/control classifier training.
+
 For supported public feature-only datasets, start with the local fetcher:
 
 ```bash

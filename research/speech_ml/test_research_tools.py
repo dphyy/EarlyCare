@@ -20,6 +20,7 @@ from research.speech_ml import (
     fetch_public_datasets,
     make_enrichment_payload,
     prepare_manifest,
+    run_ready_experiments,
     run_experiment,
     train_baseline,
 )
@@ -69,6 +70,16 @@ class ResearchToolTests(unittest.TestCase):
         )
 
         self.assertIn("--ready-only", result.stdout)
+
+    def test_run_ready_experiments_script_help_works_from_repo_root(self) -> None:
+        result = subprocess.run(
+            [sys.executable, "research/speech_ml/run_ready_experiments.py", "--help"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertIn("--include-progression", result.stdout)
 
     def test_dataset_registry_reports_fetch_manifest_readiness(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -205,6 +216,197 @@ class ResearchToolTests(unittest.TestCase):
             self.assertIn("not a validated app model", markdown)
             self.assertTrue(payload["datasets"])
             self.assertTrue(all(entry["target"] == "parkinsons-watch" for entry in payload["datasets"]))
+
+    def test_run_ready_experiments_dry_run_plans_ready_datasets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            registry_path = root / "registry.json"
+            datasets_root = root / "datasets"
+            output_dir = root / "artifacts"
+            registry_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "use_rules": ["no diagnosis"],
+                        "datasets": [
+                            {
+                                "id": "uci",
+                                "name": "UCI Parkinson Speech",
+                                "status": "feature-only",
+                                "target": "parkinsons-watch",
+                                "source_urls": ["https://example.com/uci"],
+                                "labels": "pd/control",
+                                "language": "Turkish",
+                                "tasks": ["vowels"],
+                                "participants": "sample",
+                                "raw_audio": "no-feature-table",
+                                "fetcher_dataset_id": "uci-parkinson-speech",
+                                "training_mode": "feature_classification_smoke",
+                                "earlycare_use": "feature sanity check",
+                                "required_before_training": ["fetch"],
+                            },
+                            {
+                                "id": "tele",
+                                "name": "Telemonitoring",
+                                "status": "feature-only",
+                                "target": "parkinsons-progression",
+                                "source_urls": ["https://example.com/tele"],
+                                "labels": "updrs",
+                                "language": "English",
+                                "tasks": ["voice measures"],
+                                "participants": "sample",
+                                "raw_audio": "no-feature-table",
+                                "fetcher_dataset_id": "uci-parkinsons-telemonitoring",
+                                "training_mode": "progression_analysis",
+                                "earlycare_use": "progression only",
+                                "required_before_training": ["fetch"],
+                            },
+                        ],
+                    }
+                )
+                + "\n"
+            )
+            uci_root = datasets_root / "uci-parkinson-speech"
+            uci_root.mkdir(parents=True)
+            (uci_root / "dataset_fetch_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "table_summaries": [
+                            {
+                                "path": "training_data.csv",
+                                "classification_ready": True,
+                                "progression_ready": False,
+                            }
+                        ]
+                    }
+                )
+                + "\n"
+            )
+            tele_root = datasets_root / "uci-parkinsons-telemonitoring"
+            tele_root.mkdir(parents=True)
+            (tele_root / "dataset_fetch_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "table_summaries": [
+                            {
+                                "path": "parkinsons_updrs.data",
+                                "classification_ready": False,
+                                "progression_ready": True,
+                            }
+                        ]
+                    }
+                )
+                + "\n"
+            )
+
+            exit_code = run_ready_experiments.main(
+                [
+                    "--registry",
+                    str(registry_path),
+                    "--datasets-root",
+                    str(datasets_root),
+                    "--output-dir",
+                    str(output_dir),
+                    "--dry-run",
+                    "--include-progression",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            report = json.loads((output_dir / "ready_experiments_run.json").read_text())
+            self.assertTrue(report["dry_run"])
+            self.assertEqual(report["actions_planned"], 2)
+            kinds = {action["kind"] for action in report["actions"]}
+            self.assertEqual(kinds, {"feature_baseline_training", "progression_analysis"})
+            self.assertIn("Do not treat", report["safety"]["excluded_use"])
+
+    def test_run_ready_experiments_executes_feature_training(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            registry_path = root / "registry.json"
+            datasets_root = root / "datasets"
+            output_dir = root / "artifacts"
+            registry_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "use_rules": ["no diagnosis"],
+                        "datasets": [
+                            {
+                                "id": "uci-parkinson-speech",
+                                "name": "UCI Parkinson Speech",
+                                "status": "feature-only",
+                                "target": "parkinsons-watch",
+                                "source_urls": ["https://example.com/uci"],
+                                "labels": "pd/control",
+                                "language": "Turkish",
+                                "tasks": ["vowels"],
+                                "participants": "sample",
+                                "raw_audio": "no-feature-table",
+                                "fetcher_dataset_id": "uci-parkinson-speech",
+                                "training_mode": "feature_classification_smoke",
+                                "earlycare_use": "feature sanity check",
+                                "required_before_training": ["fetch"],
+                            }
+                        ],
+                    }
+                )
+                + "\n"
+            )
+            dataset_root = datasets_root / "uci-parkinson-speech"
+            dataset_root.mkdir(parents=True)
+            input_path = dataset_root / "training_data.csv"
+            with input_path.open("w", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=["Subject id", "Jitter", "Shimmer", "class information"])
+                writer.writeheader()
+                writer.writerows(
+                    [
+                        {"Subject id": "pd-001", "Jitter": "10", "Shimmer": "12", "class information": "1"},
+                        {"Subject id": "pd-001", "Jitter": "11", "Shimmer": "13", "class information": "1"},
+                        {"Subject id": "pd-002", "Jitter": "12", "Shimmer": "14", "class information": "1"},
+                        {"Subject id": "pd-002", "Jitter": "13", "Shimmer": "15", "class information": "1"},
+                        {"Subject id": "ctl-001", "Jitter": "0", "Shimmer": "1", "class information": "0"},
+                        {"Subject id": "ctl-001", "Jitter": "1", "Shimmer": "2", "class information": "0"},
+                        {"Subject id": "ctl-002", "Jitter": "2", "Shimmer": "3", "class information": "0"},
+                        {"Subject id": "ctl-002", "Jitter": "3", "Shimmer": "4", "class information": "0"},
+                    ]
+                )
+            (dataset_root / "dataset_fetch_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "dataset_id": "uci-parkinson-speech",
+                        "name": "UCI Parkinson Speech",
+                        "table_summaries": [
+                            {
+                                "path": "training_data.csv",
+                                "classification_ready": True,
+                                "progression_ready": False,
+                            }
+                        ],
+                    }
+                )
+                + "\n"
+            )
+
+            exit_code = run_ready_experiments.main(
+                [
+                    "--registry",
+                    str(registry_path),
+                    "--datasets-root",
+                    str(datasets_root),
+                    "--output-dir",
+                    str(output_dir),
+                    "--only",
+                    "uci-parkinson-speech",
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            report = json.loads((output_dir / "ready_experiments_run.json").read_text())
+            self.assertEqual(report["actions_succeeded"], 1)
+            self.assertEqual(report["actions_failed"], 0)
+            self.assertEqual(json.loads((output_dir / "ready-uci-parkinson-speech_eval.json").read_text())["status"], "ok")
+            self.assertEqual(json.loads((output_dir / "ready-uci-parkinson-speech_baseline_model.json").read_text())["status"], "ok")
 
     def test_prepare_manifest_infers_rows_from_audio_folders(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
