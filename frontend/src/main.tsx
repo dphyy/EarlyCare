@@ -88,13 +88,14 @@ function sortByRisk<T extends { severity: RiskLevel }>(items: T[]): T[] {
   return [...items].sort((a, b) => riskOrder[b.severity] - riskOrder[a.severity]);
 }
 
-function StatCard({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
+function StatCard({ label, value, icon, meta }: { label: string; value: string; icon: React.ReactNode; meta?: string }) {
   return (
     <section className="stat-card">
       <div className="stat-icon">{icon}</div>
       <div>
         <p>{label}</p>
         <strong>{value}</strong>
+        {meta ? <small>{meta}</small> : null}
       </div>
     </section>
   );
@@ -1669,7 +1670,7 @@ function OfficerDashboard({
 }
 
 function App() {
-  const [view, setView] = useState<AppView>("demo");
+  const [view, setView] = useState<AppView>("dashboard");
   const [loadedSeniors, setLoadedSeniors] = useState<Senior[]>([]);
   const [loadedSessions, setLoadedSessions] = useState<CheckInSession[]>([]);
   const [loadedTasks, setLoadedTasks] = useState<VolunteerTask[]>([]);
@@ -1769,7 +1770,7 @@ function App() {
             <span>2-3 day living-alone check-ins</span>
           </div>
         </div>
-        <nav>
+        <nav aria-label="Primary workspace">
           <button className={view === "demo" ? "active" : ""} onClick={() => setView("demo")}>
             <ClipboardList size={18} />
             Demo runner
@@ -1786,9 +1787,10 @@ function App() {
       </header>
 
       <section className="hero-band">
-        <div>
-          <span className="eyebrow">Preventive care + volunteer escalation</span>
-          <h1>Scheduled calls that turn silence, falls, and speech change into earlier human follow-up.</h1>
+        <div className="hero-copy">
+          <span className="eyebrow">Care operations command center</span>
+          <h1>Today's living-alone check-in desk</h1>
+          <p>Track due calls, missed replies, and human follow-up before silence turns into a welfare risk.</p>
           <div className="routing-strip" aria-label="EarlyCare escalation route">
             <span>
               <Timer size={15} />
@@ -1812,10 +1814,10 @@ function App() {
           </div>
         </div>
         <div className="hero-stats">
-          <StatCard label="Open tasks" value={`${openTasks}`} icon={<Bell size={20} />} />
-          <StatCard label="Urgent" value={`${urgentTasks}`} icon={<AlertTriangle size={20} />} />
-          <StatCard label="Due now" value={`${dueNow}`} icon={<CalendarClock size={20} />} />
-          <StatCard label="Safety stance" value="No diagnosis" icon={<ShieldCheck size={20} />} />
+          <StatCard label="Open tasks" value={`${openTasks}`} meta="follow-up queue" icon={<Bell size={20} />} />
+          <StatCard label="Urgent" value={`${urgentTasks}`} meta="same-day attention" icon={<AlertTriangle size={20} />} />
+          <StatCard label="Due now" value={`${dueNow}`} meta="call cadence risk" icon={<CalendarClock size={20} />} />
+          <StatCard label="Safety stance" value="No diagnosis" meta="human review only" icon={<ShieldCheck size={20} />} />
         </div>
       </section>
 

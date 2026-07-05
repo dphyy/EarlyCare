@@ -6,6 +6,8 @@
   --line: #dfe5d8;
   --brand: #16453f;
   --brand-soft: #edf3e7;
+  --navy: #1d355d;
+  --wash: #eef2ea;
   --blue: #244b9a;
   --blue-soft: #e5edff;
   --amber: #8a5c00;
@@ -24,6 +26,9 @@
 }
 
 body {
+  background:
+    linear-gradient(180deg, #f8faf6 0, #eef2ea 340px, #f3f5ef 100%),
+    #f3f5ef;
   margin: 0;
   min-width: 320px;
 }
@@ -39,17 +44,20 @@ summary:focus-visible {
 }
 
 .app-shell {
+  background: transparent;
   min-height: 100vh;
 }
 
 .topbar {
   align-items: center;
-  background: rgba(250, 251, 247, 0.94);
-  border-bottom: 1px solid #dfe5d8;
+  background: rgba(255, 255, 255, 0.9);
+  border-bottom: 1px solid rgba(203, 215, 194, 0.95);
+  box-shadow: 0 10px 24px rgba(31, 45, 34, 0.06);
+  backdrop-filter: blur(18px);
   display: flex;
   gap: 24px;
   justify-content: space-between;
-  padding: 14px 28px;
+  padding: 12px 28px;
   position: sticky;
   top: 0;
   z-index: 10;
@@ -63,13 +71,14 @@ summary:focus-visible {
 
 .brand-mark {
   align-items: center;
-  background: #16453f;
+  background: linear-gradient(145deg, #16453f, #1d355d);
   border-radius: 8px;
+  box-shadow: 0 10px 20px rgba(22, 69, 63, 0.18);
   color: #ffffff;
   display: grid;
-  height: 46px;
+  height: 44px;
   place-items: center;
-  width: 46px;
+  width: 44px;
 }
 
 .brand strong {
@@ -102,7 +111,14 @@ nav button,
   cursor: pointer;
   display: inline-flex;
   gap: 8px;
+  min-height: 44px;
   padding: 10px 14px;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
 }
 
 nav button.active,
@@ -112,13 +128,30 @@ nav button.active,
   color: #ffffff;
 }
 
+nav button:hover,
+.call-actions button:hover,
+.scenario-tabs button:hover,
+.scenario-card:hover,
+.secondary-action:hover,
+.task-actions button:hover,
+.result-actions button:hover,
+.senior-selector button:hover {
+  border-color: #9fb18f;
+  box-shadow: 0 8px 18px rgba(31, 45, 34, 0.08);
+  transform: translateY(-1px);
+}
+
 .primary-action {
   background: #16453f;
   border-color: #16453f;
   color: #ffffff;
+  font-weight: 800;
+  justify-content: center;
 }
 
 .secondary-action {
+  background: #ffffff;
+  font-weight: 700;
   justify-content: center;
 }
 
@@ -130,13 +163,29 @@ button:disabled {
 .hero-band {
   align-items: stretch;
   background:
-    linear-gradient(120deg, rgba(223, 234, 214, 0.95), rgba(239, 244, 232, 0.98)),
-    radial-gradient(circle at 12% 20%, rgba(36, 75, 154, 0.1), transparent 24%);
-  border-bottom: 1px solid #cbd7c2;
+    linear-gradient(135deg, rgba(22, 69, 63, 0.96), rgba(29, 53, 93, 0.94)),
+    linear-gradient(180deg, #f8faf6, #eef2ea);
+  border-bottom: 1px solid rgba(22, 69, 63, 0.25);
+  color: #ffffff;
   display: grid;
-  gap: 24px;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.9fr);
-  padding: 30px 28px;
+  gap: 20px;
+  grid-template-columns: minmax(0, 1fr) minmax(420px, 0.85fr);
+  padding: 20px 28px;
+}
+
+.hero-copy {
+  align-self: center;
+}
+
+.hero-copy .eyebrow {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.hero-copy p {
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 16px;
+  margin: 8px 0 0;
+  max-width: 720px;
 }
 
 .routing-strip {
@@ -144,15 +193,15 @@ button:disabled {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 18px;
+  margin-top: 16px;
 }
 
 .routing-strip span {
   align-items: center;
-  background: rgba(255, 255, 255, 0.64);
-  border: 1px solid rgba(203, 215, 194, 0.9);
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 999px;
-  color: #243029;
+  color: #ffffff;
   display: inline-flex;
   font-size: 13px;
   gap: 6px;
@@ -160,7 +209,7 @@ button:disabled {
 }
 
 .routing-strip > svg {
-  color: #667065;
+  color: rgba(255, 255, 255, 0.46);
 }
 
 .eyebrow {
@@ -179,8 +228,8 @@ p {
 }
 
 h1 {
-  font-size: clamp(28px, 4vw, 48px);
-  line-height: 1.05;
+  font-size: clamp(28px, 3vw, 40px);
+  line-height: 1.08;
   margin-bottom: 0;
   max-width: 880px;
 }
@@ -217,8 +266,14 @@ h3 {
   align-items: center;
   display: flex;
   gap: 12px;
-  min-height: 82px;
+  min-height: 78px;
   padding: 14px;
+}
+
+.hero-stats .stat-card {
+  background: rgba(255, 255, 255, 0.96);
+  border-color: rgba(255, 255, 255, 0.68);
+  box-shadow: 0 14px 28px rgba(11, 24, 22, 0.16);
 }
 
 .stat-card p {
@@ -228,8 +283,15 @@ h3 {
 }
 
 .stat-card strong {
+  color: #17201a;
   display: block;
   line-height: 1.15;
+}
+
+.stat-card small {
+  display: block;
+  font-size: 12px;
+  margin-top: 2px;
 }
 
 .stat-icon {
@@ -250,7 +312,7 @@ h3 {
 .call-only-grid {
   display: grid;
   gap: 18px;
-  grid-template-columns: 360px minmax(0, 1fr);
+  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
   padding: 18px 28px 36px;
 }
 
@@ -265,7 +327,20 @@ h3 {
 }
 
 .panel {
+  box-shadow: 0 12px 28px rgba(31, 45, 34, 0.05);
   padding: 18px;
+}
+
+.roster-panel {
+  align-self: start;
+  max-height: calc(100vh - 96px);
+  overflow: auto;
+  position: sticky;
+  top: 82px;
+}
+
+.detail-panel {
+  min-width: 0;
 }
 
 .panel-heading,
@@ -307,6 +382,14 @@ h3 {
   gap: 10px;
 }
 
+.profile-actions .primary-action {
+  white-space: nowrap;
+}
+
+.profile-actions .risk-badge {
+  justify-self: start;
+}
+
 .profile-strip {
   align-items: center;
   background: #f8faf5;
@@ -338,7 +421,7 @@ h3 {
 
 .senior-row {
   align-items: center;
-  background: #f9faf6;
+  background: #fbfcf8;
   border: 1px solid transparent;
   border-radius: 8px;
   color: inherit;
@@ -348,6 +431,11 @@ h3 {
   padding: 12px;
   text-align: left;
   width: 100%;
+}
+
+.senior-row:hover {
+  background: #f4f8ef;
+  border-color: #d7e2cd;
 }
 
 .senior-row-meta {
@@ -364,8 +452,9 @@ h3 {
 }
 
 .senior-row.active {
-  background: #eef5e9;
-  border-color: #98b28d;
+  background: #edf6e8;
+  border-color: #87aa78;
+  box-shadow: inset 4px 0 0 #16453f;
 }
 
 .risk-badge,
@@ -766,9 +855,10 @@ h3 {
 .handoff-card,
 .profile-handoff {
   align-items: flex-start;
-  background: #f8faf5;
+  background: #ffffff;
   border: 1px solid #dfe5d8;
   border-radius: 8px;
+  box-shadow: inset 4px 0 0 #cbd7c2;
   display: flex;
   gap: 14px;
   justify-content: space-between;
@@ -792,21 +882,25 @@ h3 {
 .handoff-green {
   background: #f4fbf2;
   border-color: #b8d6b4;
+  box-shadow: inset 4px 0 0 #67a56f;
 }
 
 .handoff-watch {
   background: #f3f6ff;
   border-color: #c5d5ff;
+  box-shadow: inset 4px 0 0 #6b87d6;
 }
 
 .handoff-amber {
   background: #fff8e8;
   border-color: #e5c979;
+  box-shadow: inset 4px 0 0 #d7a53d;
 }
 
 .handoff-red {
   background: #fff3f1;
   border-color: #eca19a;
+  box-shadow: inset 4px 0 0 #df6d5f;
 }
 
 .profile-handoff {
@@ -814,7 +908,8 @@ h3 {
 }
 
 .schedule-panel {
-  background: #f8faf5;
+  background:
+    linear-gradient(180deg, #ffffff, #fbfcf8);
   border: 1px solid #dfe5d8;
   border-radius: 8px;
   margin: 16px 0;
@@ -823,14 +918,17 @@ h3 {
 
 .schedule-panel-overdue {
   border-color: #e39a92;
+  box-shadow: inset 0 3px 0 #df6d5f;
 }
 
 .schedule-panel-due-now {
   border-color: #e0bd6a;
+  box-shadow: inset 0 3px 0 #d7a53d;
 }
 
 .schedule-panel-due-soon {
   border-color: #bdcbef;
+  box-shadow: inset 0 3px 0 #6b87d6;
 }
 
 .schedule-grid {
@@ -847,6 +945,12 @@ h3 {
   gap: 4px;
   min-width: 0;
   padding: 10px;
+}
+
+.schedule-grid div:hover,
+.record-summary-grid div:hover,
+.speech-metric:hover {
+  border-color: #c9d8bf;
 }
 
 .schedule-grid span,
@@ -886,7 +990,8 @@ h3 {
 }
 
 .call-plan-panel {
-  background: #f8faf5;
+  background:
+    linear-gradient(180deg, #fbfcf8, #f6f8f1);
   border: 1px solid #dfe5d8;
   border-radius: 8px;
   margin: 16px 0;
@@ -927,6 +1032,15 @@ h3 {
   gap: 8px;
   min-width: 0;
   padding: 12px;
+}
+
+.call-plan-question:hover,
+.record-category:hover,
+.record-event:hover,
+.task-card:hover,
+.call-record:hover {
+  border-color: #c9d8bf;
+  box-shadow: 0 8px 18px rgba(31, 45, 34, 0.05);
 }
 
 .call-plan-question div {
@@ -1064,7 +1178,7 @@ h3 {
 
 .handoff-icon {
   align-items: center;
-  background: #16453f;
+  background: linear-gradient(145deg, #16453f, #1d355d);
   border-radius: 8px;
   color: #ffffff;
   display: grid;
@@ -1082,8 +1196,8 @@ h3 {
 
 .handoff-metrics span {
   align-items: center;
-  background: rgba(255, 255, 255, 0.68);
-  border: 1px solid rgba(223, 229, 216, 0.8);
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(223, 229, 216, 0.95);
   border-radius: 8px;
   color: #243029;
   display: inline-flex;
@@ -1696,6 +1810,27 @@ h3 {
     display: grid;
   }
 
+  .hero-band {
+    grid-template-columns: 1fr;
+  }
+
+  .roster-panel {
+    max-height: none;
+    overflow: visible;
+    position: static;
+  }
+
+  .profile-header {
+    display: grid;
+  }
+
+  .profile-actions {
+    align-items: stretch;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, max-content));
+    justify-content: start;
+  }
+
   nav {
     overflow-x: auto;
   }
@@ -1708,6 +1843,22 @@ h3 {
     grid-template-columns: 1fr;
   }
 
+  .hero-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .hero-stats .stat-card {
+    align-items: flex-start;
+    display: grid;
+    gap: 8px;
+    min-height: 128px;
+  }
+
+  .hero-stats .stat-icon {
+    height: 36px;
+    width: 36px;
+  }
+
   .hero-band,
   .dashboard-grid,
   .simulator-grid,
@@ -1716,6 +1867,15 @@ h3 {
   .topbar {
     padding-left: 16px;
     padding-right: 16px;
+  }
+
+  .hero-band {
+    padding-bottom: 18px;
+    padding-top: 18px;
+  }
+
+  .hero-copy p {
+    font-size: 14px;
   }
 
   .routing-strip {
@@ -1733,6 +1893,16 @@ h3 {
 
   .senior-row-meta {
     align-items: flex-start;
+  }
+
+  .profile-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-actions .primary-action,
+  .schedule-actions button,
+  .call-plan-footer .primary-action {
+    width: 100%;
   }
 
   .task-actions {
