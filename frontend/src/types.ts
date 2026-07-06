@@ -122,8 +122,10 @@ export interface CallRecord {
   speechModelFeaturesSummary?: Record<string, number | string | null>;
   currentSpeechProfile?: SpeechProfile | null;
   transcriptSegments?: TranscriptSegment[];
+  transcriptAlignmentWarnings?: string[];
   riskSignals?: RiskSignal[];
   aiRiskFallbackUsed?: boolean;
+  aiRiskFailureReason?: string | null;
   riskAssessment: RiskAssessment;
   recommendedAction: string;
 }

@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import httpx
 import numpy as np
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -30,9 +30,10 @@ from app.models import (
     Symptoms,
     TranscriptSegment,
     TranscriptMessage,
+    VolunteerTaskUpdate,
     VolunteerTask,
 )
-from app.providers import GoogleTranslateProvider, clean_transcript_text, transcribe_with_fallback
+from app.providers import GoogleTranslateProvider, _safe_error_reason, clean_transcript_text, transcribe_with_fallback
 
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -231,6 +232,18 @@ def _clean_messages(messages: list[TranscriptMessage]) -> list[TranscriptMessage
     return [message.model_copy(update={"text": _strip_speaker_labels(message.text)}) for message in messages]
 
 
+def _live_spoken_messages(messages: list[TranscriptMessage]) -> list[TranscriptMessage]:
+    return [message for message in messages if message.role != "System" and message.text.strip()]
+
+
+def _has_live_spoken_messages(messages: list[TranscriptMessage]) -> bool:
+    return bool(_live_spoken_messages(messages))
+
+
+def _role_labeled_original_from_live_messages(messages: list[TranscriptMessage]) -> str:
+    return _transcript_to_text(_live_spoken_messages(messages))
+
+
 def _word_count(text: str) -> int:
     return max(1, len(re.findall(r"\w+|[\u4e00-\u9fff]", text)))
 
@@ -312,6 +325,14 @@ def _split_sentences(text: str) -> list[str]:
     return [part.strip() for part in re.split(r"(?<=[.!?。？！])\s+", cleaned) if part.strip()]
 
 
+def _provider_text_units(text: str) -> list[str]:
+    role_labeled = [
+        _strip_speaker_labels(match.group(2))
+        for match in re.finditer(r"(?m)^\s*(Agent|Patient|Senior)\s*:\s*(.+)$", text, flags=re.IGNORECASE)
+    ]
+    return [unit for unit in role_labeled if unit] or [_strip_speaker_labels(sentence) for sentence in _split_sentences(text)]
+
+
 def _translate_message_text(language: str, text: str) -> str:
     if language.lower() == "english":
         return _clean_transcript_text(text)
@@ -321,8 +342,19 @@ def _translate_message_text(language: str, text: str) -> str:
         return _clean_transcript_text(text)
 
 
-def _role_labeled_english_transcript(messages: list[TranscriptMessage], language: str, fallback_translation: str) -> str:
+def _add_warning(warnings: list[str] | None, message: str) -> None:
+    if warnings is not None and message not in warnings:
+        warnings.append(message)
+
+
+def _role_labeled_english_transcript(
+    messages: list[TranscriptMessage],
+    language: str,
+    fallback_translation: str,
+    warnings: list[str] | None = None,
+) -> str:
     if not messages:
+        _add_warning(warnings, "English transcript used provider text because no live transcript messages were available.")
         return _clean_transcript_text(fallback_translation)
     if language.lower() == "english":
         return _transcript_to_text(messages)
@@ -338,49 +370,61 @@ def _role_labeled_english_transcript(messages: list[TranscriptMessage], language
         lines.append(_role_line(_display_role(message.role), translated or message.text))
 
     if translated_any or not fallback_translation:
+        if translated_any:
+            _add_warning(warnings, "English transcript was rebuilt from live role-labeled messages with per-turn translation.")
         return "\n".join(lines)
-    if _has_role_labeled_lines(fallback_translation):
-        return _normalize_role_labeled_transcript(fallback_translation)
 
-    fallback_sentences = _split_sentences(fallback_translation)
-    if not fallback_sentences:
+    fallback_units = _provider_text_units(fallback_translation)
+    if not fallback_units:
+        _add_warning(warnings, "Provider English transcript was empty or unsplittable; using live transcript text.")
         return "\n".join(lines)
-    spoken_messages = [message for message in messages if message.role != "System" and message.text.strip()]
-    if len(fallback_sentences) < len(spoken_messages):
+    spoken_messages = _live_spoken_messages(messages)
+    if len(fallback_units) != len(spoken_messages):
+        _add_warning(
+            warnings,
+            "Provider English transcript sentence count did not match live turn count; using live transcript text to preserve speaker roles.",
+        )
         return "\n".join(lines)
     mapped_lines: list[str] = []
     for index, message in enumerate(spoken_messages):
-        sentence_index = min(len(fallback_sentences) - 1, round(index * (len(fallback_sentences) - 1) / max(1, len(spoken_messages) - 1)))
-        mapped_lines.append(_role_line(_display_role(message.role), fallback_sentences[sentence_index]))
+        mapped_lines.append(_role_line(_display_role(message.role), fallback_units[index]))
+    if _has_role_labeled_lines(fallback_translation):
+        _add_warning(warnings, "ElevenLabs live roles were used; MERaLiON speaker labels ignored.")
+    else:
+        _add_warning(warnings, "Provider English transcript was mapped to live transcript turns because provider roles were unavailable.")
     return "\n".join(mapped_lines)
 
 
-def _role_labeled_original_transcript(messages: list[TranscriptMessage], fallback_transcript: str) -> str:
+def _role_labeled_original_transcript(
+    messages: list[TranscriptMessage],
+    fallback_transcript: str,
+    warnings: list[str] | None = None,
+) -> str:
+    if _has_live_spoken_messages(messages):
+        _add_warning(warnings, "ElevenLabs live roles were used for the original transcript; MERaLiON speaker labels ignored.")
+        return _role_labeled_original_from_live_messages(messages)
+
+    if not fallback_transcript:
+        return _transcript_to_text(messages)
+    if _has_role_labeled_lines(fallback_transcript):
+        _add_warning(warnings, "Original transcript used provider role labels because no live spoken messages were available.")
+        return _normalize_role_labeled_transcript(fallback_transcript)
+
+    speaker_parts = re.findall(r"<(Speaker\d+)>:\s*(.*?)(?=<Speaker\d+>:|$)", fallback_transcript, flags=re.IGNORECASE | re.DOTALL)
+    if speaker_parts:
+        _add_warning(warnings, "Original transcript used provider speaker labels because no live spoken messages were available.")
+        return "\n".join(
+            f"{speaker}: {_strip_speaker_labels(text)}"
+            for speaker, text in speaker_parts
+            if _clean_transcript_text(text)
+        )
+
     if not messages:
         return _clean_transcript_text(fallback_transcript)
 
-    spoken_messages = [message for message in messages if message.role != "System" and message.text.strip()]
+    spoken_messages = _live_spoken_messages(messages)
     if not spoken_messages:
         return _transcript_to_text(messages)
-
-    speaker_parts = re.findall(r"<(Speaker\d+)>:\s*(.*?)(?=<Speaker\d+>:|$)", fallback_transcript, flags=re.IGNORECASE | re.DOTALL)
-    if len(speaker_parts) >= 2:
-        ordered_speakers: list[str] = []
-        for speaker, _ in speaker_parts:
-            if speaker not in ordered_speakers:
-                ordered_speakers.append(speaker)
-        role_order: list[str] = []
-        for message in spoken_messages:
-            role = _display_role(message.role)
-            if not role_order or role_order[-1] != role:
-                role_order.append(role)
-        if len(ordered_speakers) <= len(role_order):
-            speaker_roles = {speaker: role_order[index] for index, speaker in enumerate(ordered_speakers)}
-            return "\n".join(
-                _role_line(speaker_roles.get(speaker, "Patient"), text)
-                for speaker, text in speaker_parts
-                if _clean_transcript_text(text)
-            )
 
     return _transcript_to_text(spoken_messages)
 
@@ -446,8 +490,14 @@ def _role_segments_from_messages(messages: list[TranscriptMessage], started_at: 
     return segments
 
 
-def _sync_english_segments(segments: list[TranscriptSegment], original_transcript: str, english_transcript: str) -> list[TranscriptSegment]:
+def _sync_english_segments(
+    segments: list[TranscriptSegment],
+    original_transcript: str,
+    english_transcript: str,
+    warnings: list[str] | None = None,
+) -> list[TranscriptSegment]:
     if not segments:
+        _add_warning(warnings, "Transcript segments were estimated from transcript text because provider timing was unavailable.")
         english_sentences = _split_sentences(english_transcript)
         original_sentences = _split_sentences(original_transcript)
         return [
@@ -467,9 +517,11 @@ def _sync_english_segments(segments: list[TranscriptSegment], original_transcrip
         return segments
 
     if len(segments) == 1:
+        _add_warning(warnings, "Provider returned one segment; English transcript timing is approximate.")
         segments[0].englishText = english_transcript
         return segments
 
+    _add_warning(warnings, "Provider segment count did not match English sentence count; preserving provider segment timing without sentence remapping.")
     for segment in segments:
         if not segment.englishText or segment.englishText == segment.originalText or segment.englishText == segment.text:
             segment.englishText = None
@@ -795,9 +847,9 @@ def _build_patient_speech_audio(
     return output_path, warnings, summary
 
 
-def _manual_risk_review() -> tuple[Symptoms, RiskAssessment, list[RiskSignal], str, bool]:
+def _manual_risk_review(failure_reason: str | None = None) -> tuple[Symptoms, RiskAssessment, list[RiskSignal], str, bool, str | None]:
     reasons = ["Manual review required because AI risk extraction is unavailable."]
-    return Symptoms(), _empty_assessment("Watch", reasons), [], "Manual review required.", True
+    return Symptoms(), _empty_assessment("Watch", reasons), [], "Manual review required.", True, failure_reason
 
 
 def _speech_model_review(audio_path: Path | None) -> tuple[str | None, float | None, list[str], dict[str, float | int | str | None] | None]:
@@ -813,10 +865,10 @@ def _speech_model_review(audio_path: Path | None) -> tuple[str | None, float | N
         return None, None, [f"Speech model review unavailable: {detail}"], None
 
 
-def _openai_risk_review(english_transcript: str, segments: list[TranscriptSegment]) -> tuple[Symptoms, RiskAssessment, list[RiskSignal], str, bool]:
+def _openai_risk_review(english_transcript: str, segments: list[TranscriptSegment]) -> tuple[Symptoms, RiskAssessment, list[RiskSignal], str, bool, str | None]:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        return _manual_risk_review()
+        return _manual_risk_review("OPENAI_API_KEY is not configured.")
 
     patient_segments = [
         segment
@@ -884,9 +936,9 @@ def _openai_risk_review(english_transcript: str, segments: list[TranscriptSegmen
         signals = [RiskSignal.model_validate(signal) for signal in result.get("signals", [])]
         signals = _attach_segment_timestamps(signals, review_segments)
         recommended_action = result.get("recommendedAction") or "Review highlighted details and continue routine follow-up."
-        return symptoms, assessment, signals, recommended_action, False
-    except Exception:
-        return _manual_risk_review()
+        return symptoms, assessment, signals, recommended_action, False, None
+    except Exception as exc:
+        return _manual_risk_review(_safe_error_reason(exc))
 
 
 def _load_call_record(path: Path) -> CallRecord:
@@ -1054,40 +1106,67 @@ async def save_call(
     audio_file_path, audio_path = await _save_uploaded_audio(audio, call_dir, "full-call")
     patient_audio_file_path, _ = await _save_uploaded_audio(patientAudio, call_dir, "patient-audio")
 
+    transcript_alignment_warnings: list[str] = []
     dialogue_transcript = _transcript_to_text(messages)
+    has_live_roles = _has_live_spoken_messages(messages)
     translation = transcribe_with_fallback(senior.preferredLanguage, dialogue_transcript, audio_path)
     if translation.fallbackUsed:
-        original_transcript = _clean_transcript_text(dialogue_transcript or translation.transcript)
+        original_transcript = _clean_transcript_text(
+            _role_labeled_original_from_live_messages(messages) if has_live_roles else (dialogue_transcript or translation.transcript)
+        )
         english_transcript = _clean_transcript_text(
-            _role_labeled_english_transcript(messages, senior.preferredLanguage, translation.translation or original_transcript)
+            _role_labeled_english_transcript(
+                messages,
+                senior.preferredLanguage,
+                translation.translation or original_transcript,
+                transcript_alignment_warnings,
+            )
         )
     else:
-        original_transcript = _clean_transcript_text(_role_labeled_original_transcript(messages, translation.transcript or dialogue_transcript))
+        original_transcript = _clean_transcript_text(
+            _role_labeled_original_transcript(messages, translation.transcript or dialogue_transcript, transcript_alignment_warnings)
+        )
         provider_english = _clean_transcript_text(translation.translation or translation.transcript or original_transcript)
-        if _has_role_labeled_lines(provider_english):
+        if _has_role_labeled_lines(provider_english) and not has_live_roles:
             english_transcript = provider_english
         else:
             english_transcript = _clean_transcript_text(
-                _role_labeled_english_transcript(messages, senior.preferredLanguage, provider_english)
+                _role_labeled_english_transcript(
+                    messages,
+                    senior.preferredLanguage,
+                    provider_english,
+                    transcript_alignment_warnings,
+                )
             )
     for segment in translation.segments:
         segment.text = _clean_transcript_text(segment.text)
         segment.originalText = _clean_transcript_text(segment.originalText or segment.text)
         segment.englishText = _clean_transcript_text(segment.englishText or segment.text)
-    translation.segments = _sync_english_segments(translation.segments, original_transcript, english_transcript)
+    translation.segments = _sync_english_segments(translation.segments, original_transcript, english_transcript, transcript_alignment_warnings)
     role_source_transcript = (
         english_transcript
         if translation.fallbackUsed
-        else _role_labeled_english_transcript(messages, senior.preferredLanguage, english_transcript)
+        else _role_labeled_english_transcript(messages, senior.preferredLanguage, english_transcript, transcript_alignment_warnings)
     )
     role_segments = _role_segments_from_messages(messages, startedAt, role_source_transcript)
-    if role_segments and (translation.fallbackUsed or not _has_explicit_agent_patient_roles(translation.segments)):
+    if role_segments and has_live_roles:
+        if translation.fallbackUsed:
+            _add_warning(transcript_alignment_warnings, "Transcript segment roles were rebuilt from live transcript messages because provider fallback was used.")
+        else:
+            _add_warning(transcript_alignment_warnings, "ElevenLabs live roles were used for transcript segments; MERaLiON speaker labels ignored.")
+        translation.segments = role_segments
+    elif role_segments and (translation.fallbackUsed or not _has_explicit_agent_patient_roles(translation.segments)):
+        if translation.fallbackUsed:
+            _add_warning(transcript_alignment_warnings, "Transcript segment roles were rebuilt from live transcript messages because provider fallback was used.")
+        else:
+            _add_warning(transcript_alignment_warnings, "Provider speaker labels were missing or generic; live transcript roles were used for segment roles.")
         translation.segments = role_segments
     elif not any(segment.startTimeSeconds is not None for segment in translation.segments):
         timed_segments = _timed_segments_from_messages(messages, startedAt, english_transcript)
         if timed_segments:
+            _add_warning(transcript_alignment_warnings, "Provider segment timing was unavailable; segment times were estimated from live transcript event times.")
             translation.segments = timed_segments
-    _, assessment, risk_signals, recommended_action, ai_fallback_used = _openai_risk_review(english_transcript, translation.segments)
+    _, assessment, risk_signals, recommended_action, ai_fallback_used, ai_failure_reason = _openai_risk_review(english_transcript, translation.segments)
     audio_url = f"/calls/{call_id}/audio" if audio_file_path else None
     patient_audio_url = f"/calls/{call_id}/patient-audio" if patient_audio_file_path else None
     current_speech_profile = _estimate_current_speech_profile(messages, startedAt, completedAt, translation.segments)
@@ -1141,8 +1220,10 @@ async def save_call(
         agentAudioCaptured=agentAudioCaptured,
         currentSpeechProfile=current_speech_profile,
         transcriptSegments=translation.segments,
+        transcriptAlignmentWarnings=transcript_alignment_warnings,
         riskSignals=risk_signals,
         aiRiskFallbackUsed=ai_fallback_used,
+        aiRiskFailureReason=ai_failure_reason,
         speechModelVersion=speech_model_version,
         speechModelProbability=speech_model_probability,
         speechModelWarnings=speech_model_warnings,
@@ -1178,9 +1259,12 @@ def get_volunteer_tasks() -> list[VolunteerTask]:
 
 
 @app.patch("/volunteer-tasks/{task_id}", response_model=VolunteerTask)
-def update_volunteer_task(task_id: str, status: str) -> VolunteerTask:
+def update_volunteer_task(task_id: str, status: str | None = None, payload: VolunteerTaskUpdate | None = Body(None)) -> VolunteerTask:
+    next_status = payload.status if payload is not None else status
+    if next_status not in {"Open", "In progress", "Closed"}:
+        raise HTTPException(status_code=422, detail="status must be one of: Open, In progress, Closed")
     for task in VOLUNTEER_TASKS:
         if task.id == task_id:
-            task.status = status  # type: ignore[assignment]
+            task.status = next_status  # type: ignore[assignment]
             return task
     raise HTTPException(status_code=404, detail="Volunteer task not found")

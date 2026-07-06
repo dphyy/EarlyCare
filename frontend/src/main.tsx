@@ -537,14 +537,15 @@ function modelReadiness(call: CallRecord | null): { value: string; note: string 
 }
 
 function SpeechTimingPanel({ senior, call, calls }: { senior: Senior; call: CallRecord | null; calls: CallRecord[] }) {
-  const baselineState = baselineFromCalls(senior, calls);
+  const priorCalls = call ? calls.filter((item) => item.id !== call.id) : calls;
+  const baselineState = baselineFromCalls(senior, priorCalls);
   const baseline = baselineState.profile;
   const current = call?.currentSpeechProfile ?? null;
   const patientSpeechSeconds = modelFeatureNumber(call, "patientSpeechDurationSeconds");
   const rawPatientSeconds = modelFeatureNumber(call, "rawPatientAudioDurationSeconds");
   const speechCoverage = patientSpeechSeconds && rawPatientSeconds ? patientSpeechSeconds / rawPatientSeconds : null;
-  const baselinePatientSpeech = averageModelFeature(calls, "patientSpeechDurationSeconds");
-  const baselineSpeechCoverage = averageSpeechCoverage(calls);
+  const baselinePatientSpeech = averageModelFeature(priorCalls, "patientSpeechDurationSeconds");
+  const baselineSpeechCoverage = averageSpeechCoverage(priorCalls);
   const readiness = modelReadiness(call);
   const rows = [
     { label: "Patient speech", baseline: baselinePatientSpeech ? formatSeconds(baselinePatientSpeech) : "No baseline", current: formatSeconds(patientSpeechSeconds) },
@@ -619,9 +620,15 @@ function transcriptionAttemptSummary(call: CallRecord): string {
 
 function aiReviewNote(call: CallRecord): string | null {
   if (!call.aiRiskFallbackUsed) return null;
+  if (call.aiRiskFailureReason) return `Manual review required: ${call.aiRiskFailureReason}`;
   return call.riskSignals?.length
     ? "AI review used fallback logic; highlights may be incomplete."
     : "Manual review required; AI risk highlights are unavailable for this call.";
+}
+
+function alignmentWarningText(call: CallRecord): string | null {
+  const warnings = call.transcriptAlignmentWarnings ?? [];
+  return warnings.length ? warnings.join(" ") : null;
 }
 
 function AgentsCall({
@@ -773,7 +780,7 @@ function AgentsCall({
         return;
       }
 
-      conversation.startSession({
+      await conversation.startSession({
         signedUrl: session.signedUrl,
         dynamicVariables: {
           senior_name: selectedSenior.name,
@@ -818,13 +825,13 @@ function AgentsCall({
 
     setCallState("Analysing");
     const saved = await saveCall(formData);
-    if (saved) {
-      onSavedCall(saved);
+    if (saved.ok) {
+      onSavedCall(saved.call);
       setCallState("Complete");
       setCallMessage("Call saved. Patient overview now shows original and English transcripts.");
     } else {
       setCallState("Failed");
-      setCallMessage("Call ended, but saving to backend failed.");
+      setCallMessage(`Call ended, but saving to backend failed: ${saved.message}`);
     }
   };
 
@@ -1009,6 +1016,7 @@ function OfficerDashboard({
                       {latestSignal.audioAvailable ? "saved" : "not available"}.
                     </p>
                     {aiReviewNote(latestSignal) ? <p>{aiReviewNote(latestSignal)}</p> : null}
+                    {alignmentWarningText(latestSignal) ? <p>{alignmentWarningText(latestSignal)}</p> : null}
                   </div>
                 </div>
               ) : null}
@@ -1054,6 +1062,7 @@ function OfficerDashboard({
                       </p>
                     ) : null}
                     {aiReviewNote(call) ? <p className="metric-note">{aiReviewNote(call)}</p> : null}
+                    {alignmentWarningText(call) ? <p className="metric-note">{alignmentWarningText(call)}</p> : null}
 
                     <div className="recording-player">
                       <h4>Original recording</h4>

@@ -53,6 +53,31 @@ export interface ElevenLabsSessionResponse {
   message: string;
 }
 
+export type SaveCallResult =
+  | { ok: true; call: CallRecord }
+  | { ok: false; message: string; status?: number };
+
+async function responseErrorMessage(response: Response): Promise<string> {
+  try {
+    const payload = await response.json();
+    const detail = (payload as { detail?: unknown }).detail;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) {
+      return detail
+        .map((item) => {
+          if (typeof item === "string") return item;
+          if (item && typeof item === "object" && "msg" in item) return String((item as { msg: unknown }).msg);
+          return JSON.stringify(item);
+        })
+        .join("; ");
+    }
+    if (detail) return JSON.stringify(detail);
+  } catch {
+    // Fall through to the status text below.
+  }
+  return response.statusText || `Request failed: ${response.status}`;
+}
+
 export async function createElevenLabsSession(payload: ElevenLabsSessionRequest): Promise<ElevenLabsSessionResponse> {
   if (!API_BASE_URL) {
     return {
@@ -78,18 +103,25 @@ export async function createElevenLabsSession(payload: ElevenLabsSessionRequest)
   }
 }
 
-export async function saveCall(formData: FormData): Promise<CallRecord | null> {
-  if (!API_BASE_URL) return null;
+export async function saveCall(formData: FormData): Promise<SaveCallResult> {
+  if (!API_BASE_URL) {
+    return { ok: false, message: "Backend API URL is not configured." };
+  }
 
   try {
     const response = await fetch(`${API_BASE_URL}/calls`, {
       method: "POST",
       body: formData
     });
-    if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+    if (!response.ok) {
+      return { ok: false, status: response.status, message: await responseErrorMessage(response) };
+    }
     const payload = (await response.json()) as { call: CallRecord };
-    return payload.call;
-  } catch {
-    return null;
+    return { ok: true, call: payload.call };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "Unable to save call."
+    };
   }
 }

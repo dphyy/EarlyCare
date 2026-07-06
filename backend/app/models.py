@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 RiskLevel = Literal["Green", "Watch", "Amber", "Red"]
 Language = Literal["English", "Mandarin", "Malay", "Tamil", "Singlish/Dialect"]
+VolunteerTaskStatus = Literal["Open", "In progress", "Closed"]
 
 
 class SpeechProfile(BaseModel):
@@ -73,7 +74,7 @@ class VolunteerTask(BaseModel):
     reason: str
     recommendedAction: str
     assignedTo: str
-    status: Literal["Open", "In progress", "Closed"]
+    status: VolunteerTaskStatus
     createdAt: str
 
 
@@ -154,8 +155,10 @@ class CallRecord(BaseModel):
     agentAudioCaptured: bool = False
     currentSpeechProfile: SpeechProfile | None = None
     transcriptSegments: list[TranscriptSegment] = []
+    transcriptAlignmentWarnings: list[str] = []
     riskSignals: list[RiskSignal] = []
     aiRiskFallbackUsed: bool = False
+    aiRiskFailureReason: str | None = None
     speechModelVersion: str | None = None
     speechModelProbability: float | None = None
     speechModelWarnings: list[str] = []
@@ -166,3 +169,7 @@ class CallRecord(BaseModel):
 
 class SavedCallResponse(BaseModel):
     call: CallRecord
+
+
+class VolunteerTaskUpdate(BaseModel):
+    status: VolunteerTaskStatus

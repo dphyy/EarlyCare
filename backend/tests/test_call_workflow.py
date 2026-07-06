@@ -231,6 +231,8 @@ class CallWorkflowTests(unittest.TestCase):
         self.assertEqual(call["translationProvider"], "meralion-audio-translation")
         self.assertFalse(call["translationFallbackUsed"])
         self.assertEqual(call["transcriptionAttempts"], [])
+        self.assertTrue(call["transcriptAlignmentWarnings"])
+        self.assertEqual(call["aiRiskFailureReason"], None)
         self.assertTrue(call["audioFilePath"].endswith("full-call.wav"))
         self.assertFalse(call["patientAudioAvailable"])
         self.assertIsNone(call["speechModelProbability"])
@@ -281,6 +283,52 @@ class CallWorkflowTests(unittest.TestCase):
         self.assertEqual(call["transcriptSegments"][0]["role"], "Agent")
         self.assertEqual(call["transcriptSegments"][1]["role"], "Patient")
         self.assertNotEqual(call["transcriptSegments"][0]["speaker"], "SPEAKER_00")
+        self.assertTrue(any("MERaLiON speaker labels ignored" in warning for warning in call["transcriptAlignmentWarnings"]))
+
+    def test_save_call_ignores_swapped_provider_role_labels_when_live_roles_exist(self) -> None:
+        messages = [
+            {"role": "Agent", "text": "Did you fall?", "timestamp": "2026-07-04T10:00:00+08:00"},
+            {"role": "Senior", "text": "I fell in the bathroom.", "timestamp": "2026-07-04T10:00:04+08:00"},
+        ]
+        provider_result = ProviderResult(
+            provider="meralion-audio-translation",
+            language="English",
+            transcript="<Speaker1>: Did you fall? <Speaker2>: I fell in the bathroom.",
+            translation="Patient: Did you fall?\nAgent: I fell in the bathroom.",
+            confidence=0.86,
+            fallbackUsed=False,
+            segments=[
+                TranscriptSegment(text="Did you fall?", role="Patient", speaker="SPEAKER_00", startTimeSeconds=0, endTimeSeconds=2),
+                TranscriptSegment(text="I fell in the bathroom.", role="Agent", speaker="SPEAKER_01", startTimeSeconds=3, endTimeSeconds=5),
+            ],
+        )
+
+        with TemporaryDirectory() as temp_dir:
+            with (
+                patch.object(main, "CALL_STORAGE_ROOT", Path(temp_dir)),
+                patch.object(main, "transcribe_with_fallback", return_value=provider_result),
+                patch.object(main, "_openai_risk_review", return_value=main._manual_risk_review()),
+            ):
+                client = TestClient(main.app)
+                response = client.post(
+                    "/calls",
+                    data={
+                        "seniorId": "s-001",
+                        "status": "Complete",
+                        "startedAt": "2026-07-04T10:00:00+08:00",
+                        "completedAt": "2026-07-04T10:01:00+08:00",
+                        "transcriptMessages": json.dumps(messages),
+                    },
+                    files={"audio": ("full-call.wav", _test_wav_bytes(2), "audio/wav")},
+                )
+
+        self.assertEqual(response.status_code, 200)
+        call = response.json()["call"]
+        self.assertEqual(call["originalTranscript"], "Agent: Did you fall?\nPatient: I fell in the bathroom.")
+        self.assertEqual(call["englishTranscript"], "Agent: Did you fall?\nPatient: I fell in the bathroom.")
+        self.assertEqual([segment["role"] for segment in call["transcriptSegments"]], ["Agent", "Patient"])
+        self.assertEqual([segment["speaker"] for segment in call["transcriptSegments"]], ["Agent", "Patient"])
+        self.assertTrue(any("MERaLiON speaker labels ignored" in warning for warning in call["transcriptAlignmentWarnings"]))
 
     def test_dialogue_fallback_preserves_live_roles_without_duplicate_prefixes(self) -> None:
         messages = [
@@ -624,6 +672,26 @@ class CallWorkflowTests(unittest.TestCase):
 
         self.assertEqual(transcript, "Agent: How are you?\nPatient: I almost fell.")
 
+    def test_role_labeled_english_transcript_does_not_map_mismatched_sentence_counts(self) -> None:
+        messages = [
+            main.TranscriptMessage(role="Agent", text="你好吗？", timestamp=None),
+            main.TranscriptMessage(role="Senior", text="我头痛。", timestamp=None),
+            main.TranscriptMessage(role="Agent", text="你跌倒了吗？", timestamp=None),
+            main.TranscriptMessage(role="Senior", text="没有。", timestamp=None),
+        ]
+        warnings: list[str] = []
+
+        with patch.object(main, "_translate_message_text", side_effect=lambda language, text: text):
+            transcript = main._role_labeled_english_transcript(
+                messages,
+                "Mandarin",
+                "How are you? I have a headache. Did you fall?",
+                warnings,
+            )
+
+        self.assertEqual(transcript, "Agent: 你好吗？\nPatient: 我头痛。\nAgent: 你跌倒了吗？\nPatient: 没有。")
+        self.assertTrue(any("sentence count did not match" in warning for warning in warnings))
+
     def test_role_labeled_original_transcript_replaces_meralion_speaker_tags(self) -> None:
         messages = [
             main.TranscriptMessage(role="Agent", text="How are you?", timestamp=None),
@@ -632,8 +700,16 @@ class CallWorkflowTests(unittest.TestCase):
 
         transcript = main._role_labeled_original_transcript(messages, "<Speaker1>: 您今天感觉怎么样？ <Speaker2>: 今天不错。")
 
-        self.assertEqual(transcript, "Agent: 您今天感觉怎么样？\nPatient: 今天不错。")
+        self.assertEqual(transcript, "Agent: How are you?\nPatient: 不错。")
         self.assertNotIn("<Speaker", transcript)
+
+    def test_role_labeled_original_transcript_uses_provider_speakers_without_live_messages(self) -> None:
+        transcript = main._role_labeled_original_transcript(
+            [],
+            "<Speaker1>: 您今天感觉怎么样？ <Speaker2>: 今天不错。",
+        )
+
+        self.assertEqual(transcript, "Speaker1: 您今天感觉怎么样？\nSpeaker2: 今天不错。")
 
     def test_role_labeled_original_transcript_uses_live_roles_without_speaker_tags(self) -> None:
         messages = [
@@ -742,14 +818,33 @@ class CallWorkflowTests(unittest.TestCase):
         response.json.return_value = payload
 
         with patch.dict(main.os.environ, {"OPENAI_API_KEY": "test-key"}), patch.object(main.httpx, "post", return_value=response) as post:
-            _, _, signals, _, fallback = main._openai_risk_review("Agent: Did you fall?\nPatient: I almost fell.", segments)
+            _, _, signals, _, fallback, failure_reason = main._openai_risk_review("Agent: Did you fall?\nPatient: I almost fell.", segments)
 
         request_json = post.call_args.kwargs["json"]
         user_payload = json.loads(request_json["input"][1]["content"])
         self.assertFalse(fallback)
+        self.assertIsNone(failure_reason)
         self.assertEqual(user_payload["patientOnlyTranscript"], "Patient: I almost fell.")
         self.assertEqual(len(user_payload["sentences"]), 1)
         self.assertEqual(signals[0].startTimeSeconds, 4)
+
+    def test_openai_risk_review_records_sanitized_failure_reason(self) -> None:
+        segments = [
+            TranscriptSegment(text="Patient: I feel dizzy.", englishText="Patient: I feel dizzy.", role="Patient", speaker="Patient", startTimeSeconds=4),
+        ]
+        response = Mock()
+        response.raise_for_status.side_effect = RuntimeError("Authorization: Bearer secret-token failed")
+        response.json.return_value = {}
+
+        with patch.dict(main.os.environ, {"OPENAI_API_KEY": "test-key"}), patch.object(main.httpx, "post", return_value=response):
+            _, _, signals, _, fallback, failure_reason = main._openai_risk_review("Patient: I feel dizzy.", segments)
+
+        self.assertTrue(fallback)
+        self.assertEqual(signals, [])
+        self.assertIsNotNone(failure_reason)
+        assert failure_reason is not None
+        self.assertIn("redacted", failure_reason)
+        self.assertNotIn("secret-token", failure_reason)
 
     def test_attach_segment_timestamps_drops_agent_only_signal(self) -> None:
         signals = [
@@ -771,6 +866,23 @@ class CallWorkflowTests(unittest.TestCase):
         attached = main._attach_segment_timestamps(signals, segments)
 
         self.assertEqual(attached, [])
+
+    def test_update_volunteer_task_rejects_invalid_status(self) -> None:
+        client = TestClient(main.app)
+
+        response = client.patch("/volunteer-tasks/t-001", params={"status": "Done"})
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_update_volunteer_task_accepts_body_status(self) -> None:
+        client = TestClient(main.app)
+        original_status = main.VOLUNTEER_TASKS[0].status
+
+        response = client.patch("/volunteer-tasks/t-001", json={"status": "Closed"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "Closed")
+        main.VOLUNTEER_TASKS[0].status = original_status
 
 
 if __name__ == "__main__":
