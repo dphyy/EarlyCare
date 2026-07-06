@@ -58,13 +58,14 @@ interface PreparedMicStream {
 }
 interface TranscriptHighlight {
   id: string;
-  kind: "risk" | "safeguard";
+  kind: "risk" | "safeguard" | "emotion";
   label: string;
   text: string;
   severity: RiskLevel;
   startTimeSeconds?: number | null;
   endTimeSeconds?: number | null;
   sentenceIndex?: number | null;
+  transcriptSegmentIndex?: number | null;
 }
 
 function StatCard({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
@@ -412,10 +413,32 @@ function safeguardHighlightsForCall(call: CallRecord, segments: TranscriptSegmen
         severity,
         startTimeSeconds: previousAgentReplyEnd(segments, match.segmentIndex) ?? match.segment.startTimeSeconds,
         endTimeSeconds: match.segment.endTimeSeconds,
-        sentenceIndex: patientSegments.findIndex((item) => item.segmentIndex === match.segmentIndex)
+        sentenceIndex: patientSegments.findIndex((item) => item.segmentIndex === match.segmentIndex),
+        transcriptSegmentIndex: match.segmentIndex
       }
     ];
   });
+}
+
+function emotionHighlightsForCall(call: CallRecord): TranscriptHighlight[] {
+  return (call.emotionSegments ?? []).map((emotion) => ({
+    id: emotion.id,
+    kind: "emotion",
+    label: `Tone: ${emotion.label}`,
+    text: emotion.evidenceText || emotion.label,
+    severity: call.emotionConcernLevel === "Review" ? "Watch" : "Green",
+    startTimeSeconds: emotion.startTimeSeconds,
+    endTimeSeconds: emotion.endTimeSeconds,
+    transcriptSegmentIndex: emotion.transcriptSegmentIndex
+  }));
+}
+
+function highlightChipText(highlight: TranscriptHighlight): string | null {
+  const timestamp = typeof highlight.startTimeSeconds === "number" ? formatTimestamp(highlight.startTimeSeconds) : null;
+  if (highlight.kind === "emotion") {
+    return timestamp ? `${highlight.label} ${timestamp}` : highlight.label;
+  }
+  return timestamp;
 }
 
 function HighlightedEnglishTranscript({
@@ -441,7 +464,8 @@ function HighlightedEnglishTranscript({
     endTimeSeconds: signal.endTimeSeconds,
     sentenceIndex: signal.sentenceIndex
   }));
-  const highlights = [...safeguardHighlightsForCall(call, segments, patientSegments), ...riskHighlights];
+  const emotionHighlights = emotionHighlightsForCall(call);
+  const highlights = [...safeguardHighlightsForCall(call, segments, patientSegments), ...emotionHighlights, ...riskHighlights];
 
   return (
     <div className="highlighted-transcript">
@@ -457,7 +481,11 @@ function HighlightedEnglishTranscript({
           const exactPatientMatchExists = patientSegments.some((item) =>
             textWithoutSpeakerLabel(item.segment.englishText || item.segment.text).toLowerCase().includes(lowerHighlight)
           );
-          return patientText.includes(lowerHighlight) || (!exactPatientMatchExists && highlightItem.sentenceIndex === patientIndex);
+          return (
+            patientText.includes(lowerHighlight) ||
+            highlightItem.transcriptSegmentIndex === segmentIndex ||
+            (!exactPatientMatchExists && highlightItem.sentenceIndex === patientIndex)
+          );
         });
 
         if (!matches.length || !text) {
@@ -486,7 +514,7 @@ function HighlightedEnglishTranscript({
                 onClick={() => onSelectHighlight(highlightWithSentenceTime)}
               >
                 {text}
-                {typeof highlightWithSentenceTime.startTimeSeconds === "number" ? <span>{formatTimestamp(highlightWithSentenceTime.startTimeSeconds)}</span> : null}
+                {highlightChipText(highlightWithSentenceTime) ? <span>{highlightChipText(highlightWithSentenceTime)}</span> : null}
               </button>
             </p>
           );
@@ -504,7 +532,7 @@ function HighlightedEnglishTranscript({
               onClick={() => onSelectHighlight(highlightWithSentenceTime)}
             >
               {matched}
-              {typeof highlightWithSentenceTime.startTimeSeconds === "number" ? <span>{formatTimestamp(highlightWithSentenceTime.startTimeSeconds)}</span> : null}
+              {highlightChipText(highlightWithSentenceTime) ? <span>{highlightChipText(highlightWithSentenceTime)}</span> : null}
             </button>
             {after}
           </p>
@@ -747,6 +775,18 @@ function callRecordingSummary(call: CallRecord): string {
   return parts.join(" · ");
 }
 
+function emotionToneSummary(call: CallRecord): string | null {
+  if (call.emotionReviewAvailable && call.dominantPatientEmotion) {
+    const provider = call.emotionProvider ? ` via ${call.emotionProvider}` : "";
+    const tagNote = call.emotionSegments?.length ? "" : " No per-response tone tags were returned.";
+    return `Tone: ${call.dominantPatientEmotion}${call.emotionConcernLevel && call.emotionConcernLevel !== "None" ? ` (${call.emotionConcernLevel.toLowerCase()})` : ""}${provider}.${tagNote}`;
+  }
+  if (call.emotionFailureReason) {
+    return `Tone unavailable: ${call.emotionFailureReason}`;
+  }
+  return null;
+}
+
 function AgentsCall({
   seniors,
   selectedSeniorId,
@@ -773,6 +813,7 @@ function AgentsCall({
   const agentPlaybackTimeRef = useRef(0);
   const agentAudioCapturedRef = useRef(false);
   const agentAudioWarningShownRef = useRef(false);
+  const elevenLabsConversationIdRef = useRef<string | null>(null);
   const transcriptRef = useRef<TranscriptMessage[]>([]);
 
   const conversation = useConversation({
@@ -809,6 +850,8 @@ function AgentsCall({
     },
     onConversationMetadata: (metadata) => {
       agentAudioFormatRef.current = metadata.agent_output_audio_format as AgentAudioFormat;
+      const conversationId = (metadata as { conversation_id?: string; conversationId?: string }).conversation_id ?? (metadata as { conversationId?: string }).conversationId;
+      elevenLabsConversationIdRef.current = conversationId ?? elevenLabsConversationIdRef.current;
     },
     onAudio: (base64Audio) => {
       const audioContext = audioContextRef.current;
@@ -849,6 +892,7 @@ function AgentsCall({
     setDebugMessage("");
     setAudioCleanupWarning("");
     transcriptRef.current = [];
+    elevenLabsConversationIdRef.current = null;
     const callStartedAt = new Date().toISOString();
     setStartedAt(callStartedAt);
 
@@ -898,6 +942,9 @@ function AgentsCall({
 
       await conversation.startSession({
         signedUrl: session.signedUrl,
+        onConnect: ({ conversationId }) => {
+          elevenLabsConversationIdRef.current = conversationId;
+        },
         dynamicVariables: {
           senior_name: selectedSenior.name,
           preferred_language: selectedSenior.preferredLanguage,
@@ -933,6 +980,9 @@ function AgentsCall({
     formData.append("startedAt", startedAt ?? new Date().toISOString());
     formData.append("completedAt", new Date().toISOString());
     formData.append("transcriptMessages", JSON.stringify(transcriptRef.current));
+    if (elevenLabsConversationIdRef.current) {
+      formData.append("elevenLabsConversationId", elevenLabsConversationIdRef.current);
+    }
     formData.append("agentAudioCaptured", String(agentAudioCapturedRef.current));
     audioContextRef.current?.close();
     audioContextRef.current = null;
@@ -1184,6 +1234,7 @@ function OfficerDashboard({
                       <small>{callRecordingSummary(call)}</small>
                     </div>
                     <p className="call-action-summary">{call.recommendedAction}</p>
+                    {emotionToneSummary(call) ? <p className="metric-note">{emotionToneSummary(call)}</p> : null}
                     {aiReviewNote(call) ? <p className="metric-note">{aiReviewNote(call)}</p> : null}
                     {safeguardLevel(call) !== "None" || call.safeguardFailureReason ? (
                       <div className={`safeguard-summary safeguard-${safeguardLevel(call).toLowerCase()}`}>

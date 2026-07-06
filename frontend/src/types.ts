@@ -1,5 +1,6 @@
 export type RiskLevel = "Green" | "Watch" | "Amber" | "Red";
 export type SafeguardLevel = "None" | "Support" | "Urgent" | "Emergency";
+export type EmotionConcernLevel = "None" | "Watch" | "Review";
 export type CheckInStatus = "Checked in" | "Missed" | "Needs follow-up" | "Urgent";
 export type Language = "English" | "Mandarin" | "Malay" | "Tamil" | "Singlish/Dialect";
 
@@ -93,6 +94,19 @@ export interface RiskSignal {
   endTimeSeconds?: number | null;
 }
 
+export interface EmotionSegment {
+  id: string;
+  label: string;
+  confidence: number;
+  startTimeSeconds?: number | null;
+  endTimeSeconds?: number | null;
+  transcriptSegmentIndex?: number | null;
+  evidenceText: string;
+  valence?: number | null;
+  arousal?: number | null;
+  dominance?: number | null;
+}
+
 export interface CrisisResource {
   name: string;
   phone?: string | null;
@@ -112,6 +126,7 @@ export interface CallRecord {
   originalTranscript: string;
   englishTranscript: string;
   transcriptMessages: TranscriptMessage[];
+  elevenLabsConversationId?: string | null;
   translationProvider: string;
   translationFallbackUsed: boolean;
   transcriptionAttempts?: TranscriptionAttempt[];
@@ -135,6 +150,14 @@ export interface CallRecord {
   riskSignals?: RiskSignal[];
   aiRiskFallbackUsed?: boolean;
   aiRiskFailureReason?: string | null;
+  emotionReviewAvailable?: boolean;
+  emotionProvider?: string | null;
+  emotionFallbackUsed?: boolean;
+  emotionFailureReason?: string | null;
+  dominantPatientEmotion?: string | null;
+  emotionConcernLevel?: EmotionConcernLevel;
+  emotionSegments?: EmotionSegment[];
+  emotionAttempts?: TranscriptionAttempt[];
   safeguardReviewAvailable?: boolean;
   safeguardLevel?: SafeguardLevel;
   safeguardCategory?: string | null;

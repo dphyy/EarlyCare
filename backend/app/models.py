@@ -7,6 +7,7 @@ RiskLevel = Literal["Green", "Watch", "Amber", "Red"]
 Language = Literal["English", "Mandarin", "Malay", "Tamil", "Singlish/Dialect"]
 VolunteerTaskStatus = Literal["Open", "In progress", "Closed"]
 SafeguardLevel = Literal["None", "Support", "Urgent", "Emergency"]
+EmotionConcernLevel = Literal["None", "Watch", "Review"]
 
 
 class SpeechProfile(BaseModel):
@@ -130,6 +131,29 @@ class RiskSignal(BaseModel):
     endTimeSeconds: float | None = None
 
 
+class EmotionSegment(BaseModel):
+    id: str
+    label: str
+    confidence: float
+    startTimeSeconds: float | None = None
+    endTimeSeconds: float | None = None
+    transcriptSegmentIndex: int | None = None
+    evidenceText: str
+    valence: float | None = None
+    arousal: float | None = None
+    dominance: float | None = None
+
+
+class EmotionProviderResult(BaseModel):
+    provider: str | None = None
+    fallbackUsed: bool = False
+    dominantEmotion: str | None = None
+    concernLevel: EmotionConcernLevel = "None"
+    segments: list[EmotionSegment] = []
+    attempts: list["TranscriptionAttempt"] = []
+    failureReason: str | None = None
+
+
 class CrisisResource(BaseModel):
     name: str
     phone: str | None = None
@@ -149,6 +173,7 @@ class CallRecord(BaseModel):
     originalTranscript: str
     englishTranscript: str
     transcriptMessages: list[TranscriptMessage]
+    elevenLabsConversationId: str | None = None
     translationProvider: str
     translationFallbackUsed: bool
     transcriptionAttempts: list[TranscriptionAttempt] = []
@@ -168,6 +193,14 @@ class CallRecord(BaseModel):
     riskSignals: list[RiskSignal] = []
     aiRiskFallbackUsed: bool = False
     aiRiskFailureReason: str | None = None
+    emotionReviewAvailable: bool = False
+    emotionProvider: str | None = None
+    emotionFallbackUsed: bool = False
+    emotionFailureReason: str | None = None
+    dominantPatientEmotion: str | None = None
+    emotionConcernLevel: EmotionConcernLevel = "None"
+    emotionSegments: list[EmotionSegment] = []
+    emotionAttempts: list[TranscriptionAttempt] = []
     safeguardReviewAvailable: bool = False
     safeguardLevel: SafeguardLevel = "None"
     safeguardCategory: str | None = None

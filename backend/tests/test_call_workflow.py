@@ -217,6 +217,7 @@ class CallWorkflowTests(unittest.TestCase):
                         "startedAt": "2026-07-04T10:00:00+08:00",
                         "completedAt": "2026-07-04T10:01:00+08:00",
                         "transcriptMessages": json.dumps(messages),
+                        "elevenLabsConversationId": "conv-123",
                         "agentAudioCaptured": "true",
                     },
                     files={"audio": ("full-call.wav", b"audio bytes", "audio/wav")},
@@ -227,6 +228,7 @@ class CallWorkflowTests(unittest.TestCase):
         transcribe.assert_called_once()
         self.assertEqual(call["originalTranscript"], "Agent: Live agent text\nPatient: Live senior text")
         self.assertEqual(call["englishTranscript"], "Agent: Live agent text\nPatient: Live senior text")
+        self.assertEqual(call["elevenLabsConversationId"], "conv-123")
         self.assertEqual(call["transcriptMessages"][0]["text"], "Live agent text")
         self.assertEqual(call["translationProvider"], "meralion-audio-translation")
         self.assertFalse(call["translationFallbackUsed"])
@@ -943,6 +945,157 @@ class CallWorkflowTests(unittest.TestCase):
     def test_safeguard_level_can_lift_visible_risk_level(self) -> None:
         self.assertEqual(main._risk_level_with_safeguard("Green", "Emergency"), "Red")
         self.assertEqual(main._risk_level_with_safeguard("Red", "Support"), "Red")
+
+    def test_elevenlabs_emotion_review_fetches_data_collection(self) -> None:
+        segments = [
+            TranscriptSegment(text="Agent: Are you okay?", englishText="Agent: Are you okay?", role="Agent", speaker="Agent", startTimeSeconds=0.2, endTimeSeconds=1.0),
+            TranscriptSegment(text="Patient: I am scared.", englishText="Patient: I am scared.", role="Patient", speaker="Patient", startTimeSeconds=1.3, endTimeSeconds=2.0),
+        ]
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "analysis": {
+                "data_collection_results": {
+                    "user_emotional_state": {
+                        "value": json.dumps(
+                            {
+                                "responses": [
+                                    {"responseIndex": 0, "emotion": "anxious", "confidence": 0.82, "evidence": "I am scared."}
+                                ],
+                                "dominantEmotion": "anxious",
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        with patch.dict(main.os.environ, {"ELEVENLABS_API_KEY": "test-key"}), patch.object(main.httpx, "get", return_value=response) as get:
+            result = main._elevenlabs_emotion_review("conv-123", segments)
+
+        self.assertEqual(get.call_args.args[0], "https://api.elevenlabs.io/v1/convai/conversations/conv-123")
+        self.assertEqual(get.call_args.kwargs["headers"], {"xi-api-key": "test-key"})
+        self.assertEqual(result.provider, "elevenlabs-data-collection")
+        self.assertEqual(result.dominantEmotion, "anxious")
+        self.assertEqual(result.concernLevel, "Review")
+        self.assertEqual(result.segments[0].label, "anxious")
+        self.assertEqual(result.segments[0].startTimeSeconds, 1.3)
+        self.assertEqual(result.segments[0].transcriptSegmentIndex, 1)
+
+    def test_elevenlabs_emotion_review_polls_until_data_collection_ready(self) -> None:
+        missing = Mock()
+        missing.raise_for_status.return_value = None
+        missing.json.return_value = {"analysis": {"data_collection_results": {}}}
+        ready = Mock()
+        ready.raise_for_status.return_value = None
+        ready.json.return_value = {"analysis": {"data_collection_results": {"user_emotional_state": {"value": {"dominantEmotion": "calm", "responses": []}}}}}
+
+        with (
+            patch.dict(main.os.environ, {"ELEVENLABS_API_KEY": "test-key"}),
+            patch.object(main.httpx, "get", side_effect=[missing, ready]) as get,
+            patch.object(main.time, "sleep") as sleep,
+        ):
+            result = main._elevenlabs_emotion_review("conv-123", [])
+
+        self.assertEqual(get.call_count, 2)
+        sleep.assert_called_once_with(2)
+        self.assertEqual(result.provider, "elevenlabs-data-collection")
+        self.assertEqual(result.dominantEmotion, "calm")
+        self.assertEqual([attempt.status for attempt in result.attempts], ["skipped", "success"])
+
+    def test_elevenlabs_emotion_review_summary_only_has_no_segments(self) -> None:
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {"data_collection_results": {"user_emotional_state": {"value": "calm"}}}
+
+        with patch.dict(main.os.environ, {"ELEVENLABS_API_KEY": "test-key"}), patch.object(main.httpx, "get", return_value=response):
+            result = main._elevenlabs_emotion_review("conv-123", [])
+
+        self.assertEqual(result.dominantEmotion, "calm")
+        self.assertEqual(result.segments, [])
+        self.assertIsNotNone(result.failureReason)
+        assert result.failureReason is not None
+        self.assertIn("summary", result.failureReason.lower())
+
+    def test_elevenlabs_emotion_review_maps_missing_indexes_by_order_when_counts_match(self) -> None:
+        segments = [
+            TranscriptSegment(text="Patient: First answer.", englishText="Patient: First answer.", role="Patient", speaker="Patient", startTimeSeconds=1, endTimeSeconds=2),
+            TranscriptSegment(text="Agent: Next question.", englishText="Agent: Next question.", role="Agent", speaker="Agent", startTimeSeconds=3, endTimeSeconds=4),
+            TranscriptSegment(text="Patient: Second answer.", englishText="Patient: Second answer.", role="Patient", speaker="Patient", startTimeSeconds=5, endTimeSeconds=6),
+        ]
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "data_collection_results": {
+                "user_emotional_state": {
+                    "value": {
+                        "dominantEmotion": "calm",
+                        "responses": [
+                            {"emotion": "calm", "confidence": 0.7, "evidence": "First answer."},
+                            {"emotion": "frustrated", "confidence": 0.8, "evidence": "Second answer."},
+                        ],
+                    }
+                }
+            }
+        }
+
+        with patch.dict(main.os.environ, {"ELEVENLABS_API_KEY": "test-key"}), patch.object(main.httpx, "get", return_value=response):
+            result = main._elevenlabs_emotion_review("conv-123", segments)
+
+        self.assertEqual([segment.transcriptSegmentIndex for segment in result.segments], [0, 2])
+        self.assertEqual([segment.startTimeSeconds for segment in result.segments], [1, 5])
+
+    def test_elevenlabs_emotion_review_summary_dict_records_helpful_reason(self) -> None:
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "data_collection_results": {
+                "user_emotional_state": {
+                    "value": {
+                        "dominantEmotion": "calm",
+                        "summary": "The user sounded calm overall.",
+                    }
+                }
+            }
+        }
+
+        with patch.dict(main.os.environ, {"ELEVENLABS_API_KEY": "test-key"}), patch.object(main.httpx, "get", return_value=response):
+            result = main._elevenlabs_emotion_review("conv-123", [])
+
+        self.assertEqual(result.dominantEmotion, "calm")
+        self.assertEqual(result.segments, [])
+        self.assertIsNotNone(result.failureReason)
+        assert result.failureReason is not None
+        self.assertIn("per-response", result.failureReason)
+
+    def test_elevenlabs_emotion_review_records_sanitized_failure_reason(self) -> None:
+        response = Mock()
+        response.raise_for_status.side_effect = RuntimeError("Authorization: Bearer secret-token failed")
+        response.json.return_value = {}
+
+        with patch.dict(main.os.environ, {"ELEVENLABS_API_KEY": "test-key"}), patch.object(main.httpx, "get", return_value=response):
+            result = main._elevenlabs_emotion_review("conv-123", [])
+
+        self.assertIsNone(result.provider)
+        self.assertIsNotNone(result.failureReason)
+        assert result.failureReason is not None
+        self.assertIn("redacted", result.failureReason)
+        self.assertNotIn("secret-token", result.failureReason)
+
+    def test_emotion_modifier_lifts_green_only_to_watch(self) -> None:
+        assessment = main._empty_assessment("Green", ["No notable risk."])
+        result = main.EmotionProviderResult(
+            provider="meralion-emotion",
+            dominantEmotion="sad",
+            concernLevel="Review",
+            segments=[main.EmotionSegment(id="emotion-1", label="sad", confidence=0.86, evidenceText="Patient sounded sad.")],
+        )
+        lifted = main._apply_emotion_modifier(assessment, result)
+        self.assertEqual(lifted.riskLevel, "Watch")
+
+        red_assessment = main._empty_assessment("Red", ["Emergency clinical risk."])
+        unchanged = main._apply_emotion_modifier(red_assessment, result)
+        self.assertEqual(unchanged.riskLevel, "Red")
 
     def test_attach_segment_timestamps_drops_agent_only_signal(self) -> None:
         signals = [

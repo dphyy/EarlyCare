@@ -930,6 +930,11 @@ h3 {
   border-color: #c3463a;
 }
 
+.transcript-highlight-emotion {
+  background: #dff0ee;
+  border-color: #5b918b;
+}
+
 .transcript-highlight span {
   background: rgba(255, 255, 255, 0.7);
   border-radius: 999px;
@@ -952,6 +957,12 @@ h3 {
 .transcript-highlight-safeguard:focus-visible {
   background: #ffc5bd;
   box-shadow: 0 0 0 3px rgba(181, 53, 45, 0.18);
+}
+
+.transcript-highlight-emotion.active,
+.transcript-highlight-emotion:focus-visible {
+  background: #c4e4e0;
+  box-shadow: 0 0 0 3px rgba(91, 145, 139, 0.18);
 }
 
 .loading {

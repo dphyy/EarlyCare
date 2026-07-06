@@ -2,6 +2,7 @@ import os
 import json
 import mimetypes
 import re
+import time
 import wave
 from pathlib import Path
 from datetime import datetime, timezone
@@ -21,6 +22,9 @@ from app.models import (
     CallRecord,
     CheckInSession,
     CrisisResource,
+    EmotionConcernLevel,
+    EmotionProviderResult,
+    EmotionSegment,
     ProviderResult,
     RiskAssessment,
     RiskSignal,
@@ -32,6 +36,7 @@ from app.models import (
     Symptoms,
     TranscriptSegment,
     TranscriptMessage,
+    TranscriptionAttempt,
     VolunteerTaskUpdate,
     VolunteerTask,
 )
@@ -927,6 +932,235 @@ def _speech_model_review(audio_path: Path | None) -> tuple[str | None, float | N
         return None, None, [f"Speech model review unavailable: {detail}"], None
 
 
+NEGATIVE_EMOTION_LABELS = {
+    "angry",
+    "anger",
+    "anxious",
+    "anxiety",
+    "distressed",
+    "distress",
+    "fear",
+    "fearful",
+    "frustrated",
+    "sad",
+    "sadness",
+    "upset",
+    "worried",
+    "flat",
+}
+
+
+def _emotion_concern_level(segments: list[EmotionSegment]) -> EmotionConcernLevel:
+    concerning = [segment for segment in segments if segment.label.lower() in NEGATIVE_EMOTION_LABELS and segment.confidence >= 0.6]
+    if not concerning:
+        return "None"
+    high_confidence = [segment for segment in concerning if segment.confidence >= 0.8]
+    if len(concerning) >= 2 or high_confidence:
+        return "Review"
+    return "Watch"
+
+
+def _dominant_emotion(segments: list[EmotionSegment]) -> str | None:
+    if not segments:
+        return None
+    best = max(segments, key=lambda segment: segment.confidence)
+    return best.label
+
+
+ELEVENLABS_EMOTION_DATA_KEY = "user_emotional_state"
+
+
+def _jsonish(value: object) -> object:
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return value
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            return value
+    return value
+
+
+def _find_nested_key(payload: object, key: str) -> object | None:
+    if isinstance(payload, dict):
+        if key in payload:
+            return payload[key]
+        for value in payload.values():
+            found = _find_nested_key(value, key)
+            if found is not None:
+                return found
+    elif isinstance(payload, list):
+        for item in payload:
+            found = _find_nested_key(item, key)
+            if found is not None:
+                return found
+    return None
+
+
+def _extract_elevenlabs_data_value(payload: dict[str, object], key: str = ELEVENLABS_EMOTION_DATA_KEY) -> object | None:
+    direct = _find_nested_key(payload, key)
+    if direct is not None:
+        if isinstance(direct, dict):
+            for value_key in ["value", "result", "data", "answer"]:
+                if value_key in direct:
+                    return _jsonish(direct[value_key])
+        return _jsonish(direct)
+
+    for container_key in ["data_collection_results", "dataCollectionResults", "collected_data", "collectedData"]:
+        container = _find_nested_key(payload, container_key)
+        if isinstance(container, dict) and key in container:
+            result = container[key]
+            if isinstance(result, dict):
+                for value_key in ["value", "result", "data", "answer"]:
+                    if value_key in result:
+                        return _jsonish(result[value_key])
+            return _jsonish(result)
+        if isinstance(container, list):
+            for item in container:
+                if not isinstance(item, dict):
+                    continue
+                name = item.get("name") or item.get("key") or item.get("id")
+                if name == key:
+                    for value_key in ["value", "result", "data", "answer"]:
+                        if value_key in item:
+                            return _jsonish(item[value_key])
+                    return item
+    return None
+
+
+def _patient_segment_index_from_response_index(patient_segments: list[tuple[int, TranscriptSegment]], response_index: int | None) -> tuple[int | None, TranscriptSegment | None]:
+    if response_index is None or response_index < 0 or response_index >= len(patient_segments):
+        return None, None
+    return patient_segments[response_index]
+
+
+def _emotion_response_segment(
+    item: dict[str, object],
+    index: int,
+    patient_segments: list[tuple[int, TranscriptSegment]],
+    use_order_fallback: bool = False,
+) -> EmotionSegment | None:
+    label = item.get("emotion") or item.get("label") or item.get("emotionalState") or item.get("emotional_state")
+    if not isinstance(label, str) or not label.strip():
+        return None
+    response_index_value = item.get("responseIndex") if "responseIndex" in item else item.get("response_index")
+    response_index = int(response_index_value) if isinstance(response_index_value, (int, float)) else None
+    if response_index is None and use_order_fallback:
+        response_index = index
+    transcript_segment_index, transcript_segment = _patient_segment_index_from_response_index(patient_segments, response_index)
+    confidence_value = item.get("confidence") or item.get("score") or item.get("probability")
+    confidence = float(confidence_value) if isinstance(confidence_value, (int, float)) else 0.65
+    evidence = item.get("evidence") or item.get("text") or item.get("utterance")
+    if not isinstance(evidence, str) or not evidence.strip():
+        evidence = transcript_segment.englishText or transcript_segment.text if transcript_segment else f"Patient response {index + 1}"
+    return EmotionSegment(
+        id=f"emotion-{index + 1}",
+        label=_clean_transcript_text(label).lower(),
+        confidence=max(0.0, min(1.0, confidence)),
+        startTimeSeconds=transcript_segment.startTimeSeconds if transcript_segment else None,
+        endTimeSeconds=transcript_segment.endTimeSeconds if transcript_segment else None,
+        transcriptSegmentIndex=transcript_segment_index,
+        evidenceText=_clean_transcript_text(evidence),
+    )
+
+
+def _parse_elevenlabs_emotion_result(value: object, segments: list[TranscriptSegment]) -> EmotionProviderResult:
+    value = _jsonish(value)
+    patient_segments = [(index, segment) for index, segment in enumerate(segments) if _is_patient_segment(segment)]
+    if isinstance(value, dict):
+        raw_responses = value.get("responses")
+        emotion_segments: list[EmotionSegment] = []
+        if isinstance(raw_responses, list):
+            has_indexes = any(isinstance(item, dict) and ("responseIndex" in item or "response_index" in item) for item in raw_responses)
+            use_order_fallback = not has_indexes and len(raw_responses) == len(patient_segments)
+            for index, item in enumerate(raw_responses):
+                if isinstance(item, dict):
+                    segment = _emotion_response_segment(item, index, patient_segments, use_order_fallback=use_order_fallback)
+                    if segment is not None:
+                        emotion_segments.append(segment)
+
+        dominant = value.get("dominantEmotion") or value.get("dominant_emotion") or value.get("emotion") or value.get("label")
+        dominant_emotion = _clean_transcript_text(dominant).lower() if isinstance(dominant, str) and dominant.strip() else _dominant_emotion(emotion_segments)
+        failure_reason = None
+        if dominant_emotion and not emotion_segments:
+            failure_reason = "Tone summary available, but ElevenLabs did not return per-response emotion JSON for transcript tags."
+        return EmotionProviderResult(
+            provider="elevenlabs-data-collection",
+            dominantEmotion=dominant_emotion,
+            concernLevel=_emotion_concern_level(emotion_segments),
+            segments=emotion_segments,
+            attempts=[TranscriptionAttempt(provider="elevenlabs-data-collection", status="success")],
+            failureReason=failure_reason,
+        )
+
+    if isinstance(value, str) and value.strip():
+        return EmotionProviderResult(
+            provider="elevenlabs-data-collection",
+            dominantEmotion=_clean_transcript_text(value).lower(),
+            concernLevel="None",
+            segments=[],
+            attempts=[TranscriptionAttempt(provider="elevenlabs-data-collection", status="success")],
+            failureReason="Tone summary available, but ElevenLabs returned summary text instead of per-response emotion JSON for transcript tags.",
+        )
+    raise RuntimeError(f"ElevenLabs data collection key {ELEVENLABS_EMOTION_DATA_KEY} was empty or invalid")
+
+
+def _elevenlabs_emotion_review(conversation_id: str | None, segments: list[TranscriptSegment]) -> EmotionProviderResult:
+    if not conversation_id:
+        return EmotionProviderResult(
+            provider=None,
+            attempts=[TranscriptionAttempt(provider="elevenlabs-data-collection", status="skipped", reason="ElevenLabs conversation ID was not captured")],
+            failureReason="ElevenLabs conversation ID was not captured.",
+        )
+    api_key = os.getenv("ELEVENLABS_API_KEY")
+    if not api_key:
+        return EmotionProviderResult(
+            provider=None,
+            attempts=[TranscriptionAttempt(provider="elevenlabs-data-collection", status="skipped", reason="ElevenLabs API key not configured")],
+            failureReason="ElevenLabs API key not configured.",
+        )
+
+    last_error: Exception | None = None
+    attempts: list[TranscriptionAttempt] = []
+    for attempt_index in range(6):
+        try:
+            response = httpx.get(
+                f"https://api.elevenlabs.io/v1/convai/conversations/{conversation_id}",
+                headers={"xi-api-key": api_key},
+                timeout=15,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict):
+                raise RuntimeError("ElevenLabs conversation response was not a JSON object")
+            value = _extract_elevenlabs_data_value(payload)
+            if value is not None:
+                result = _parse_elevenlabs_emotion_result(value, segments)
+                result.attempts = [*attempts, *result.attempts]
+                return result
+            attempts.append(TranscriptionAttempt(provider="elevenlabs-data-collection", status="skipped", reason="user_emotional_state not ready"))
+        except Exception as exc:
+            attempts.append(TranscriptionAttempt(provider="elevenlabs-data-collection", status="failed", reason=_safe_error_reason(exc)))
+            last_error = exc
+            break
+        if attempt_index < 5:
+            time.sleep(2)
+    failure_reason = _safe_error_reason(last_error) if last_error else "ElevenLabs data collection result user_emotional_state was not available after polling."
+    return EmotionProviderResult(provider=None, attempts=attempts, failureReason=failure_reason)
+
+
+def _apply_emotion_modifier(assessment: RiskAssessment, emotion_result: EmotionProviderResult) -> RiskAssessment:
+    if emotion_result.concernLevel != "Review" or not emotion_result.segments:
+        return assessment
+    reason = f"Patient vocal tone review suggested {emotion_result.dominantEmotion or 'distress'}; use as context for human follow-up, not diagnosis."
+    if assessment.riskLevel == "Green":
+        return assessment.model_copy(update={"riskLevel": "Watch", "reasons": [*assessment.reasons, reason]})
+    if reason not in assessment.reasons:
+        return assessment.model_copy(update={"reasons": [*assessment.reasons, reason]})
+    return assessment
+
+
 def _manual_safeguard_review(failure_reason: str | None = None) -> tuple[bool, SafeguardLevel, str | None, list[str], str | None, list[CrisisResource], str | None]:
     return False, "None", None, [], None, [], failure_reason
 
@@ -1267,6 +1501,7 @@ async def save_call(
     startedAt: str = Form(...),
     completedAt: str = Form(...),
     transcriptMessages: str = Form(...),
+    elevenLabsConversationId: str | None = Form(None),
     agentAudioCaptured: bool = Form(False),
     audio: UploadFile | None = File(None),
     patientAudio: UploadFile | None = File(None),
@@ -1379,6 +1614,8 @@ async def save_call(
     if patient_speech_path is not None:
         patient_speech_file_path = str(patient_speech_path)
         patient_speech_url = f"/calls/{call_id}/patient-speech-audio"
+    emotion_result = _elevenlabs_emotion_review(elevenLabsConversationId, translation.segments)
+    assessment = _apply_emotion_modifier(assessment, emotion_result)
     speech_model_version, speech_model_probability, speech_model_warnings, speech_model_features = _speech_model_review(
         patient_speech_path
     )
@@ -1402,6 +1639,7 @@ async def save_call(
         originalTranscript=original_transcript,
         englishTranscript=english_transcript,
         transcriptMessages=messages,
+        elevenLabsConversationId=elevenLabsConversationId,
         translationProvider=translation.provider,
         translationFallbackUsed=translation.fallbackUsed,
         transcriptionAttempts=translation.attempts,
@@ -1421,6 +1659,14 @@ async def save_call(
         riskSignals=risk_signals,
         aiRiskFallbackUsed=ai_fallback_used,
         aiRiskFailureReason=ai_failure_reason,
+        emotionReviewAvailable=emotion_result.provider is not None,
+        emotionProvider=emotion_result.provider,
+        emotionFallbackUsed=emotion_result.fallbackUsed,
+        emotionFailureReason=emotion_result.failureReason,
+        dominantPatientEmotion=emotion_result.dominantEmotion,
+        emotionConcernLevel=emotion_result.concernLevel,
+        emotionSegments=emotion_result.segments,
+        emotionAttempts=emotion_result.attempts,
         safeguardReviewAvailable=safeguard_review_available,
         safeguardLevel=safeguard_level,
         safeguardCategory=safeguard_category,

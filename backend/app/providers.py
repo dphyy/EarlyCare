@@ -1,6 +1,5 @@
 import base64
 import html
-import mimetypes
 import os
 import re
 from pathlib import Path
