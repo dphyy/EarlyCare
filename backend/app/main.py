@@ -2,11 +2,13 @@ import os
 import json
 import mimetypes
 import re
+import wave
 from pathlib import Path
 from datetime import datetime, timezone
 from uuid import uuid4
 
 import httpx
+import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -36,6 +38,7 @@ from app.providers import GoogleTranslateProvider, clean_transcript_text, transc
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 CALL_STORAGE_ROOT = BACKEND_ROOT / "storage" / "calls"
+SPEECH_MODEL_ARTIFACT_ROOT = BACKEND_ROOT / "models" / "speech"
 app = FastAPI(title="EarlyCare API", version="0.1.0")
 SUPPORTED_AUDIO_EXTENSIONS = {".mp3", ".ogg", ".wav", ".webm"}
 CONTENT_TYPE_AUDIO_EXTENSIONS = {
@@ -109,6 +112,64 @@ def _audio_upload_extension(audio: UploadFile) -> str:
         return suffix
     content_type = (audio.content_type or "").split(";")[0].lower()
     return CONTENT_TYPE_AUDIO_EXTENSIONS.get(content_type, ".wav")
+
+
+async def _save_uploaded_audio(upload: UploadFile | None, call_dir: Path, stem: str) -> tuple[str | None, Path | None]:
+    if upload is None:
+        return None, None
+    audio_path = call_dir / f"{stem}{_audio_upload_extension(upload)}"
+    audio_path.write_bytes(await upload.read())
+    return str(audio_path), audio_path
+
+
+def _audio_file_response(audio_path: Path, call_id: str) -> FileResponse:
+    media_type = mimetypes.guess_type(audio_path.name)[0] or "application/octet-stream"
+    if audio_path.suffix.lower() == ".wav":
+        media_type = "audio/wav"
+    return FileResponse(audio_path, media_type=media_type, filename=f"{call_id}-{audio_path.name}")
+
+
+def _read_wav_mono(audio_path: Path) -> tuple[np.ndarray, int]:
+    with wave.open(str(audio_path), "rb") as wav_file:
+        channels = wav_file.getnchannels()
+        sample_width = wav_file.getsampwidth()
+        sample_rate = wav_file.getframerate()
+        frames = wav_file.readframes(wav_file.getnframes())
+    if sample_width != 2:
+        raise RuntimeError("Patient speech extraction requires 16-bit PCM WAV audio")
+    audio = np.frombuffer(frames, dtype="<i2").astype(np.float32) / 32768.0
+    if channels > 1:
+        audio = audio.reshape(-1, channels).mean(axis=1)
+    return audio, sample_rate
+
+
+def _write_wav_mono(audio_path: Path, audio: np.ndarray, sample_rate: int) -> None:
+    audio_path.parent.mkdir(parents=True, exist_ok=True)
+    clipped = np.clip(audio, -1, 1)
+    samples = (clipped * 32767).astype("<i2")
+    with wave.open(str(audio_path), "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(samples.tobytes())
+
+
+def _trim_speech_edges(audio: np.ndarray, sample_rate: int, threshold: float = 0.012, padding_seconds: float = 0.08) -> np.ndarray:
+    if not len(audio):
+        return audio
+    frame_size = max(1, int(sample_rate * 0.03))
+    hop = max(1, int(sample_rate * 0.01))
+    voiced: list[tuple[int, int]] = []
+    for start in range(0, max(1, len(audio) - frame_size + 1), hop):
+        frame = audio[start : start + frame_size]
+        if len(frame) and float(np.sqrt(np.mean(np.square(frame)))) >= threshold:
+            voiced.append((start, min(len(audio), start + frame_size)))
+    if not voiced:
+        return audio[:0]
+    pad = int(sample_rate * padding_seconds)
+    start = max(0, voiced[0][0] - pad)
+    end = min(len(audio), voiced[-1][1] + pad)
+    return audio[start:end]
 
 
 def _transcript_to_text(messages: list[TranscriptMessage]) -> str:
@@ -257,16 +318,30 @@ def _role_labeled_original_transcript(messages: list[TranscriptMessage], fallbac
     if not messages:
         return _clean_transcript_text(fallback_transcript)
 
-    source_sentences = _split_sentences(re.sub(r"<Speaker\d+>:\s*", " ", fallback_transcript))
     spoken_messages = [message for message in messages if message.role != "System" and message.text.strip()]
-    if not source_sentences or not spoken_messages:
+    if not spoken_messages:
         return _transcript_to_text(messages)
 
-    mapped_lines: list[str] = []
-    for index, message in enumerate(spoken_messages):
-        sentence_index = min(len(source_sentences) - 1, round(index * (len(source_sentences) - 1) / max(1, len(spoken_messages) - 1)))
-        mapped_lines.append(f"{_display_role(message.role)}: {source_sentences[sentence_index]}")
-    return "\n".join(mapped_lines)
+    speaker_parts = re.findall(r"<(Speaker\d+)>:\s*(.*?)(?=<Speaker\d+>:|$)", fallback_transcript, flags=re.IGNORECASE | re.DOTALL)
+    if len(speaker_parts) >= 2:
+        ordered_speakers: list[str] = []
+        for speaker, _ in speaker_parts:
+            if speaker not in ordered_speakers:
+                ordered_speakers.append(speaker)
+        role_order: list[str] = []
+        for message in spoken_messages:
+            role = _display_role(message.role)
+            if not role_order or role_order[-1] != role:
+                role_order.append(role)
+        if len(ordered_speakers) <= len(role_order):
+            speaker_roles = {speaker: role_order[index] for index, speaker in enumerate(ordered_speakers)}
+            return "\n".join(
+                f"{speaker_roles.get(speaker, 'Patient')}: {_clean_transcript_text(text)}"
+                for speaker, text in speaker_parts
+                if _clean_transcript_text(text)
+            )
+
+    return _transcript_to_text(spoken_messages)
 
 
 def _role_segments_from_messages(messages: list[TranscriptMessage], started_at: str, english_transcript: str) -> list[TranscriptSegment]:
@@ -507,9 +582,94 @@ def _attach_segment_timestamps(signals: list[RiskSignal], segments: list[Transcr
     return next_signals
 
 
+def _is_patient_segment(segment: TranscriptSegment) -> bool:
+    text = segment.englishText or segment.originalText or segment.text
+    return segment.role == "Patient" or segment.speaker == "Patient" or text.startswith("Patient:")
+
+
+def _build_patient_speech_audio(
+    patient_audio_path: Path | None,
+    segments: list[TranscriptSegment],
+    output_path: Path,
+) -> tuple[Path | None, list[str], dict[str, float | int | str | None]]:
+    if patient_audio_path is None or not patient_audio_path.exists():
+        return None, [], {}
+    warnings: list[str] = []
+    try:
+        audio, sample_rate = _read_wav_mono(patient_audio_path)
+    except Exception as exc:
+        return None, [f"Patient speech extraction unavailable: {exc}"], {}
+
+    raw_duration = len(audio) / sample_rate if sample_rate else 0.0
+    patient_segments = [
+        segment
+        for segment in segments
+        if _is_patient_segment(segment) and segment.startTimeSeconds is not None and segment.endTimeSeconds is not None
+    ]
+    speech_parts: list[np.ndarray] = []
+    for segment in patient_segments:
+        start_seconds = max(0.0, float(segment.startTimeSeconds or 0) - 0.15)
+        end_seconds = min(raw_duration, float(segment.endTimeSeconds or 0) + 0.25)
+        if end_seconds <= start_seconds:
+            continue
+        start_index = max(0, int(start_seconds * sample_rate))
+        end_index = min(len(audio), int(end_seconds * sample_rate))
+        trimmed = _trim_speech_edges(audio[start_index:end_index], sample_rate)
+        if len(trimmed):
+            speech_parts.append(trimmed)
+
+    fallback_used = False
+    if not speech_parts:
+        fallback_used = True
+        warnings.append("Patient speech extraction used energy trimming because patient segment timings were unavailable or silent.")
+        trimmed = _trim_speech_edges(audio, sample_rate)
+        if len(trimmed):
+            speech_parts.append(trimmed)
+
+    if not speech_parts:
+        return None, warnings + ["Patient speech extraction found no usable speech audio."], {
+            "rawPatientAudioDurationSeconds": round(raw_duration, 3),
+            "patientSpeechDurationSeconds": 0,
+            "patientSpeechTurnCount": len(patient_segments),
+            "patientSpeechExtractionMode": "fallback-energy" if fallback_used else "timed-segments",
+        }
+
+    gap = np.zeros(int(sample_rate * 0.08), dtype=np.float32)
+    combined_parts: list[np.ndarray] = []
+    for index, part in enumerate(speech_parts):
+        if index:
+            combined_parts.append(gap)
+        combined_parts.append(part)
+    patient_speech = np.concatenate(combined_parts)
+    _write_wav_mono(output_path, patient_speech, sample_rate)
+    speech_duration = len(patient_speech) / sample_rate if sample_rate else 0.0
+    summary = {
+        "rawPatientAudioDurationSeconds": round(raw_duration, 3),
+        "patientSpeechDurationSeconds": round(speech_duration, 3),
+        "patientSpeechRemovedSeconds": round(max(0, raw_duration - speech_duration), 3),
+        "patientSpeechRemovalRatio": round(max(0, raw_duration - speech_duration) / max(raw_duration, 0.001), 4),
+        "patientSpeechTurnCount": len(speech_parts),
+        "patientSpeechExtractionMode": "fallback-energy" if fallback_used else "timed-segments",
+    }
+    return output_path, warnings, summary
+
+
 def _manual_risk_review() -> tuple[Symptoms, RiskAssessment, list[RiskSignal], str, bool]:
     reasons = ["Manual review required because AI risk extraction is unavailable."]
     return Symptoms(), _empty_assessment("Watch", reasons), [], "Manual review required.", True
+
+
+def _speech_model_review(audio_path: Path | None) -> tuple[str | None, float | None, list[str], dict[str, float | int | str | None] | None]:
+    if audio_path is None or os.getenv("EARLYCARE_SPEECH_MODEL_ENABLED", "").lower() not in {"1", "true", "yes"}:
+        return None, None, [], None
+    try:
+        from app.speech_ml.inference import predict_speech_marker
+
+        result = predict_speech_marker(audio_path, SPEECH_MODEL_ARTIFACT_ROOT)
+        return result.model_version, result.probability, result.warnings, result.features_summary
+    except Exception as exc:
+        detail = str(exc) or exc.__class__.__name__
+        return None, None, [f"Speech model review unavailable: {detail}"], None
 
 
 def _openai_risk_review(english_transcript: str, segments: list[TranscriptSegment]) -> tuple[Symptoms, RiskAssessment, list[RiskSignal], str, bool]:
@@ -640,10 +800,25 @@ def get_call_audio(call_id: str) -> FileResponse:
     )
     if audio_path is None:
         raise HTTPException(status_code=404, detail="Audio recording not found")
-    media_type = mimetypes.guess_type(audio_path.name)[0] or "application/octet-stream"
-    if audio_path.suffix.lower() == ".wav":
-        media_type = "audio/wav"
-    return FileResponse(audio_path, media_type=media_type, filename=f"{call_id}-{audio_path.name}")
+    return _audio_file_response(audio_path, call_id)
+
+
+@app.get("/calls/{call_id}/patient-audio")
+def get_call_patient_audio(call_id: str) -> FileResponse:
+    call_dir = CALL_STORAGE_ROOT / call_id
+    audio_path = next((candidate for candidate in call_dir.glob("patient-audio.*") if candidate.exists()), None)
+    if audio_path is None:
+        raise HTTPException(status_code=404, detail="Patient audio recording not found")
+    return _audio_file_response(audio_path, call_id)
+
+
+@app.get("/calls/{call_id}/patient-speech-audio")
+def get_call_patient_speech_audio(call_id: str) -> FileResponse:
+    call_dir = CALL_STORAGE_ROOT / call_id
+    audio_path = next((candidate for candidate in call_dir.glob("patient-speech.*") if candidate.exists()), None)
+    if audio_path is None:
+        raise HTTPException(status_code=404, detail="Patient speech audio recording not found")
+    return _audio_file_response(audio_path, call_id)
 
 
 @app.post("/checkins/start", response_model=CheckInSession)
@@ -721,6 +896,7 @@ async def save_call(
     transcriptMessages: str = Form(...),
     agentAudioCaptured: bool = Form(False),
     audio: UploadFile | None = File(None),
+    patientAudio: UploadFile | None = File(None),
 ) -> SavedCallResponse:
     senior = get_senior(seniorId)
     try:
@@ -734,12 +910,8 @@ async def save_call(
     call_dir = CALL_STORAGE_ROOT / call_id
     call_dir.mkdir(parents=True, exist_ok=True)
 
-    audio_file_path: str | None = None
-    audio_path: Path | None = None
-    if audio is not None:
-        audio_path = call_dir / f"full-call{_audio_upload_extension(audio)}"
-        audio_path.write_bytes(await audio.read())
-        audio_file_path = str(audio_path)
+    audio_file_path, audio_path = await _save_uploaded_audio(audio, call_dir, "full-call")
+    patient_audio_file_path, _ = await _save_uploaded_audio(patientAudio, call_dir, "patient-audio")
 
     dialogue_transcript = _transcript_to_text(messages)
     translation = transcribe_with_fallback(senior.preferredLanguage, dialogue_transcript, audio_path)
@@ -774,7 +946,28 @@ async def save_call(
             translation.segments = timed_segments
     _, assessment, risk_signals, recommended_action, ai_fallback_used = _openai_risk_review(english_transcript, translation.segments)
     audio_url = f"/calls/{call_id}/audio" if audio_file_path else None
+    patient_audio_url = f"/calls/{call_id}/patient-audio" if patient_audio_file_path else None
     current_speech_profile = _estimate_current_speech_profile(messages, startedAt, completedAt, translation.segments)
+    patient_speech_file_path: str | None = None
+    patient_speech_url: str | None = None
+    speech_extraction_warnings: list[str] = []
+    speech_extraction_summary: dict[str, float | int | str | None] = {}
+    patient_speech_path, speech_extraction_warnings, speech_extraction_summary = _build_patient_speech_audio(
+        Path(patient_audio_file_path) if patient_audio_file_path else None,
+        translation.segments,
+        call_dir / "patient-speech.wav",
+    )
+    if patient_speech_path is not None:
+        patient_speech_file_path = str(patient_speech_path)
+        patient_speech_url = f"/calls/{call_id}/patient-speech-audio"
+    speech_model_version, speech_model_probability, speech_model_warnings, speech_model_features = _speech_model_review(
+        patient_speech_path
+    )
+    speech_model_warnings = [*speech_extraction_warnings, *speech_model_warnings]
+    if speech_model_features is not None:
+        speech_model_features = {**speech_model_features, **speech_extraction_summary}
+    elif speech_extraction_summary:
+        speech_model_features = speech_extraction_summary
 
     (call_dir / "transcript-original.json").write_text(json.dumps([message.model_dump() for message in messages], indent=2))
     (call_dir / "transcript-english.txt").write_text(english_transcript)
@@ -795,11 +988,21 @@ async def save_call(
         audioFilePath=audio_file_path,
         audioUrl=audio_url,
         audioAvailable=audio_file_path is not None,
+        patientAudioFilePath=patient_audio_file_path,
+        patientAudioUrl=patient_audio_url,
+        patientAudioAvailable=patient_audio_file_path is not None,
+        patientSpeechAudioFilePath=patient_speech_file_path,
+        patientSpeechAudioUrl=patient_speech_url,
+        patientSpeechAudioAvailable=patient_speech_file_path is not None,
         agentAudioCaptured=agentAudioCaptured,
         currentSpeechProfile=current_speech_profile,
         transcriptSegments=translation.segments,
         riskSignals=risk_signals,
         aiRiskFallbackUsed=ai_fallback_used,
+        speechModelVersion=speech_model_version,
+        speechModelProbability=speech_model_probability,
+        speechModelWarnings=speech_model_warnings,
+        speechModelFeaturesSummary=speech_model_features,
         riskAssessment=assessment,
         recommendedAction=recommended_action,
     )

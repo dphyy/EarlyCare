@@ -2,7 +2,7 @@
 
 **Preventive care and patient engagement for elderly people living alone.**
 
-EarlyCare is a hackathon prototype for routine wellbeing calls. A patient starts a simulated browser call, an ElevenLabs agent conducts the check-in, the app records the full conversation, and the Patient overview shows the recording, original transcript, English transcript, patient-only AI risk highlights, and speech timing context for caregiver review.
+EarlyCare is a hackathon prototype for routine wellbeing calls. A patient starts a simulated browser call, an ElevenLabs agent conducts the check-in, the app records the full conversation plus patient-only microphone audio, and the Patient overview shows the recording, original transcript, English transcript, patient-only AI risk highlights, and speech signal quality context for caregiver review.
 
 EarlyCare is decision support, not diagnosis. It helps care teams notice risk signals such as falls, dizziness, sickness, confusion, weakness, poor intake, missed check-ins, or requests for help earlier.
 
@@ -11,12 +11,13 @@ EarlyCare is decision support, not diagnosis. It helps care teams notice risk si
 | Area | What EarlyCare Does |
 | --- | --- |
 | Agents call | Starts an ElevenLabs Agents-powered browser call from the EarlyCare website. The patient can speak in the language they are comfortable with. |
-| Full-call recording | Records patient microphone audio and ElevenLabs agent audio into one replayable `full-call.webm`. |
-| Patient overview | Shows saved recordings, translated English transcript, original transcript, speech timing, risk review, and follow-up recommendation. |
+| Full-call recording | Records patient microphone audio and ElevenLabs agent audio into one replayable `full-call.wav`. |
+| Patient-only audio | Saves raw `patient-audio.wav` and derives `patient-speech.wav` by cutting patient turns for speech-model scoring. |
+| Patient overview | Shows saved recordings, translated English transcript, original transcript, speech signal quality, risk review, and follow-up recommendation. |
 | Transcription and translation | Uses MERaLiON first, ElevenLabs speech-to-text and Google Translate as fallback, and saved dialogue transcript only as the final demo fallback. |
 | Inline risk highlights | Uses OpenAI structured output to detect patient-only risk signals and highlights the exact English evidence inline. |
 | Audio verification | Clicking a highlighted patient phrase seeks playback to immediately after the previous agent question, so caregivers can hear the patient answer in context. |
-| Speech timing | Tracks latest-call speech rate, average pause, response latency, pitch variability, and phrase accuracy against the latest available baseline. |
+| Speech signal quality | Shows derived patient-speech duration, speech coverage, response latency, speaking rate, and model readiness against recent-call baselines. |
 
 ## Workflow
 
@@ -25,7 +26,8 @@ EarlyCare is decision support, not diagnosis. It helps care teams notice risk si
 3. The frontend captures:
    - live dialogue messages in the original spoken language
    - mixed full-call audio containing patient and agent voice
-4. The backend saves `full-call.webm` and call metadata.
+   - patient-only microphone audio for downstream speech ML
+4. The backend saves `full-call.wav`, raw `patient-audio.wav`, derived `patient-speech.wav`, and call metadata.
 5. The backend attempts transcript generation in this order:
    - MERaLiON `http://meralion.org:8010/audio/transcription`
    - MERaLiON `http://meralion.org:8010/audio/translation`
@@ -37,7 +39,8 @@ EarlyCare is decision support, not diagnosis. It helps care teams notice risk si
    - English transcript with `Agent:` and `Patient:` speaker labels
    - timestamped transcript segments
    - provider/fallback metadata
-   - speech timing metrics
+   - speech profile metrics
+   - patient-only audio, derived patient-speech audio, and speech-model quality fields when configured
 7. OpenAI reviews patient speech only and returns structured risk signals.
 8. The Patient overview renders the English transcript above the original transcript and highlights risk evidence inline.
 9. Clicking a highlight plays the saved audio from immediately after the previous agent prompt.
@@ -52,7 +55,31 @@ EarlyCare is decision support, not diagnosis. It helps care teams notice risk si
 | Transcription | MERaLiON, ElevenLabs STT | Primary and fallback speech-to-text. |
 | Translation | MERaLiON, Google Translate | English transcript generation for caregiver review. |
 | AI review | OpenAI API | Structured patient-only risk extraction. |
+| Speech model | UCI/Kaggle tabular voice-feature model | Optional high-risk speech-marker probability from patient-only audio. |
 | Persistence | Local filesystem | Hackathon-friendly storage under `backend/storage/calls/`. |
+
+## Speech ML Research Path
+
+EarlyCare includes an optional Parkinsonian speech-marker model trained on UCI/Kaggle tabular voice features. The repo includes `backend/data/parkinsons.data` and trained artifacts under `backend/models/speech/`; runtime scoring is still disabled by default so normal startup stays lightweight.
+
+Recommended training path:
+
+1. Use the bundled `backend/data/parkinsons.data`, downloaded from the [Kaggle Parkinson's Disease Data Set](https://www.kaggle.com/datasets/vikasukani/parkinsons-disease-data-set), or replace it with the source [UCI Parkinsons dataset](https://archive.ics.uci.edu/dataset/174/parkinsons). Cite the dataset when using it.
+2. Install optional ML dependencies:
+
+```bash
+cd backend
+source .venv/bin/activate
+pip install -r requirements-ml.txt
+```
+
+3. Train and evaluate tabular models:
+
+```bash
+PYTHONPATH=backend backend/.venv/bin/python backend/scripts/train_parkinsons_tabular_model.py backend/data/parkinsons.data --output-dir backend/models/speech
+```
+
+The current saved winner is a calibrated random forest selected by grouped cross-validation ROC-AUC. Runtime inference first cuts patient turns from raw `patient-audio.wav` into `patient-speech.wav`, then extracts UCI-style acoustic features from that derived audio. These features were designed for controlled voice recordings, so conversational EarlyCare audio is still quality-gated. When extracted patient speech is too short or unstable, the app shows "Speech marker unavailable" or "Speech marker low confidence" instead of a misleading percentage.
 
 ## Setup
 
@@ -82,6 +109,7 @@ GOOGLE_TRANSLATE_API_KEY=
 GOOGLE_TRANSLATE_URL=https://translation.googleapis.com/language/translate/v2
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
+EARLYCARE_SPEECH_MODEL_ENABLED=false
 ```
 
 Never commit real `.env` files.
@@ -100,6 +128,12 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+```
+
+Install optional speech-model dependencies only when retraining or enabling runtime scoring:
+
+```bash
+pip install -r requirements-ml.txt
 ```
 
 ### 4. Run Locally
@@ -129,7 +163,7 @@ Open the Vite URL, usually `http://localhost:5173`.
 4. Speak with the agent in any comfortable language.
 5. Click **End & save**.
 6. Open **Patient overview**.
-7. Review the full-call recording, English transcript, original transcript, speech timing, and inline risk highlights.
+7. Review the full-call recording, English transcript, original transcript, speech signal quality, and inline risk highlights.
 8. Click a highlighted risk phrase to replay the patient answer from immediately after the previous agent question.
 
 ## Commands
@@ -156,7 +190,8 @@ EarlyCare does not diagnose Parkinson's disease, concussion, stroke, or any othe
 
 ## Roadmap
 
-- Replace heuristic speech timing estimates with validated audio-derived features.
+- Replace heuristic speech-profile estimates with validated audio-derived features.
+- Train and validate the optional UCI/Kaggle tabular speech-marker model with grouped evaluation when subject IDs are available.
 - Improve audio/transcript alignment with provider word-level timestamps when available.
 - Validate risk categories with clinicians and labelled datasets before real-world deployment.
 - Add persistent database/object storage for multi-user demos.

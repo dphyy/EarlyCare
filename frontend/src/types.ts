@@ -102,7 +102,17 @@ export interface CallRecord {
   audioFilePath?: string | null;
   audioUrl?: string | null;
   audioAvailable: boolean;
+  patientAudioFilePath?: string | null;
+  patientAudioUrl?: string | null;
+  patientAudioAvailable?: boolean;
+  patientSpeechAudioFilePath?: string | null;
+  patientSpeechAudioUrl?: string | null;
+  patientSpeechAudioAvailable?: boolean;
   agentAudioCaptured?: boolean;
+  speechModelVersion?: string | null;
+  speechModelProbability?: number | null;
+  speechModelWarnings?: string[];
+  speechModelFeaturesSummary?: Record<string, number | string | null>;
   currentSpeechProfile?: SpeechProfile | null;
   transcriptSegments?: TranscriptSegment[];
   riskSignals?: RiskSignal[];

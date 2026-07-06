@@ -393,6 +393,21 @@ function formatMetric(value: number | undefined | null, suffix = ""): string {
   return `${Math.round(value)}${suffix}`;
 }
 
+function formatSeconds(value: number | undefined | null): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return "Not enough data";
+  return value >= 10 ? `${Math.round(value)}s` : `${value.toFixed(1)}s`;
+}
+
+function formatPercent(value: number | undefined | null): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return "Not enough data";
+  return `${Math.round(value * 100)}%`;
+}
+
+function modelFeatureNumber(call: CallRecord | null, key: string): number | null {
+  const value = call?.speechModelFeaturesSummary?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function averageProfiles(profiles: NonNullable<CallRecord["currentSpeechProfile"]>[]): NonNullable<CallRecord["currentSpeechProfile"]> | null {
   if (!profiles.length) return null;
   const sum = profiles.reduce(
@@ -431,22 +446,75 @@ function baselineFromCalls(senior: Senior, calls: CallRecord[]): { profile: Seni
   return { profile: senior.baselineSpeechProfile, source: "Default baseline until recordings are available" };
 }
 
+function averageModelFeature(calls: CallRecord[], key: string): number | null {
+  const values = calls
+    .slice(0, 5)
+    .map((call) => modelFeatureNumber(call, key))
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
+  if (!values.length) return null;
+  return values.reduce((total, value) => total + value, 0) / values.length;
+}
+
+function averageSpeechCoverage(calls: CallRecord[]): number | null {
+  const values = calls
+    .slice(0, 5)
+    .map((item) => {
+      const speechSeconds = modelFeatureNumber(item, "patientSpeechDurationSeconds");
+      const rawSeconds = modelFeatureNumber(item, "rawPatientAudioDurationSeconds");
+      return speechSeconds && rawSeconds ? speechSeconds / rawSeconds : null;
+    })
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0);
+  if (!values.length) return null;
+  return values.reduce((total, value) => total + value, 0) / values.length;
+}
+
+function modelReadiness(call: CallRecord | null): { value: string; note: string } {
+  if (!call) return { value: "No call", note: "Complete a call first" };
+  const summary = call.speechModelFeaturesSummary;
+  const warnings = call.speechModelWarnings ?? [];
+  const warningText = warnings.join(" ").toLowerCase();
+  const usable = summary?.speechModelUsable;
+  if (warningText.includes("low confidence")) {
+    return { value: "Low confidence", note: warnings.find((warning) => warning.toLowerCase().includes("low confidence")) ?? "Review audio quality" };
+  }
+  if (call.speechModelProbability !== null && call.speechModelProbability !== undefined && usable !== "false") {
+    return { value: "Usable", note: `${Math.round(call.speechModelProbability * 100)}% marker score` };
+  }
+  if (usable === "false" || warningText.includes("unavailable")) {
+    return { value: "Unavailable", note: warnings.find((warning) => warning.toLowerCase().includes("unavailable")) ?? "Not enough patient speech" };
+  }
+  if (call.patientSpeechAudioAvailable) {
+    return { value: "Ready", note: "Ready when enabled" };
+  }
+  return { value: "Missing", note: "Not enough patient speech" };
+}
+
 function SpeechTimingPanel({ senior, call, calls }: { senior: Senior; call: CallRecord | null; calls: CallRecord[] }) {
   const baselineState = baselineFromCalls(senior, calls);
   const baseline = baselineState.profile;
   const current = call?.currentSpeechProfile ?? null;
+  const patientSpeechSeconds = modelFeatureNumber(call, "patientSpeechDurationSeconds");
+  const rawPatientSeconds = modelFeatureNumber(call, "rawPatientAudioDurationSeconds");
+  const speechCoverage = patientSpeechSeconds && rawPatientSeconds ? patientSpeechSeconds / rawPatientSeconds : null;
+  const baselinePatientSpeech = averageModelFeature(calls, "patientSpeechDurationSeconds");
+  const baselineSpeechCoverage = averageSpeechCoverage(calls);
+  const readiness = modelReadiness(call);
   const rows = [
-    { label: "Speech rate", baseline: `${Math.round(baseline.speechRate)} wpm`, current: formatMetric(current?.speechRate, " wpm") },
-    { label: "Average pause", baseline: `${Math.round(baseline.avgPauseMs)} ms`, current: formatMetric(current?.avgPauseMs, " ms") },
+    { label: "Patient speech", baseline: baselinePatientSpeech ? formatSeconds(baselinePatientSpeech) : "No baseline", current: formatSeconds(patientSpeechSeconds) },
+    {
+      label: "Speech coverage",
+      baseline: baselineSpeechCoverage !== null ? `${Math.round(baselineSpeechCoverage * 100)}% avg` : "No baseline",
+      current: formatPercent(speechCoverage)
+    },
     { label: "Response latency", baseline: `${Math.round(baseline.responseLatencyMs)} ms`, current: formatMetric(current?.responseLatencyMs, " ms") },
-    { label: "Pitch variability", baseline: baseline.pitchVariability.toFixed(2), current: formatMetric(current?.pitchVariability) },
-    { label: "Phrase accuracy", baseline: `${Math.round(baseline.phraseAccuracy * 100)}%`, current: formatMetric(current ? current.phraseAccuracy * 100 : null, "%") }
+    { label: "Speaking rate", baseline: `${Math.round(baseline.speechRate)} wpm`, current: formatMetric(current?.speechRate, " wpm") },
+    { label: "Model readiness", baseline: readiness.note, current: readiness.value }
   ];
 
   return (
     <section className="speech-timing-panel">
       <div className="panel-heading compact-heading">
-        <h3>Speech timing</h3>
+        <h3>Speech signal quality</h3>
         <span>{baselineState.source}</span>
       </div>
       <div className="speech-metric-grid">
@@ -458,13 +526,35 @@ function SpeechTimingPanel({ senior, call, calls }: { senior: Senior; call: Call
           </div>
         ))}
       </div>
-      {!current || !current.avgPauseMs || !current.responseLatencyMs ? (
+      {!call?.speechModelFeaturesSummary && !call?.patientSpeechAudioAvailable ? (
         <p className="metric-note">
-          Not enough timing data yet. Improve this by keeping full-call recording enabled, ensuring Meralion returns timestamps/diarization, and letting the agent ask short turn-by-turn questions so patient responses can be timed cleanly.
+          Not enough patient speech yet. Keep patient-only recording enabled and let the agent ask short turn-by-turn questions so patient answers can be isolated cleanly.
         </p>
       ) : null}
     </section>
   );
+}
+
+function speechMarkerTitle(call: CallRecord): string {
+  if (call.speechModelProbability !== null && call.speechModelProbability !== undefined) {
+    return `Speech marker watch: ${Math.round(call.speechModelProbability * 100)}%`;
+  }
+  const warnings = (call.speechModelWarnings ?? []).join(" ").toLowerCase();
+  if (warnings.includes("low confidence")) return "Speech marker low confidence";
+  if (warnings.includes("unavailable")) return "Speech marker unavailable";
+  return call.patientAudioAvailable ? "Speech marker model ready" : "Speech marker unavailable";
+}
+
+function speechMarkerDescription(call: CallRecord): string {
+  if (call.speechModelProbability !== null && call.speechModelProbability !== undefined) {
+    return `${call.speechModelVersion ?? "UCI/Kaggle tabular model"} scored the patient-only audio. This is a research screening signal, not a diagnosis.`;
+  }
+  if (call.speechModelWarnings?.length) {
+    return call.speechModelWarnings.join(" ");
+  }
+  return call.patientAudioAvailable
+    ? "Patient-only audio is saved. Enable backend speech scoring to populate the high-risk speech marker."
+    : "Patient-only audio is not available for speech-marker scoring.";
 }
 
 function AgentsCall({
@@ -485,6 +575,7 @@ function AgentsCall({
   const [transcriptMessages, setTranscriptMessages] = useState<TranscriptMessage[]>([]);
   const [startedAt, setStartedAt] = useState<string | null>(null);
   const recorderRef = useRef<WavRecorder | null>(null);
+  const patientRecorderRef = useRef<WavRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const recordingInputRef = useRef<GainNode | null>(null);
@@ -579,7 +670,10 @@ function AgentsCall({
       if (!AudioContextConstructor) throw new Error("Browser audio recording is not supported.");
       const audioContext = new AudioContextConstructor();
       const recordingInput = audioContext.createGain();
-      audioContext.createMediaStreamSource(stream).connect(recordingInput);
+      const microphoneSource = audioContext.createMediaStreamSource(stream);
+      const patientOnlyInput = audioContext.createGain();
+      microphoneSource.connect(recordingInput);
+      microphoneSource.connect(patientOnlyInput);
       audioContextRef.current = audioContext;
       recordingInputRef.current = recordingInput;
       agentPlaybackTimeRef.current = audioContext.currentTime;
@@ -587,6 +681,7 @@ function AgentsCall({
       agentAudioWarningShownRef.current = false;
       agentAudioFormatRef.current = "pcm_16000";
       recorderRef.current = createWavRecorder(audioContext, recordingInput);
+      patientRecorderRef.current = createWavRecorder(audioContext, patientOnlyInput);
 
       const session = await createElevenLabsSession({
         seniorId: selectedSenior.id,
@@ -634,9 +729,11 @@ function AgentsCall({
       conversation.endSession();
     }
     const audioBlob = await stopRecorder(recorderRef.current);
+    const patientAudioBlob = await stopRecorder(patientRecorderRef.current);
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     recorderRef.current = null;
+    patientRecorderRef.current = null;
 
     const formData = new FormData();
     formData.append("seniorId", selectedSenior.id);
@@ -649,6 +746,7 @@ function AgentsCall({
     audioContextRef.current = null;
     recordingInputRef.current = null;
     if (audioBlob) formData.append("audio", audioBlob, "full-call.wav");
+    if (patientAudioBlob) formData.append("patientAudio", patientAudioBlob, "patient-audio.wav");
 
     setCallState("Analysing");
     const saved = await saveCall(formData);
@@ -852,6 +950,15 @@ function OfficerDashboard({
                   </div>
                 </div>
               ) : null}
+              {latestSignal.patientAudioAvailable || latestSignal.speechModelWarnings?.length || latestSignal.speechModelProbability !== null ? (
+                <div className="model-card">
+                  <Activity size={22} />
+                  <div>
+                    <strong>{speechMarkerTitle(latestSignal)}</strong>
+                    <p>{speechMarkerDescription(latestSignal)}</p>
+                  </div>
+                </div>
+              ) : null}
             </>
           ) : (
             <p className="empty-state">No risk assessment is available for this senior yet.</p>
@@ -873,13 +980,18 @@ function OfficerDashboard({
                       </div>
                       <small>
                         {call.translationProvider}
-                        {call.translationFallbackUsed ? " fallback" : ""} · audio {call.audioAvailable ? "saved" : "missing"} · agent voice{" "}
-                        {call.agentAudioCaptured ? "captured" : "not confirmed"}
+                        {call.translationFallbackUsed ? " fallback" : ""} · audio {call.audioAvailable ? "saved" : "missing"} · patient audio{" "}
+                        {call.patientAudioAvailable ? "saved" : "missing"} · agent voice {call.agentAudioCaptured ? "captured" : "not confirmed"}
                       </small>
                     </div>
                     <p>
                       <strong>Recommended action:</strong> {call.recommendedAction}
                     </p>
+                    {call.patientAudioAvailable || call.speechModelWarnings?.length || call.speechModelProbability !== null ? (
+                      <p>
+                        <strong>{speechMarkerTitle(call)}:</strong> {speechMarkerDescription(call)}
+                      </p>
+                    ) : null}
 
                     <div className="recording-player">
                       <h4>Original recording</h4>

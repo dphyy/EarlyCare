@@ -137,11 +137,21 @@ class CallRecord(BaseModel):
     audioFilePath: str | None = None
     audioUrl: str | None = None
     audioAvailable: bool
+    patientAudioFilePath: str | None = None
+    patientAudioUrl: str | None = None
+    patientAudioAvailable: bool = False
+    patientSpeechAudioFilePath: str | None = None
+    patientSpeechAudioUrl: str | None = None
+    patientSpeechAudioAvailable: bool = False
     agentAudioCaptured: bool = False
     currentSpeechProfile: SpeechProfile | None = None
     transcriptSegments: list[TranscriptSegment] = []
     riskSignals: list[RiskSignal] = []
     aiRiskFallbackUsed: bool = False
+    speechModelVersion: str | None = None
+    speechModelProbability: float | None = None
+    speechModelWarnings: list[str] = []
+    speechModelFeaturesSummary: dict[str, float | int | str | None] | None = None
     riskAssessment: RiskAssessment
     recommendedAction: str
 

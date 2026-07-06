@@ -1,13 +1,40 @@
 import unittest
 from pathlib import Path
 import json
+import math
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
+import wave
+
+import numpy as np
 
 from fastapi.testclient import TestClient
 
 from app import main, providers
 from app.models import ProviderResult, TranscriptSegment
+
+
+def _test_wav_bytes(seconds: float = 4.0, speech_ranges: list[tuple[float, float]] | None = None, sample_rate: int = 16_000) -> bytes:
+    sample_count = int(seconds * sample_rate)
+    samples = np.zeros(sample_count, dtype=np.float32)
+    for start_seconds, end_seconds in speech_ranges or [(0, seconds)]:
+        start = int(start_seconds * sample_rate)
+        end = min(sample_count, int(end_seconds * sample_rate))
+        for index in range(start, end):
+            samples[index] = 0.25 * math.sin(2 * math.pi * 180 * index / sample_rate)
+    with TemporaryDirectory() as temp_dir:
+        path = Path(temp_dir) / "test.wav"
+        with wave.open(str(path), "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(sample_rate)
+            wav_file.writeframes((samples * 32767).astype("<i2").tobytes())
+        return path.read_bytes()
+
+
+def _wav_duration(path: Path) -> float:
+    with wave.open(str(path), "rb") as wav_file:
+        return wav_file.getnframes() / wav_file.getframerate()
 
 
 class CallWorkflowTests(unittest.TestCase):
@@ -174,12 +201,106 @@ class CallWorkflowTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         call = response.json()["call"]
         transcribe.assert_called_once()
-        self.assertEqual(call["originalTranscript"], "Agent: MERaLiON original transcript.\nPatient: MERaLiON original transcript.")
+        self.assertEqual(call["originalTranscript"], "Agent: Live agent text\nPatient: Live senior text")
         self.assertEqual(call["englishTranscript"], "MERaLiON English transcript.")
         self.assertEqual(call["transcriptMessages"][0]["text"], "Live agent text")
         self.assertEqual(call["translationProvider"], "meralion-audio-translation")
         self.assertFalse(call["translationFallbackUsed"])
         self.assertTrue(call["audioFilePath"].endswith("full-call.wav"))
+        self.assertFalse(call["patientAudioAvailable"])
+        self.assertIsNone(call["speechModelProbability"])
+
+    def test_save_call_stores_patient_only_audio_when_uploaded(self) -> None:
+        messages = [
+            {"role": "Agent", "text": "How are you?", "timestamp": "2026-07-04T10:00:00+08:00"},
+            {"role": "Senior", "text": "I am okay.", "timestamp": "2026-07-04T10:00:02+08:00"},
+        ]
+        provider_result = ProviderResult(
+            provider="fallback",
+            language="English",
+            transcript="Agent: How are you?\nPatient: I am okay.",
+            translation="Agent: How are you?\nPatient: I am okay.",
+            confidence=0.5,
+            fallbackUsed=True,
+        )
+
+        with TemporaryDirectory() as temp_dir:
+            with (
+                patch.object(main, "CALL_STORAGE_ROOT", Path(temp_dir)),
+                patch.object(main, "transcribe_with_fallback", return_value=provider_result),
+                patch.object(main, "_openai_risk_review", return_value=main._manual_risk_review()),
+                patch.dict(main.os.environ, {"EARLYCARE_SPEECH_MODEL_ENABLED": "false"}),
+            ):
+                client = TestClient(main.app)
+                response = client.post(
+                    "/calls",
+                    data={
+                        "seniorId": "s-001",
+                        "status": "Complete",
+                        "startedAt": "2026-07-04T10:00:00+08:00",
+                        "completedAt": "2026-07-04T10:01:00+08:00",
+                        "transcriptMessages": json.dumps(messages),
+                    },
+                    files={
+                        "audio": ("full-call.wav", _test_wav_bytes(2), "audio/wav"),
+                        "patientAudio": ("patient-audio.wav", _test_wav_bytes(4, [(1.2, 2.3)]), "audio/wav"),
+                    },
+                )
+                call = response.json()["call"]
+                audio_response = client.get(call["audioUrl"])
+                patient_audio_response = client.get(call["patientAudioUrl"])
+                patient_speech_response = client.get(call["patientSpeechAudioUrl"])
+                patient_speech_duration = _wav_duration(Path(call["patientSpeechAudioFilePath"]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(call["audioAvailable"])
+        self.assertTrue(call["patientAudioAvailable"])
+        self.assertTrue(call["patientSpeechAudioAvailable"])
+        self.assertTrue(call["patientAudioFilePath"].endswith("patient-audio.wav"))
+        self.assertTrue(call["patientSpeechAudioFilePath"].endswith("patient-speech.wav"))
+        self.assertLess(patient_speech_duration, 2.0)
+        self.assertGreater(patient_speech_duration, 0.5)
+        self.assertEqual(call["speechModelWarnings"], [])
+        self.assertTrue(audio_response.content)
+        self.assertTrue(patient_audio_response.content)
+        self.assertTrue(patient_speech_response.content)
+
+    def test_patient_audio_endpoint_returns_404_when_missing(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            with patch.object(main, "CALL_STORAGE_ROOT", Path(temp_dir)):
+                client = TestClient(main.app)
+                response = client.get("/calls/missing/patient-audio")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_patient_speech_audio_endpoint_returns_404_when_missing(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            with patch.object(main, "CALL_STORAGE_ROOT", Path(temp_dir)):
+                client = TestClient(main.app)
+                response = client.get("/calls/missing/patient-speech-audio")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_patient_speech_extraction_uses_timed_patient_segments(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            patient_audio = root / "patient-audio.wav"
+            patient_audio.write_bytes(_test_wav_bytes(8, [(3.0, 4.0), (6.0, 6.7)]))
+            output_path = root / "patient-speech.wav"
+            segments = [
+                TranscriptSegment(text="Agent: question", role="Agent", startTimeSeconds=0.0, endTimeSeconds=2.0),
+                TranscriptSegment(text="Patient: answer", role="Patient", startTimeSeconds=2.8, endTimeSeconds=4.2),
+                TranscriptSegment(text="Agent: question", role="Agent", startTimeSeconds=4.3, endTimeSeconds=5.5),
+                TranscriptSegment(text="Patient: yes", role="Patient", startTimeSeconds=5.8, endTimeSeconds=6.9),
+            ]
+
+            speech_path, warnings, summary = main._build_patient_speech_audio(patient_audio, segments, output_path)
+
+        self.assertEqual(speech_path, output_path)
+        self.assertFalse(warnings)
+        self.assertLess(summary["patientSpeechDurationSeconds"], summary["rawPatientAudioDurationSeconds"])
+        self.assertEqual(summary["patientSpeechExtractionMode"], "timed-segments")
+        self.assertEqual(summary["patientSpeechTurnCount"], 2)
 
     def test_speech_timing_estimate_uses_message_timestamps(self) -> None:
         messages = [
@@ -259,6 +380,25 @@ class CallWorkflowTests(unittest.TestCase):
 
         self.assertEqual(transcript, "Agent: 您今天感觉怎么样？\nPatient: 今天不错。")
         self.assertNotIn("<Speaker", transcript)
+
+    def test_role_labeled_original_transcript_uses_live_roles_without_speaker_tags(self) -> None:
+        messages = [
+            main.TranscriptMessage(
+                role="Agent",
+                text="Hello, this is Early Care. This is your routine well-being check-in. Is now a good time to continue?",
+                timestamp=None,
+            ),
+            main.TranscriptMessage(role="Senior", text="Yes.", timestamp=None),
+        ]
+
+        transcript = main._role_labeled_original_transcript(
+            messages,
+            "Hello, this is Early Care. This is your routine well-being check-in. Is now a good time to continue? Yes.",
+        )
+
+        self.assertIn("Agent: Hello, this is Early Care. This is your routine well-being check-in. Is now a good time to continue?", transcript)
+        self.assertIn("Patient: Yes.", transcript)
+        self.assertNotIn("Patient: This is your routine well-being check-in.", transcript)
 
     def test_role_segments_estimate_patient_start_before_transcript_event_time(self) -> None:
         messages = [

@@ -103,7 +103,7 @@ def assess_speech_deviation(baseline: SpeechProfile, request: SpeechDeviationReq
 
 def extract_demo_embedding_note() -> str:
     return (
-        "Production path: pass audio through wav2vec 2.0, WavLM, or MERaLiON SpeechEncoder, "
-        "pool hidden states into an embedding, then compare with the senior's stable baseline. "
-        "This prototype accepts precomputed/demo embeddings to avoid shipping model weights."
+        "Production path: save patient-only audio, extract UCI/Kaggle-style voice features, "
+        "score the trained tabular speech-marker model, and compare speech timing against "
+        "the senior's stable baseline. Outputs are screening signals, not diagnoses."
     )

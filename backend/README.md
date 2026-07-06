@@ -1,11 +1,13 @@
 # EarlyCare Backend
 
-FastAPI service for EarlyCare call sessions, call artifact storage, transcription, translation, speech timing, and OpenAI-assisted patient-risk review.
+FastAPI service for EarlyCare call sessions, call artifact storage, transcription, translation, speech signal quality, and OpenAI-assisted patient-risk review.
 
 ## What It Does
 
 - Creates signed ElevenLabs Agents session URLs without exposing secrets to the frontend.
-- Saves full-call audio uploaded by the browser as `full-call.webm`.
+- Saves full-call audio uploaded by the browser as `full-call.wav`.
+- Saves patient-only microphone audio as `patient-audio.wav` when the frontend provides it.
+- Derives `patient-speech.wav` from timed patient turns and uses it for speech-marker scoring.
 - Stores cleaned live dialogue messages with `Agent:` and `Patient:` labels.
 - Removes bracketed delivery cues such as `[happy]`, `[concerned]`, and `[sighs]`.
 - Uses MERaLiON first for timestamped transcription and audio translation.
@@ -20,15 +22,17 @@ When the frontend posts to `POST /calls`, the backend:
 
 1. Validates the selected senior.
 2. Parses and cleans transcript messages.
-3. Saves uploaded mixed audio as `backend/storage/calls/{call_id}/full-call.webm`.
-4. Builds an original transcript with `Agent:` and `Patient:` speaker labels.
-5. Builds an English transcript with the same speaker labels.
-6. Creates timestamped transcript segments from provider output or live message timing.
-7. Estimates speech timing metrics for the latest call.
-8. Sends patient speech only to OpenAI for structured risk review.
-9. Drops any risk signal that cannot be validated against a patient segment.
-10. Saves `metadata.json`, `transcript-original.json`, `transcript-english.txt`, and audio.
-11. Returns the saved call record to the frontend.
+3. Saves uploaded mixed audio as `backend/storage/calls/{call_id}/full-call.wav`.
+4. Saves uploaded patient-only audio as `backend/storage/calls/{call_id}/patient-audio.wav` when available.
+5. Builds an original transcript with `Agent:` and `Patient:` speaker labels.
+6. Builds an English transcript with the same speaker labels.
+7. Creates timestamped transcript segments from provider output or live message timing.
+8. Derives `patient-speech.wav` by cutting and trimming timed patient turns from `patient-audio.wav`.
+9. Estimates speech profile metrics and speech signal quality for the latest call.
+10. Sends patient speech only to OpenAI for structured risk review.
+11. Drops any risk signal that cannot be validated against a patient segment.
+12. Saves `metadata.json`, `transcript-original.json`, `transcript-english.txt`, and audio.
+13. Returns the saved call record to the frontend.
 
 Generated call artifacts are intentionally local-only and ignored by git.
 
@@ -61,6 +65,26 @@ OpenAI returns:
 If OpenAI is unavailable, the call still saves with `aiRiskFallbackUsed=true` and a manual-review recommendation.
 
 EarlyCare does not diagnose medical conditions.
+
+## Optional Speech ML Research
+
+The backend includes a trained UCI/Kaggle Parkinsonian speech-marker model path. Runtime scoring is optional and does not run unless `EARLYCARE_SPEECH_MODEL_ENABLED=true`.
+
+Install optional dependencies:
+
+```bash
+pip install -r requirements-ml.txt
+```
+
+Retrain and evaluate tabular models:
+
+```bash
+PYTHONPATH=. python scripts/train_parkinsons_tabular_model.py data/parkinsons.data --output-dir models/speech
+```
+
+The bundled `data/parkinsons.data` uses the [Kaggle Parkinson's Disease Data Set](https://www.kaggle.com/datasets/vikasukani/parkinsons-disease-data-set), mirrored from the source [UCI Parkinsons dataset](https://archive.ics.uci.edu/dataset/174/parkinsons). The trainer compares logistic regression, random forest, gradient boosting, SVM, XGBoost, and LightGBM when installed, then saves `parkinsons_tabular_model.joblib`, `feature_schema.json`, `metrics.json`, and `model_card.json`. It uses grouped splits by subject ID from the `name` column when possible. The current checked-in winner is a calibrated random forest.
+
+Runtime inference is disabled by default. Set `EARLYCARE_SPEECH_MODEL_ENABLED=true` after installing `requirements-ml.txt` to score derived `patient-speech.wav`. Returned model values are screening research signals, not a Parkinson's diagnosis. EarlyCare conversational audio can only approximate UCI-style controlled phonation features, so too-short or unstable extracted speech returns low-confidence/unavailable warnings instead of a percentage.
 
 ## Audio Seeking
 
@@ -114,6 +138,7 @@ curl http://127.0.0.1:8000/health
 | `GOOGLE_TRANSLATE_URL` | Google fallback | Defaults to Cloud Translation v2. |
 | `OPENAI_API_KEY` | AI risk review | Used for structured patient-risk extraction. |
 | `OPENAI_MODEL` | AI risk review | Defaults to `gpt-4o-mini`. |
+| `EARLYCARE_SPEECH_MODEL_ENABLED` | Speech marker scoring | Defaults to `false`; set to `true` after installing optional ML dependencies. |
 
 Never commit real `.env` files.
 
@@ -126,6 +151,8 @@ Never commit real `.env` files.
 | `GET /calls` | Saved call records, newest first. |
 | `GET /calls/{call_id}` | One saved call record. |
 | `GET /calls/{call_id}/audio` | Replayable saved full-call recording. |
+| `GET /calls/{call_id}/patient-audio` | Saved patient-only microphone recording for ML research. |
+| `GET /calls/{call_id}/patient-speech-audio` | Derived patient-turn-only audio used for speech-marker scoring. |
 | `POST /calls` | Save transcript messages and uploaded audio. |
 | `POST /elevenlabs/signed-url` | Create a signed Agents session URL. |
 | `GET /volunteer-tasks` | Demo volunteer task list. |
@@ -141,7 +168,9 @@ backend/storage/calls/{call_id}/
 Each call can include:
 
 - `metadata.json`
-- `full-call.webm`
+- `full-call.wav`
+- `patient-audio.wav`
+- `patient-speech.wav`
 - `transcript-original.json`
 - `transcript-english.txt`
 

@@ -38,11 +38,27 @@ backend/.env.*
 # Local storage and generated call artifacts
 backend/storage/
 backend/storage/**
+backend/storage/calls/
+backend/storage/calls/**
+backend/storage/**/full-call.*
+backend/storage/**/patient-audio.*
+backend/storage/**/patient-speech.*
+backend/storage/**/mic-audio.*
 *.webm
 *.wav
 *.mp3
 *.m4a
 *.ogg
+
+# ML scratch data and experiments
+backend/data/raw/
+backend/data/*.zip
+backend/data/*.csv
+!backend/data/parkinsons.data
+backend/models/**/runs/
+backend/models/**/checkpoints/
+backend/models/**/*.tmp
+backend/models/**/*.bak
 
 # OS/editor noise
 .DS_Store
