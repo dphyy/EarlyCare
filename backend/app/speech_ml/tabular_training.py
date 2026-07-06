@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 
 from app.speech_ml.evaluation import binary_metrics, group_folds, speaker_level_probabilities
-from app.speech_ml.parkinsons_features import UCI_PARKINSONS_FEATURE_NAMES
+from app.speech_ml.parkinsons_features import CONVERSATIONAL_PARKINSONS_FEATURE_NAMES
 
 
 @dataclass
@@ -28,7 +28,7 @@ def load_uci_dataframe(csv_path):
     import pandas as pd  # type: ignore
 
     frame = pd.read_csv(csv_path)
-    missing = [column for column in [*UCI_PARKINSONS_FEATURE_NAMES, "status"] if column not in frame.columns]
+    missing = [column for column in [*CONVERSATIONAL_PARKINSONS_FEATURE_NAMES, "status"] if column not in frame.columns]
     if missing:
         raise ValueError(f"Missing required UCI/Kaggle Parkinson columns: {', '.join(missing)}")
     return frame

@@ -12,7 +12,7 @@ import numpy as np
 
 from app.speech_ml.evaluation import group_folds
 from app.speech_ml.inference import predict_speech_marker
-from app.speech_ml.parkinsons_features import UCI_PARKINSONS_FEATURE_NAMES, extract_uci_parkinsons_features
+from app.speech_ml.parkinsons_features import CONVERSATIONAL_PARKINSONS_FEATURE_NAMES, extract_conversational_parkinsons_features
 from app.speech_ml.preprocessing import preprocess_audio
 from app.speech_ml.tabular_training import select_best_candidate, subject_id_from_name, CandidateResult
 
@@ -71,16 +71,39 @@ class SpeechMlTests(unittest.TestCase):
         self.assertIsNone(result.probability)
         self.assertTrue(any("No trained speech model artifacts" in warning for warning in result.warnings))
 
-    def test_uci_parkinsons_features_are_complete_and_finite(self) -> None:
+    def test_conversational_parkinsons_features_are_complete_and_finite(self) -> None:
         with TemporaryDirectory() as temp_dir:
             audio_path = Path(temp_dir) / "patient.wav"
             write_test_wav(audio_path, sample_rate=16_000, seconds=4.0)
 
-            features, warnings = extract_uci_parkinsons_features(audio_path)
+            features, warnings = extract_conversational_parkinsons_features(audio_path)
 
-        self.assertEqual(list(features.keys()), UCI_PARKINSONS_FEATURE_NAMES)
+        self.assertEqual(list(features.keys()), CONVERSATIONAL_PARKINSONS_FEATURE_NAMES)
         self.assertTrue(all(math.isfinite(value) for value in features.values()))
-        self.assertTrue(any("controlled sustained phonation" in warning for warning in warnings))
+        self.assertTrue(any("conversational Parkinson speech marker" in warning for warning in warnings))
+
+    def test_conversational_schema_excludes_legacy_nontransferable_features(self) -> None:
+        excluded = {
+            "MDVP:Shimmer",
+            "MDVP:Shimmer(dB)",
+            "Shimmer:APQ3",
+            "Shimmer:APQ5",
+            "MDVP:APQ",
+            "Shimmer:DDA",
+            "RPDE",
+            "DFA",
+            "spread1",
+            "spread2",
+            "D2",
+            "PPE",
+        }
+        self.assertEqual(len(CONVERSATIONAL_PARKINSONS_FEATURE_NAMES), 10)
+        self.assertFalse(excluded & set(CONVERSATIONAL_PARKINSONS_FEATURE_NAMES))
+
+    def test_legacy_feature_helpers_are_removed_from_runtime_extractor(self) -> None:
+        source = Path("backend/app/speech_ml/parkinsons_features.py").read_text()
+        for legacy_name in ["_shimmer_from_audio", "_nonlinear_pitch_features", "_dfa", "_correlation_dimension"]:
+            self.assertNotIn(legacy_name, source)
 
     def test_short_silent_audio_returns_quality_warning(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -91,7 +114,7 @@ class SpeechMlTests(unittest.TestCase):
                 wav_file.setframerate(16_000)
                 wav_file.writeframes(np.zeros(16_000, dtype="<i2").tobytes())
 
-            _, warnings = extract_uci_parkinsons_features(audio_path)
+            _, warnings = extract_conversational_parkinsons_features(audio_path)
 
         self.assertTrue(any("shorter than 3 seconds" in warning for warning in warnings))
         self.assertTrue(any("mostly silence" in warning for warning in warnings))
@@ -120,7 +143,7 @@ class SpeechMlTests(unittest.TestCase):
             artifacts.mkdir()
             write_test_wav(audio_path, sample_rate=16_000, seconds=4.0)
             joblib.dump(DummyProbabilityModel(), artifacts / "parkinsons_tabular_model.joblib")
-            (artifacts / "feature_schema.json").write_text(json.dumps(UCI_PARKINSONS_FEATURE_NAMES))
+            (artifacts / "feature_schema.json").write_text(json.dumps(CONVERSATIONAL_PARKINSONS_FEATURE_NAMES))
             (artifacts / "model_card.json").write_text(json.dumps({"model_version": "test-tabular-v0"}))
 
             result = predict_speech_marker(audio_path, artifacts)
@@ -128,6 +151,29 @@ class SpeechMlTests(unittest.TestCase):
         self.assertEqual(result.model_version, "test-tabular-v0")
         self.assertEqual(result.probability, 0.8)
         self.assertIsNotNone(result.features_summary)
+
+    @unittest.skipUnless(importlib.util.find_spec("joblib"), "joblib is optional")
+    def test_predict_speech_model_blocks_out_of_training_range_features(self) -> None:
+        import joblib  # type: ignore
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            audio_path = root / "patient.wav"
+            artifacts = root / "artifacts"
+            artifacts.mkdir()
+            write_test_wav(audio_path, sample_rate=16_000, seconds=4.0)
+            joblib.dump(DummyProbabilityModel(), artifacts / "parkinsons_tabular_model.joblib")
+            (artifacts / "feature_schema.json").write_text(json.dumps(CONVERSATIONAL_PARKINSONS_FEATURE_NAMES))
+            (artifacts / "model_card.json").write_text(json.dumps({"model_version": "test-tabular-v0"}))
+            (artifacts / "feature_reference_ranges.json").write_text(
+                json.dumps({name: {"min": -0.001, "max": 0.001} for name in CONVERSATIONAL_PARKINSONS_FEATURE_NAMES})
+            )
+
+            result = predict_speech_marker(audio_path, artifacts)
+
+        self.assertIsNone(result.probability)
+        self.assertTrue(any("outside the UCI/Kaggle training range" in warning for warning in result.warnings))
+        self.assertGreater(result.features_summary["speechModelFeatureOutOfRangeCount"], 0)
 
     @unittest.skipUnless(importlib.util.find_spec("joblib"), "joblib is optional")
     def test_long_patient_speech_audio_is_scored_in_chunks(self) -> None:
@@ -140,7 +186,7 @@ class SpeechMlTests(unittest.TestCase):
             artifacts.mkdir()
             write_test_wav(audio_path, sample_rate=16_000, seconds=35.0)
             joblib.dump(DummyProbabilityModel(), artifacts / "parkinsons_tabular_model.joblib")
-            (artifacts / "feature_schema.json").write_text(json.dumps(UCI_PARKINSONS_FEATURE_NAMES))
+            (artifacts / "feature_schema.json").write_text(json.dumps(CONVERSATIONAL_PARKINSONS_FEATURE_NAMES))
             (artifacts / "model_card.json").write_text(json.dumps({"model_version": "test-tabular-v0"}))
 
             result = predict_speech_marker(audio_path, artifacts)
@@ -161,14 +207,14 @@ class SpeechMlTests(unittest.TestCase):
             label = 1 if index >= 4 else 0
             subject = f"phon_R01_S{index // 2 + 1:02d}_{index % 2 + 1}"
             base = 1.0 + label * 2.0 + index * 0.01
-            rows.append([subject, *[base + feature_index * 0.001 for feature_index in range(len(UCI_PARKINSONS_FEATURE_NAMES))], label])
+            rows.append([subject, *[base + feature_index * 0.001 for feature_index in range(len(CONVERSATIONAL_PARKINSONS_FEATURE_NAMES))], label])
 
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             csv_path = root / "parkinsons.data"
             output_dir = root / "artifacts"
             csv_path.write_text(
-                ",".join(["name", *UCI_PARKINSONS_FEATURE_NAMES, "status"])
+                ",".join(["name", *CONVERSATIONAL_PARKINSONS_FEATURE_NAMES, "status"])
                 + "\n"
                 + "\n".join(",".join(str(value) for value in row) for row in rows)
             )
@@ -192,3 +238,9 @@ class SpeechMlTests(unittest.TestCase):
             self.assertTrue((output_dir / "feature_schema.json").exists())
             self.assertTrue((output_dir / "metrics.json").exists())
             self.assertTrue((output_dir / "model_card.json").exists())
+            self.assertTrue((output_dir / "feature_reference_ranges.json").exists())
+            schema = json.loads((output_dir / "feature_schema.json").read_text())
+            model_card = json.loads((output_dir / "model_card.json").read_text())
+            self.assertEqual(schema, CONVERSATIONAL_PARKINSONS_FEATURE_NAMES)
+            self.assertEqual(model_card["feature_schema"], CONVERSATIONAL_PARKINSONS_FEATURE_NAMES)
+            self.assertIn("excluded_source_features", model_card)

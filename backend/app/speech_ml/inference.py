@@ -9,7 +9,13 @@ from pathlib import Path
 import numpy as np
 
 from app.speech_ml import TARGET_SAMPLE_RATE
-from app.speech_ml.parkinsons_features import UCI_PARKINSONS_FEATURE_NAMES, extract_uci_parkinsons_features, ordered_feature_vector, pitch_track, voiced_window_count
+from app.speech_ml.parkinsons_features import (
+    CONVERSATIONAL_PARKINSONS_FEATURE_NAMES,
+    extract_conversational_parkinsons_features,
+    ordered_feature_vector,
+    pitch_track,
+    voiced_window_count,
+)
 from app.speech_ml.preprocessing import load_audio, preprocess_audio
 
 
@@ -25,6 +31,7 @@ def _public_warnings(warnings: list[str]) -> list[str]:
     hidden_fragments = [
         "controlled sustained phonation",
         "conversational earlycare audio is an approximate screening input",
+        "the conversational parkinson speech marker uses pitch, jitter, and harmonic/noise features",
     ]
     public: list[str] = []
     for warning in warnings:
@@ -95,12 +102,69 @@ def _predict_probability(model, features: dict[str, float], feature_schema: list
     return float(1 / (1 + np.exp(-decision)))
 
 
-def _score_single_audio(audio_path: Path, model, feature_schema: list[str]) -> tuple[float | None, list[str], dict[str, float | int | str | None]]:
+def _reference_ranges(artifact_dir: Path) -> dict[str, dict[str, float]]:
+    ranges_path = artifact_dir / "feature_reference_ranges.json"
+    if not ranges_path.exists():
+        return {}
+    try:
+        with ranges_path.open() as ranges_file:
+            loaded = json.load(ranges_file)
+    except Exception:
+        return {}
+    ranges: dict[str, dict[str, float]] = {}
+    if not isinstance(loaded, dict):
+        return ranges
+    for name, values in loaded.items():
+        if not isinstance(name, str) or not isinstance(values, dict):
+            continue
+        min_value = values.get("min")
+        max_value = values.get("max")
+        if isinstance(min_value, (int, float)) and isinstance(max_value, (int, float)):
+            ranges[name] = {"min": float(min_value), "max": float(max_value)}
+    return ranges
+
+
+def _training_range_gate(features: dict[str, float], ranges: dict[str, dict[str, float]], warnings: list[str]) -> tuple[bool, dict[str, float | int | str | None]]:
+    if not ranges:
+        return True, {}
+    outside: list[str] = []
+    for name, limits in ranges.items():
+        value = features.get(name)
+        if value is None:
+            continue
+        if value < limits["min"] or value > limits["max"]:
+            outside.append(name)
+
+    usable = True
+    if len(outside) >= 3:
+        usable = False
+        warnings.append(
+            "Speech marker unavailable: extracted voice features are outside the UCI/Kaggle training range "
+            f"({', '.join(outside[:6])}{'...' if len(outside) > 6 else ''})."
+        )
+    elif outside:
+        warnings.append(f"Speech marker low confidence: {', '.join(outside)} outside the UCI/Kaggle training range.")
+
+    return usable, {
+        "speechModelFeatureOutOfRangeCount": len(outside),
+        "speechModelOutOfRangeFeatures": ", ".join(outside),
+    }
+
+
+def _score_single_audio(
+    audio_path: Path,
+    model,
+    feature_schema: list[str],
+    reference_ranges: dict[str, dict[str, float]],
+) -> tuple[float | None, list[str], dict[str, float | int | str | None]]:
     chunks, quality = preprocess_audio(audio_path)
     warnings = list(quality.warnings)
-    features, feature_warnings = extract_uci_parkinsons_features(audio_path)
+    features, feature_warnings = extract_conversational_parkinsons_features(audio_path)
     warnings.extend(feature_warnings)
     usable, quality_summary = _quality_gate(audio_path, quality, features, warnings)
+    in_range, range_summary = _training_range_gate(features, reference_ranges, warnings)
+    usable = usable and in_range
+    quality_summary["speechModelUsable"] = "true" if usable else "false"
     probability = _predict_probability(model, features, feature_schema) if usable else None
     return probability, _public_warnings(warnings), {
         "duration_seconds": quality.duration_seconds,
@@ -108,18 +172,25 @@ def _score_single_audio(audio_path: Path, model, feature_schema: list[str]) -> t
         "clipping_ratio": round(quality.clipping_ratio, 4),
         "chunk_count": len(chunks),
         **quality_summary,
+        **range_summary,
         **{key: round(value, 4) for key, value in features.items()},
     }
 
 
-def _score_chunked_audio(audio_path: Path, model, feature_schema: list[str]) -> tuple[float | None, list[str], dict[str, float | int | str | None]]:
+def _score_chunked_audio(
+    audio_path: Path,
+    model,
+    feature_schema: list[str],
+    reference_ranges: dict[str, dict[str, float]],
+) -> tuple[float | None, list[str], dict[str, float | int | str | None]]:
     chunks, quality = preprocess_audio(audio_path, max_duration_seconds=12.0)
     if quality.duration_seconds <= 24 or len(chunks) <= 1:
-        return _score_single_audio(audio_path, model, feature_schema)
+        return _score_single_audio(audio_path, model, feature_schema, reference_ranges)
 
     probabilities: list[float] = []
     warnings = _public_warnings(quality.warnings)
     scored_summaries: list[dict[str, float | int | str | None]] = []
+    skipped_summaries: list[dict[str, float | int | str | None]] = []
     skipped_chunks = 0
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
@@ -129,10 +200,11 @@ def _score_chunked_audio(audio_path: Path, model, feature_schema: list[str]) -> 
                 continue
             chunk_path = root / f"patient-speech-chunk-{index}.wav"
             _write_pcm_wav(chunk_path, chunk, TARGET_SAMPLE_RATE)
-            probability, chunk_warnings, summary = _score_single_audio(chunk_path, model, feature_schema)
+            probability, chunk_warnings, summary = _score_single_audio(chunk_path, model, feature_schema, reference_ranges)
             warnings.extend(chunk_warnings)
             if probability is None:
                 skipped_chunks += 1
+                skipped_summaries.append(summary)
                 continue
             probabilities.append(probability)
             scored_summaries.append(summary)
@@ -153,7 +225,12 @@ def _score_chunked_audio(audio_path: Path, model, feature_schema: list[str]) -> 
         return median_probability, _public_warnings(warnings), summary
 
     warnings.append("Speech marker unavailable: no patient-speech chunk passed quality checks.")
-    return None, _public_warnings(warnings), {
+    skipped_summary = max(
+        skipped_summaries,
+        key=lambda item: int(item.get("speechModelFeatureOutOfRangeCount") or 0),
+        default={},
+    )
+    summary = {
         "duration_seconds": quality.duration_seconds,
         "silence_ratio": round(quality.silence_ratio, 4),
         "clipping_ratio": round(quality.clipping_ratio, 4),
@@ -162,13 +239,21 @@ def _score_chunked_audio(audio_path: Path, model, feature_schema: list[str]) -> 
         "skippedChunkCount": skipped_chunks,
         "speechModelUsable": "false",
     }
+    summary.update(
+        {
+            key: value
+            for key, value in skipped_summary.items()
+            if key in {"speechModelFeatureOutOfRangeCount", "speechModelOutOfRangeFeatures"}
+        }
+    )
+    return None, _public_warnings(warnings), summary
 
 
 def predict_speech_marker(audio_path: Path, artifact_dir: Path) -> SpeechModelResult:
     warnings: list[str] = []
     chunks, quality = preprocess_audio(audio_path)
     warnings.extend(quality.warnings)
-    features, feature_warnings = extract_uci_parkinsons_features(audio_path)
+    features, feature_warnings = extract_conversational_parkinsons_features(audio_path)
     warnings.extend(feature_warnings)
     usable, quality_summary = _quality_gate(audio_path, quality, features, warnings)
 
@@ -193,7 +278,7 @@ def predict_speech_marker(audio_path: Path, artifact_dir: Path) -> SpeechModelRe
 
     with config_path.open() as config_file:
         model_card = json.load(config_file)
-    feature_schema = UCI_PARKINSONS_FEATURE_NAMES
+    feature_schema = CONVERSATIONAL_PARKINSONS_FEATURE_NAMES
     if schema_path.exists():
         with schema_path.open() as schema_file:
             loaded_schema = json.load(schema_file)
@@ -203,7 +288,7 @@ def predict_speech_marker(audio_path: Path, artifact_dir: Path) -> SpeechModelRe
         import joblib  # type: ignore
 
         model = joblib.load(model_path)
-        probability, warnings, features_summary = _score_chunked_audio(audio_path, model, feature_schema)
+        probability, warnings, features_summary = _score_chunked_audio(audio_path, model, feature_schema, _reference_ranges(artifact_dir))
     except Exception as exc:
         warnings.append(f"Trained speech model could not be loaded or executed: {exc}")
         probability = None

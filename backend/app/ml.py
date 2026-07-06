@@ -100,7 +100,7 @@ def assess_speech_deviation(baseline: SpeechProfile, request: SpeechDeviationReq
 
 def extract_demo_embedding_note() -> str:
     return (
-        "Production path: save patient-only audio, extract UCI/Kaggle-style voice features, "
-        "score the trained tabular speech-marker model, and compare speech timing against "
+        "Production path: save patient-only audio, extract conversational pitch, jitter, and noise features, "
+        "score the trained speech-marker model, and compare speech timing against "
         "the senior's stable baseline. Outputs are screening signals, not diagnoses."
     )

@@ -709,7 +709,7 @@ function speechMarkerTitle(call: CallRecord): string {
 
 function speechMarkerDescription(call: CallRecord): string {
   if (call.speechModelProbability !== null && call.speechModelProbability !== undefined) {
-    return `${call.speechModelVersion ?? "UCI/Kaggle tabular model"} scored the patient-only audio. This is a research screening signal, not a diagnosis.`;
+    return `${call.speechModelVersion ?? "conversational speech marker model"} scored patient-only pitch, jitter, and noise features. This is a research screening signal, not a diagnosis.`;
   }
   if (call.speechModelWarnings?.length) {
     return call.speechModelWarnings.join(" ");
