@@ -71,8 +71,8 @@ export const scenarios: Scenario[] = [
       "Yes, I am okay. I ate breakfast and took my medicine.",
       "Any falls, dizziness, headache, or blurred vision since our last call?",
       "No falls. No headache. I feel normal.",
-      "Please repeat: Today I am safe at home and I can ask for help.",
-      "Today I am safe at home and I can ask for help."
+      "Can you ask someone nearby for help if you need it?",
+      "Yes, I can call my son if I need help."
     ],
     speechMetrics: {
       speechRate: 126,

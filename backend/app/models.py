@@ -91,6 +91,13 @@ class ProviderResult(BaseModel):
     confidence: float
     fallbackUsed: bool
     segments: list["TranscriptSegment"] = []
+    attempts: list["TranscriptionAttempt"] = []
+
+
+class TranscriptionAttempt(BaseModel):
+    provider: str
+    status: Literal["success", "failed", "skipped"]
+    reason: str | None = None
 
 
 class TranscriptSegment(BaseModel):
@@ -134,6 +141,7 @@ class CallRecord(BaseModel):
     transcriptMessages: list[TranscriptMessage]
     translationProvider: str
     translationFallbackUsed: bool
+    transcriptionAttempts: list[TranscriptionAttempt] = []
     audioFilePath: str | None = None
     audioUrl: str | None = None
     audioAvailable: bool

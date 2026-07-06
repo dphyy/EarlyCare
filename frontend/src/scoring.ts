@@ -32,17 +32,15 @@ export function assessScenario(senior: Senior, scenario: Scenario): RiskAssessme
   const pauseDelta = Math.abs(current.avgPauseMs - baseline.avgPauseMs) / baseline.avgPauseMs;
   const latencyDelta = Math.abs(current.responseLatencyMs - baseline.responseLatencyMs) / baseline.responseLatencyMs;
   const pitchDelta = Math.abs(current.pitchVariability - baseline.pitchVariability) / Math.max(baseline.pitchVariability, 0.1);
-  const phraseDelta = Math.max(0, baseline.phraseAccuracy - current.phraseAccuracy);
 
   const speechDeviationScore = clampScore(
-    embeddingDelta * 0.45 + rateDelta * 35 + pauseDelta * 24 + latencyDelta * 18 + pitchDelta * 20 + phraseDelta * 35
+    embeddingDelta * 0.45 + rateDelta * 35 + pauseDelta * 24 + latencyDelta * 18 + pitchDelta * 20
   );
 
   const parkinsonsWatchScore = clampScore(
-    (current.speechRate < baseline.speechRate * 0.8 ? 22 : 0) +
+      (current.speechRate < baseline.speechRate * 0.8 ? 22 : 0) +
       (current.avgPauseMs > baseline.avgPauseMs * 1.55 ? 24 : 0) +
       (current.pitchVariability < baseline.pitchVariability * 0.7 ? 22 : 0) +
-      (current.phraseAccuracy < baseline.phraseAccuracy * 0.88 ? 14 : 0) +
       Math.min(18, speechDeviationScore * 0.22)
   );
 

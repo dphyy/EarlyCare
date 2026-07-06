@@ -10,23 +10,23 @@ EarlyCare is decision support, not diagnosis. It helps care teams notice risk si
 
 | Area | What EarlyCare Does |
 | --- | --- |
-| Agents call | Starts an ElevenLabs Agents-powered browser call from the EarlyCare website. The patient can speak in the language they are comfortable with. |
-| Full-call recording | Records patient microphone audio and ElevenLabs agent audio into one replayable `full-call.wav`. |
-| Patient-only audio | Saves raw `patient-audio.wav` and derives `patient-speech.wav` by cutting patient turns for speech-model scoring. |
+| Agents call | Starts an ElevenLabs Agents-powered browser call from a transcript-free animated call screen. The patient can speak in the language they are comfortable with. |
+| Full-call recording | Requests browser echo cancellation, noise suppression, and auto gain control, then records patient microphone audio and ElevenLabs agent audio into one replayable `full-call.wav`. |
+| Patient-only audio | Saves raw `patient-audio.wav` and derives `patient-speech.wav` by isolating voiced patient answers between agent turns for speech-model scoring. |
 | Patient overview | Shows saved recordings, translated English transcript, original transcript, speech signal quality, risk review, and follow-up recommendation. |
 | Transcription and translation | Uses MERaLiON first, ElevenLabs speech-to-text and Google Translate as fallback, and saved dialogue transcript only as the final demo fallback. |
-| Inline risk highlights | Uses OpenAI structured output to detect patient-only risk signals and highlights the exact English evidence inline. |
+| Inline risk highlights | Uses OpenAI structured output to detect patient-only risk signals and highlights exact English evidence inline when AI review succeeds. |
 | Audio verification | Clicking a highlighted patient phrase seeks playback to immediately after the previous agent question, so caregivers can hear the patient answer in context. |
 | Speech signal quality | Shows derived patient-speech duration, speech coverage, response latency, speaking rate, and model readiness against recent-call baselines. |
 
 ## Workflow
 
 1. Patient starts the simulated call from the **Agents call** page.
-2. The ElevenLabs agent conducts the wellbeing check-in.
+2. The ElevenLabs agent conducts the wellbeing check-in with concise turn-by-turn questions and no required repeat phrase.
 3. The frontend captures:
-   - live dialogue messages in the original spoken language
+   - live dialogue messages internally for saved-call review, without rendering a live transcript during the call
    - mixed full-call audio containing patient and agent voice
-   - patient-only microphone audio for downstream speech ML
+   - patient-only microphone audio for downstream speech ML, using browser microphone cleanup when available
 4. The backend saves `full-call.wav`, raw `patient-audio.wav`, derived `patient-speech.wav`, and call metadata.
 5. The backend attempts transcript generation in this order:
    - MERaLiON `http://meralion.org:8010/audio/transcription`
@@ -34,14 +34,15 @@ EarlyCare is decision support, not diagnosis. It helps care teams notice risk si
    - ElevenLabs speech-to-text for original transcript fallback
    - Google Translate for English translation fallback
    - saved dialogue transcript as final demo fallback
+   - each provider attempt is saved with success/failure/skipped status for debugging
 6. The backend stores:
    - original transcript with `Agent:` and `Patient:` speaker labels
    - English transcript with `Agent:` and `Patient:` speaker labels
    - timestamped transcript segments
-   - provider/fallback metadata
+   - provider/fallback metadata and sanitized provider attempt reasons
    - speech profile metrics
    - patient-only audio, derived patient-speech audio, and speech-model quality fields when configured
-7. OpenAI reviews patient speech only and returns structured risk signals.
+7. OpenAI reviews patient speech only and returns structured risk signals when configured; otherwise the dashboard shows manual review status without inline AI highlights.
 8. The Patient overview renders the English transcript above the original transcript and highlights risk evidence inline.
 9. Clicking a highlight plays the saved audio from immediately after the previous agent prompt.
 
@@ -60,7 +61,7 @@ EarlyCare is decision support, not diagnosis. It helps care teams notice risk si
 
 ## Speech ML Research Path
 
-EarlyCare includes an optional Parkinsonian speech-marker model trained on UCI/Kaggle tabular voice features. The repo includes `backend/data/parkinsons.data` and trained artifacts under `backend/models/speech/`; runtime scoring is still disabled by default so normal startup stays lightweight.
+EarlyCare includes a Parkinsonian speech-marker research path trained on UCI/Kaggle tabular voice features. The repo includes `backend/data/parkinsons.data` and trained artifacts under `backend/models/speech/`; runtime ML imports are lazy so the core app can still save calls if optional speech dependencies are unavailable.
 
 Recommended training path:
 
@@ -79,7 +80,7 @@ pip install -r requirements-ml.txt
 PYTHONPATH=backend backend/.venv/bin/python backend/scripts/train_parkinsons_tabular_model.py backend/data/parkinsons.data --output-dir backend/models/speech
 ```
 
-The current saved winner is a calibrated random forest selected by grouped cross-validation ROC-AUC. Runtime inference first cuts patient turns from raw `patient-audio.wav` into `patient-speech.wav`, then extracts UCI-style acoustic features from that derived audio. These features were designed for controlled voice recordings, so conversational EarlyCare audio is still quality-gated. When extracted patient speech is too short or unstable, the app shows "Speech marker unavailable" or "Speech marker low confidence" instead of a misleading percentage.
+The current saved winner is a calibrated random forest selected by grouped cross-validation ROC-AUC. Runtime inference builds `patient-speech.wav` from voiced patient answer regions between agent turns, then scores manageable patient-speech chunks and aggregates the median probability. These features were designed for controlled voice recordings, so conversational EarlyCare audio is still quality-gated. When extracted patient speech is too short, silent, clipped, or severely unstable, the app shows "Speech marker unavailable" or "Speech marker low confidence" instead of a misleading percentage.
 
 ## Setup
 
@@ -109,7 +110,7 @@ GOOGLE_TRANSLATE_API_KEY=
 GOOGLE_TRANSLATE_URL=https://translation.googleapis.com/language/translate/v2
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
-EARLYCARE_SPEECH_MODEL_ENABLED=false
+EARLYCARE_SPEECH_MODEL_ENABLED=true
 ```
 
 Never commit real `.env` files.
@@ -130,7 +131,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Install optional speech-model dependencies only when retraining or enabling runtime scoring:
+Install optional speech-model dependencies when retraining or using runtime speech-marker scoring:
 
 ```bash
 pip install -r requirements-ml.txt

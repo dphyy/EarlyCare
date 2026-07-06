@@ -10,7 +10,6 @@ import {
   Headphones,
   HeartPulse,
   Languages,
-  Mic,
   PhoneCall,
   ShieldCheck,
   UserRoundCheck
@@ -29,6 +28,10 @@ interface WavRecorder {
   processor: ScriptProcessorNode;
   silentOutput: GainNode;
   sampleRate: number;
+}
+interface PreparedMicStream {
+  stream: MediaStream;
+  warning: string;
 }
 
 function StatCard({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
@@ -103,6 +106,38 @@ function createWavRecorder(audioContext: AudioContext, input: AudioNode): WavRec
   processor.connect(silentOutput);
   silentOutput.connect(audioContext.destination);
   return { chunks, input, processor, silentOutput, sampleRate: audioContext.sampleRate };
+}
+
+async function requestCleanMicrophoneStream(): Promise<PreparedMicStream> {
+  const enhancedConstraints: MediaStreamConstraints = {
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      channelCount: 1,
+      sampleRate: 16_000
+    }
+  };
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia(enhancedConstraints);
+    const settings = stream.getAudioTracks()[0]?.getSettings?.() ?? {};
+    const unavailable = [
+      settings.echoCancellation === false ? "echo cancellation" : "",
+      settings.noiseSuppression === false ? "noise suppression" : "",
+      settings.autoGainControl === false ? "auto gain control" : ""
+    ].filter(Boolean);
+    return {
+      stream,
+      warning: unavailable.length ? `Browser microphone cleanup is limited: ${unavailable.join(", ")} unavailable.` : ""
+    };
+  } catch (error) {
+    const fallbackStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const reason = error instanceof Error ? error.message : "enhanced constraints were rejected";
+    return {
+      stream: fallbackStream,
+      warning: `Browser rejected enhanced microphone cleanup (${reason}); using basic microphone capture.`
+    };
+  }
 }
 
 function stopRecorder(recorder: WavRecorder | null): Promise<Blob | null> {
@@ -216,7 +251,17 @@ function isPatientSegment(segment: TranscriptSegment): boolean {
 }
 
 function textWithoutSpeakerLabel(text: string): string {
-  return cleanTranscriptText(text).replace(/^(Agent|Patient):\s*/i, "");
+  let cleaned = cleanTranscriptText(text);
+  while (/^(Agent|Patient|Senior):\s*/i.test(cleaned)) {
+    cleaned = cleaned.replace(/^(Agent|Patient|Senior):\s*/i, "").trim();
+  }
+  return cleaned;
+}
+
+function displaySegmentText(segment: TranscriptSegment): string {
+  const role = segment.role === "Senior" ? "Patient" : segment.role || segment.speaker;
+  const text = textWithoutSpeakerLabel(segment.englishText || segment.text);
+  return role === "Agent" || role === "Patient" ? `${role}: ${text}` : cleanTranscriptText(segment.englishText || segment.text);
 }
 
 function wordCount(text: string): number {
@@ -255,11 +300,13 @@ function previousAgentReplyEnd(segments: TranscriptSegment[], patientSegmentInde
 function getEnglishTranscriptSegments(call: CallRecord): TranscriptSegment[] {
   const segments = call.transcriptSegments ?? [];
   const joinedSegmentEnglish = segments.map((segment) => cleanTranscriptText(segment.englishText || segment.text)).join("\n").trim();
+  const hasLiveRoles = segments.some((segment) => segment.role === "Agent" || segment.role === "Patient" || segment.speaker === "Agent" || segment.speaker === "Patient");
   const shouldUseCallTranscript =
-    !segments.length ||
-    !joinedSegmentEnglish ||
-    joinedSegmentEnglish === cleanTranscriptText(call.originalTranscript) ||
-    (looksNonEnglish(joinedSegmentEnglish) && !looksNonEnglish(call.englishTranscript));
+    !hasLiveRoles &&
+    (!segments.length ||
+      !joinedSegmentEnglish ||
+      joinedSegmentEnglish === cleanTranscriptText(call.originalTranscript) ||
+      (looksNonEnglish(joinedSegmentEnglish) && !looksNonEnglish(call.englishTranscript)));
 
   if (shouldUseCallTranscript) {
     const sentences = splitSentences(call.englishTranscript);
@@ -300,7 +347,7 @@ function getEnglishTranscriptSegments(call: CallRecord): TranscriptSegment[] {
 
 function buildTranscriptText(call: CallRecord, language: "original" | "english"): string {
   if (language === "english") {
-    return getEnglishTranscriptSegments(call).map((segment) => cleanTranscriptText(segment.englishText || segment.text)).filter(Boolean).join("\n") || call.englishTranscript;
+    return getEnglishTranscriptSegments(call).map(displaySegmentText).filter(Boolean).join("\n") || call.englishTranscript;
   }
   return call.originalTranscript.replace(/\bSenior:/g, "Patient:");
 }
@@ -323,7 +370,7 @@ function HighlightedEnglishTranscript({
   return (
     <div className="highlighted-transcript">
       {segments.map((segment, segmentIndex) => {
-        const text = cleanTranscriptText(segment.englishText || segment.text);
+        const text = displaySegmentText(segment);
         const patientIndex = patientSegments.findIndex((item) => item.segmentIndex === segmentIndex);
         const patientOnly = patientIndex >= 0;
         const matches = signals.filter((signal) => {
@@ -557,6 +604,26 @@ function speechMarkerDescription(call: CallRecord): string {
     : "Patient-only audio is not available for speech-marker scoring.";
 }
 
+function transcriptionAttemptSummary(call: CallRecord): string {
+  const attempts = call.transcriptionAttempts ?? [];
+  if (!attempts.length) {
+    return `${call.translationProvider}${call.translationFallbackUsed ? " fallback" : ""}`;
+  }
+  return attempts
+    .map((attempt) => {
+      const reason = attempt.reason ? ` (${attempt.reason})` : "";
+      return `${attempt.provider} ${attempt.status}${reason}`;
+    })
+    .join(" -> ");
+}
+
+function aiReviewNote(call: CallRecord): string | null {
+  if (!call.aiRiskFallbackUsed) return null;
+  return call.riskSignals?.length
+    ? "AI review used fallback logic; highlights may be incomplete."
+    : "Manual review required; AI risk highlights are unavailable for this call.";
+}
+
 function AgentsCall({
   seniors,
   selectedSeniorId,
@@ -572,7 +639,7 @@ function AgentsCall({
   const [callState, setCallState] = useState<CallState>("Ready");
   const [callMessage, setCallMessage] = useState("Ready to simulate a phone call through the website.");
   const [debugMessage, setDebugMessage] = useState("");
-  const [transcriptMessages, setTranscriptMessages] = useState<TranscriptMessage[]>([]);
+  const [audioCleanupWarning, setAudioCleanupWarning] = useState("");
   const [startedAt, setStartedAt] = useState<string | null>(null);
   const recorderRef = useRef<WavRecorder | null>(null);
   const patientRecorderRef = useRef<WavRecorder | null>(null);
@@ -647,7 +714,6 @@ function AgentsCall({
         timestamp: new Date().toISOString()
       };
       transcriptRef.current = [...transcriptRef.current, line];
-      setTranscriptMessages(transcriptRef.current);
       if (line.role === "Senior" && line.text) {
         conversation.sendContextualUpdate(nextReplyLanguageInstruction(line.text));
       }
@@ -658,14 +724,18 @@ function AgentsCall({
     setCallState("Connecting");
     setCallMessage("Connecting to Agents...");
     setDebugMessage("");
-    setTranscriptMessages([]);
+    setAudioCleanupWarning("");
     transcriptRef.current = [];
     const callStartedAt = new Date().toISOString();
     setStartedAt(callStartedAt);
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const preparedMic = await requestCleanMicrophoneStream();
+      const stream = preparedMic.stream;
       streamRef.current = stream;
+      if (preparedMic.warning) {
+        setAudioCleanupWarning(preparedMic.warning);
+      }
       const AudioContextConstructor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!AudioContextConstructor) throw new Error("Browser audio recording is not supported.");
       const audioContext = new AudioContextConstructor();
@@ -698,7 +768,6 @@ function AgentsCall({
           timestamp: new Date().toISOString()
         };
         transcriptRef.current = [fallbackLine];
-        setTranscriptMessages(transcriptRef.current);
         setCallState("Failed");
         setCallMessage("Agents unavailable. Transcript/audio can still be saved if needed.");
         return;
@@ -712,8 +781,7 @@ function AgentsCall({
           living_alone: selectedSenior.livingAlone,
           caregiver_contact: selectedSenior.caregiverContact,
           check_in_reason: "Routine living-alone wellbeing check-in",
-          baseline_reminder: "Use EarlyCare's stored personal baseline context without saying exact baseline metrics aloud.",
-          repeat_phrase: "Today I am safe at home and I can ask for help."
+          baseline_reminder: "Use EarlyCare's stored personal baseline context without saying exact baseline metrics aloud."
         }
       });
     } catch (error) {
@@ -760,6 +828,10 @@ function AgentsCall({
     }
   };
 
+  const busy = callState === "Connecting" || callState === "Saving" || callState === "Analysing";
+  const canEndAndSave = callState === "In call" || callState === "Failed";
+  const callVisualState = conversation.isSpeaking ? "speaking" : conversation.isListening ? "listening" : callState.toLowerCase().replace(/\s+/g, "-");
+
   return (
     <main className="call-only-grid">
       <section className="panel call-panel">
@@ -787,43 +859,33 @@ function AgentsCall({
             <span className="live-dot">{callState}</span>
           </div>
 
-          <div className="waveform" aria-label="voice waveform">
-            {Array.from({ length: 36 }).map((_, index) => (
-              <span key={index} style={{ height: `${18 + ((index * 17) % 58)}px` }} />
-            ))}
-          </div>
-
-          <div className="transcript">
-            {(transcriptMessages.length ? transcriptMessages : [{ role: "System", text: "Click Start call. The agent will begin talking once connected." }]).map(
-              (line, index) => (
-                <p
-                  className={line.role === "Senior" ? "senior-line" : line.role === "System" ? "system-line" : "agent-line"}
-                  key={`${line.role}-${line.text}-${index}`}
-                >
-                  {line.role === "Senior" ? "Patient" : line.role}: {line.text}
-                </p>
-              )
-            )}
+          <div className={`voice-visual ${callVisualState}`} aria-label="Live call voice visual">
+            <div className="voice-orb">
+              <span />
+              <span />
+              <span />
+            </div>
+            <button
+              aria-label={canEndAndSave ? "End and save call" : "Start call"}
+              className="call-orb-button"
+              disabled={busy}
+              onClick={() => void (canEndAndSave ? endAndSaveCall() : startCall())}
+              type="button"
+            >
+              <PhoneCall size={28} />
+            </button>
           </div>
 
           <div className="answer-box">
             <p>{callMessage}</p>
             {debugMessage ? <small>Debug: {debugMessage}</small> : null}
+            {audioCleanupWarning ? <small>{audioCleanupWarning}</small> : null}
             <small>
               SDK status: {conversation.status}. Mode: {conversation.mode}. {conversation.isSpeaking ? "Agent speaking." : conversation.isListening ? "Listening." : ""}
             </small>
           </div>
 
-          <div className="call-actions">
-            <button onClick={() => void startCall()} disabled={callState === "Connecting" || callState === "In call" || callState === "Saving" || callState === "Analysing"}>
-              <Mic size={18} />
-              Start call
-            </button>
-            <button onClick={() => void endAndSaveCall()} disabled={callState !== "In call" && callState !== "Failed"}>
-              <PhoneCall size={18} />
-              End & save
-            </button>
-          </div>
+          <p className="call-action-hint">{canEndAndSave ? "Tap the call button to end and save." : busy ? "EarlyCare is preparing the call." : "Tap the call button to start."}</p>
         </div>
       </section>
     </main>
@@ -943,10 +1005,10 @@ function OfficerDashboard({
                   <div>
                     <strong>{latestSignal.aiRiskFallbackUsed ? "Manual review required" : "AI review completed"}</strong>
                     <p>
-                      Translation provider: {latestSignal.translationProvider}
-                      {latestSignal.translationFallbackUsed ? " (fallback used)" : ""}. Audio recording:{" "}
+                      Transcript pipeline: {transcriptionAttemptSummary(latestSignal)}. Audio recording:{" "}
                       {latestSignal.audioAvailable ? "saved" : "not available"}.
                     </p>
+                    {aiReviewNote(latestSignal) ? <p>{aiReviewNote(latestSignal)}</p> : null}
                   </div>
                 </div>
               ) : null}
@@ -979,8 +1041,7 @@ function OfficerDashboard({
                         <strong>{new Date(call.completedAt).toLocaleString()}</strong>
                       </div>
                       <small>
-                        {call.translationProvider}
-                        {call.translationFallbackUsed ? " fallback" : ""} · audio {call.audioAvailable ? "saved" : "missing"} · patient audio{" "}
+                        {transcriptionAttemptSummary(call)} · audio {call.audioAvailable ? "saved" : "missing"} · patient audio{" "}
                         {call.patientAudioAvailable ? "saved" : "missing"} · agent voice {call.agentAudioCaptured ? "captured" : "not confirmed"}
                       </small>
                     </div>
@@ -992,6 +1053,7 @@ function OfficerDashboard({
                         <strong>{speechMarkerTitle(call)}:</strong> {speechMarkerDescription(call)}
                       </p>
                     ) : null}
+                    {aiReviewNote(call) ? <p className="metric-note">{aiReviewNote(call)}</p> : null}
 
                     <div className="recording-player">
                       <h4>Original recording</h4>

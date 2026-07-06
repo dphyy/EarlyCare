@@ -154,26 +154,42 @@ def _write_wav_mono(audio_path: Path, audio: np.ndarray, sample_rate: int) -> No
         wav_file.writeframes(samples.tobytes())
 
 
-def _trim_speech_edges(audio: np.ndarray, sample_rate: int, threshold: float = 0.012, padding_seconds: float = 0.08) -> np.ndarray:
+def _voiced_clips(
+    audio: np.ndarray,
+    sample_rate: int,
+    threshold: float = 0.012,
+    padding_seconds: float = 0.04,
+    merge_gap_seconds: float = 0.18,
+    min_clip_seconds: float = 0.12,
+) -> list[np.ndarray]:
     if not len(audio):
-        return audio
+        return []
     frame_size = max(1, int(sample_rate * 0.03))
     hop = max(1, int(sample_rate * 0.01))
-    voiced: list[tuple[int, int]] = []
+    pad = int(sample_rate * padding_seconds)
+    voiced_ranges: list[tuple[int, int]] = []
     for start in range(0, max(1, len(audio) - frame_size + 1), hop):
         frame = audio[start : start + frame_size]
         if len(frame) and float(np.sqrt(np.mean(np.square(frame)))) >= threshold:
-            voiced.append((start, min(len(audio), start + frame_size)))
-    if not voiced:
-        return audio[:0]
-    pad = int(sample_rate * padding_seconds)
-    start = max(0, voiced[0][0] - pad)
-    end = min(len(audio), voiced[-1][1] + pad)
-    return audio[start:end]
+            voiced_ranges.append((max(0, start - pad), min(len(audio), start + frame_size + pad)))
+    if not voiced_ranges:
+        return []
+
+    merge_gap = int(sample_rate * merge_gap_seconds)
+    merged: list[tuple[int, int]] = []
+    for start, end in voiced_ranges:
+        if not merged or start - merged[-1][1] > merge_gap:
+            merged.append((start, end))
+        else:
+            previous_start, previous_end = merged[-1]
+            merged[-1] = (previous_start, max(previous_end, end))
+
+    min_samples = int(sample_rate * min_clip_seconds)
+    return [audio[start:end] for start, end in merged if end - start >= min_samples]
 
 
 def _transcript_to_text(messages: list[TranscriptMessage]) -> str:
-    return "\n".join(f"{'Patient' if message.role == 'Senior' else message.role}: {message.text}" for message in messages)
+    return "\n".join(_role_line(_display_role(message.role), message.text) for message in messages)
 
 
 def _display_role(role: str) -> str:
@@ -184,8 +200,35 @@ def _clean_transcript_text(text: str) -> str:
     return clean_transcript_text(text)
 
 
+def _strip_speaker_labels(text: str) -> str:
+    cleaned = _clean_transcript_text(text)
+    while True:
+        stripped = re.sub(r"^(?:Agent|Patient|Senior)\s*:\s*", "", cleaned, flags=re.IGNORECASE).strip()
+        if stripped == cleaned:
+            return stripped
+        cleaned = stripped
+
+
+def _role_line(role: str, text: str) -> str:
+    return f"{_display_role(role)}: {_strip_speaker_labels(text)}"
+
+
+def _normalize_role_labeled_transcript(text: str) -> str:
+    lines: list[str] = []
+    for raw_line in text.splitlines():
+        cleaned = _clean_transcript_text(raw_line)
+        match = re.match(r"^(Agent|Patient|Senior)\s*:\s*(.*)$", cleaned, flags=re.IGNORECASE)
+        if not match:
+            if cleaned:
+                lines.append(cleaned)
+            continue
+        role = _display_role(match.group(1).capitalize())
+        lines.append(_role_line(role, match.group(2)))
+    return "\n".join(line for line in lines if line.strip())
+
+
 def _clean_messages(messages: list[TranscriptMessage]) -> list[TranscriptMessage]:
-    return [message.model_copy(update={"text": _clean_transcript_text(message.text)}) for message in messages]
+    return [message.model_copy(update={"text": _strip_speaker_labels(message.text)}) for message in messages]
 
 
 def _word_count(text: str) -> int:
@@ -193,7 +236,7 @@ def _word_count(text: str) -> int:
 
 
 def _estimated_utterance_seconds(text: str) -> float:
-    words = _word_count(re.sub(r"^(Agent|Patient):\s*", "", text))
+    words = _word_count(_strip_speaker_labels(text))
     return round(min(12, max(0.9, words / 2.4)), 3)
 
 
@@ -251,19 +294,13 @@ def _estimate_current_speech_profile(
 
     avg_pause_ms = round(sum(pause_values) / len(pause_values), 1) if pause_values else 0
     response_latency_ms = round(sum(latency_values) / len(latency_values), 1) if latency_values else 0
-    repeat_phrase = "today i am safe at home and i can ask for help"
-    combined = " ".join(message.text.lower() for message in senior_messages)
-    phrase_accuracy = 0.96 if repeat_phrase in combined else 0
-    if not phrase_accuracy and timed_segments:
-        segment_text = " ".join((segment.englishText or segment.originalText or segment.text).lower() for segment in timed_segments)
-        phrase_accuracy = 0.96 if repeat_phrase in segment_text else 0
 
     return SpeechProfile(
         speechRate=speech_rate,
         avgPauseMs=avg_pause_ms,
         responseLatencyMs=response_latency_ms,
         pitchVariability=round(min(1, len(set(segment_starts)) / 20), 2) if segment_starts else 0,
-        phraseAccuracy=phrase_accuracy,
+        phraseAccuracy=1.0,
         updatedAt=completed_at or _now_iso(),
     )
 
@@ -298,19 +335,23 @@ def _role_labeled_english_transcript(messages: list[TranscriptMessage], language
         translated = _translate_message_text(language, message.text)
         if translated and translated != message.text:
             translated_any = True
-        lines.append(f"{_display_role(message.role)}: {translated or message.text}")
+        lines.append(_role_line(_display_role(message.role), translated or message.text))
 
     if translated_any or not fallback_translation:
         return "\n".join(lines)
+    if _has_role_labeled_lines(fallback_translation):
+        return _normalize_role_labeled_transcript(fallback_translation)
 
     fallback_sentences = _split_sentences(fallback_translation)
     if not fallback_sentences:
         return "\n".join(lines)
     spoken_messages = [message for message in messages if message.role != "System" and message.text.strip()]
+    if len(fallback_sentences) < len(spoken_messages):
+        return "\n".join(lines)
     mapped_lines: list[str] = []
     for index, message in enumerate(spoken_messages):
         sentence_index = min(len(fallback_sentences) - 1, round(index * (len(fallback_sentences) - 1) / max(1, len(spoken_messages) - 1)))
-        mapped_lines.append(f"{_display_role(message.role)}: {fallback_sentences[sentence_index]}")
+        mapped_lines.append(_role_line(_display_role(message.role), fallback_sentences[sentence_index]))
     return "\n".join(mapped_lines)
 
 
@@ -336,12 +377,34 @@ def _role_labeled_original_transcript(messages: list[TranscriptMessage], fallbac
         if len(ordered_speakers) <= len(role_order):
             speaker_roles = {speaker: role_order[index] for index, speaker in enumerate(ordered_speakers)}
             return "\n".join(
-                f"{speaker_roles.get(speaker, 'Patient')}: {_clean_transcript_text(text)}"
+                _role_line(speaker_roles.get(speaker, "Patient"), text)
                 for speaker, text in speaker_parts
                 if _clean_transcript_text(text)
             )
 
     return _transcript_to_text(spoken_messages)
+
+
+def _has_explicit_agent_patient_roles(segments: list[TranscriptSegment]) -> bool:
+    roles = {
+        role
+        for segment in segments
+        for role in [segment.role, segment.speaker]
+        if role in {"Agent", "Patient"}
+    }
+    text_roles = {
+        label
+        for segment in segments
+        for text in [segment.englishText or segment.text]
+        for label in ["Agent", "Patient"]
+        if text.startswith(f"{label}:")
+    }
+    return {"Agent", "Patient"}.issubset(roles | text_roles)
+
+
+def _has_role_labeled_lines(text: str) -> bool:
+    labels = {match.group(1) for match in re.finditer(r"(?m)^\s*(Agent|Patient):", text)}
+    return {"Agent", "Patient"}.issubset(labels)
 
 
 def _role_segments_from_messages(messages: list[TranscriptMessage], started_at: str, english_transcript: str) -> list[TranscriptSegment]:
@@ -354,7 +417,7 @@ def _role_segments_from_messages(messages: list[TranscriptMessage], started_at: 
     for index, message in enumerate(spoken_messages):
         line = english_lines[index] if index < len(english_lines) else f"{_display_role(message.role)}: {message.text}"
         role = _display_role(message.role)
-        english_text = re.sub(r"^(Agent|Patient):\s*", "", line).strip()
+        english_text = _strip_speaker_labels(line)
         event_time = _relative_seconds(message.timestamp, started_at)
         start = event_time
         end = None
@@ -371,9 +434,9 @@ def _role_segments_from_messages(messages: list[TranscriptMessage], started_at: 
             end = max(event_time, estimated_end)
         segments.append(
             TranscriptSegment(
-                text=f"{role}: {english_text}",
-                originalText=f"{role}: {message.text}",
-                englishText=f"{role}: {english_text}",
+                text=_role_line(role, english_text),
+                originalText=_role_line(role, message.text),
+                englishText=_role_line(role, english_text),
                 startTimeSeconds=start,
                 endTimeSeconds=end,
                 role=role,
@@ -587,6 +650,79 @@ def _is_patient_segment(segment: TranscriptSegment) -> bool:
     return segment.role == "Patient" or segment.speaker == "Patient" or text.startswith("Patient:")
 
 
+def _is_agent_segment(segment: TranscriptSegment) -> bool:
+    text = segment.englishText or segment.originalText or segment.text
+    return segment.role == "Agent" or segment.speaker == "Agent" or text.startswith("Agent:")
+
+
+def _segment_start(segment: TranscriptSegment) -> float | None:
+    if segment.startTimeSeconds is None:
+        return None
+    return max(0.0, float(segment.startTimeSeconds))
+
+
+def _segment_end(segment: TranscriptSegment, raw_duration: float) -> float | None:
+    start = _segment_start(segment)
+    if start is None:
+        return None
+    if segment.endTimeSeconds is not None and float(segment.endTimeSeconds) > start:
+        return min(raw_duration, float(segment.endTimeSeconds))
+    estimated_end = start + _estimated_utterance_seconds(segment.englishText or segment.originalText or segment.text)
+    return min(raw_duration, estimated_end)
+
+
+def _slice_voiced_clips(audio: np.ndarray, sample_rate: int, start_seconds: float, end_seconds: float) -> list[np.ndarray]:
+    if end_seconds <= start_seconds:
+        return []
+    start_index = max(0, int(start_seconds * sample_rate))
+    end_index = min(len(audio), int(end_seconds * sample_rate))
+    return _voiced_clips(audio[start_index:end_index], sample_rate)
+
+
+def _agent_answer_windows(segments: list[TranscriptSegment], raw_duration: float) -> list[tuple[float, float]]:
+    timed_segments = sorted(
+        [segment for segment in segments if _segment_start(segment) is not None],
+        key=lambda item: float(item.startTimeSeconds or 0),
+    )
+    windows: list[tuple[float, float]] = []
+    for index, segment in enumerate(timed_segments):
+        if not _is_agent_segment(segment):
+            continue
+        start = _segment_end(segment, raw_duration)
+        if start is None:
+            continue
+        next_turn_start = next(
+            (_segment_start(candidate) for candidate in timed_segments[index + 1 :] if _segment_start(candidate) is not None),
+            None,
+        )
+        if next_turn_start is not None:
+            start = min(start, next_turn_start)
+        next_agent_start = next(
+            (_segment_start(candidate) for candidate in timed_segments[index + 1 :] if _is_agent_segment(candidate) and _segment_start(candidate) is not None),
+            None,
+        )
+        end = next_agent_start if next_agent_start is not None else raw_duration
+        if end > start:
+            windows.append((start, min(raw_duration, end)))
+    return windows
+
+
+def _patient_segment_windows(segments: list[TranscriptSegment], raw_duration: float) -> list[tuple[float, float]]:
+    windows: list[tuple[float, float]] = []
+    for segment in segments:
+        if not _is_patient_segment(segment):
+            continue
+        start = _segment_start(segment)
+        end = _segment_end(segment, raw_duration)
+        if start is None or end is None:
+            continue
+        start = max(0.0, start - 0.15)
+        end = min(raw_duration, end + 0.25)
+        if end > start:
+            windows.append((start, end))
+    return windows
+
+
 def _build_patient_speech_audio(
     patient_audio_path: Path | None,
     segments: list[TranscriptSegment],
@@ -604,37 +740,40 @@ def _build_patient_speech_audio(
     patient_segments = [
         segment
         for segment in segments
-        if _is_patient_segment(segment) and segment.startTimeSeconds is not None and segment.endTimeSeconds is not None
+        if _is_patient_segment(segment) and segment.startTimeSeconds is not None
     ]
     speech_parts: list[np.ndarray] = []
-    for segment in patient_segments:
-        start_seconds = max(0.0, float(segment.startTimeSeconds or 0) - 0.15)
-        end_seconds = min(raw_duration, float(segment.endTimeSeconds or 0) + 0.25)
-        if end_seconds <= start_seconds:
-            continue
-        start_index = max(0, int(start_seconds * sample_rate))
-        end_index = min(len(audio), int(end_seconds * sample_rate))
-        trimmed = _trim_speech_edges(audio[start_index:end_index], sample_rate)
-        if len(trimmed):
-            speech_parts.append(trimmed)
 
-    fallback_used = False
+    extraction_mode = "agent-window-vad"
+    windows = _agent_answer_windows(segments, raw_duration)
+    for start_seconds, end_seconds in windows:
+        speech_parts.extend(_slice_voiced_clips(audio, sample_rate, start_seconds, end_seconds))
+
     if not speech_parts:
-        fallback_used = True
-        warnings.append("Patient speech extraction used energy trimming because patient segment timings were unavailable or silent.")
-        trimmed = _trim_speech_edges(audio, sample_rate)
-        if len(trimmed):
-            speech_parts.append(trimmed)
+        extraction_mode = "patient-segment-vad"
+        windows = _patient_segment_windows(segments, raw_duration)
+        for start_seconds, end_seconds in windows:
+            speech_parts.extend(_slice_voiced_clips(audio, sample_rate, start_seconds, end_seconds))
+        if windows:
+            warnings.append("Patient speech extraction used patient segment VAD because agent-bounded windows were unavailable or silent.")
+
+    if not speech_parts:
+        extraction_mode = "full-audio-vad"
+        windows = [(0.0, raw_duration)] if raw_duration > 0 else []
+        warnings.append("Patient speech extraction used full-audio VAD because turn timings were unavailable.")
+        speech_parts.extend(_voiced_clips(audio, sample_rate))
 
     if not speech_parts:
         return None, warnings + ["Patient speech extraction found no usable speech audio."], {
             "rawPatientAudioDurationSeconds": round(raw_duration, 3),
             "patientSpeechDurationSeconds": 0,
             "patientSpeechTurnCount": len(patient_segments),
-            "patientSpeechExtractionMode": "fallback-energy" if fallback_used else "timed-segments",
+            "patientSpeechWindowCount": len(windows),
+            "patientSpeechVoicedClipCount": 0,
+            "patientSpeechExtractionMode": extraction_mode,
         }
 
-    gap = np.zeros(int(sample_rate * 0.08), dtype=np.float32)
+    gap = np.zeros(int(sample_rate * 0.04), dtype=np.float32)
     combined_parts: list[np.ndarray] = []
     for index, part in enumerate(speech_parts):
         if index:
@@ -648,8 +787,10 @@ def _build_patient_speech_audio(
         "patientSpeechDurationSeconds": round(speech_duration, 3),
         "patientSpeechRemovedSeconds": round(max(0, raw_duration - speech_duration), 3),
         "patientSpeechRemovalRatio": round(max(0, raw_duration - speech_duration) / max(raw_duration, 0.001), 4),
-        "patientSpeechTurnCount": len(speech_parts),
-        "patientSpeechExtractionMode": "fallback-energy" if fallback_used else "timed-segments",
+        "patientSpeechTurnCount": len(patient_segments) or len(speech_parts),
+        "patientSpeechWindowCount": len(windows),
+        "patientSpeechVoicedClipCount": len(speech_parts),
+        "patientSpeechExtractionMode": extraction_mode,
     }
     return output_path, warnings, summary
 
@@ -922,23 +1063,25 @@ async def save_call(
         )
     else:
         original_transcript = _clean_transcript_text(_role_labeled_original_transcript(messages, translation.transcript or dialogue_transcript))
-        english_transcript = _clean_transcript_text(translation.translation or translation.transcript or original_transcript)
+        provider_english = _clean_transcript_text(translation.translation or translation.transcript or original_transcript)
+        if _has_role_labeled_lines(provider_english):
+            english_transcript = provider_english
+        else:
+            english_transcript = _clean_transcript_text(
+                _role_labeled_english_transcript(messages, senior.preferredLanguage, provider_english)
+            )
     for segment in translation.segments:
         segment.text = _clean_transcript_text(segment.text)
         segment.originalText = _clean_transcript_text(segment.originalText or segment.text)
         segment.englishText = _clean_transcript_text(segment.englishText or segment.text)
     translation.segments = _sync_english_segments(translation.segments, original_transcript, english_transcript)
-    needs_role_support = translation.fallbackUsed or not any(
-        segment.role == "Patient" or segment.speaker == "Patient" or (segment.englishText or segment.text).startswith("Patient:")
-        for segment in translation.segments
-    )
     role_source_transcript = (
         english_transcript
         if translation.fallbackUsed
         else _role_labeled_english_transcript(messages, senior.preferredLanguage, english_transcript)
     )
-    role_segments = _role_segments_from_messages(messages, startedAt, role_source_transcript) if needs_role_support else []
-    if role_segments:
+    role_segments = _role_segments_from_messages(messages, startedAt, role_source_transcript)
+    if role_segments and (translation.fallbackUsed or not _has_explicit_agent_patient_roles(translation.segments)):
         translation.segments = role_segments
     elif not any(segment.startTimeSeconds is not None for segment in translation.segments):
         timed_segments = _timed_segments_from_messages(messages, startedAt, english_transcript)
@@ -985,6 +1128,7 @@ async def save_call(
         transcriptMessages=messages,
         translationProvider=translation.provider,
         translationFallbackUsed=translation.fallbackUsed,
+        transcriptionAttempts=translation.attempts,
         audioFilePath=audio_file_path,
         audioUrl=audio_url,
         audioAvailable=audio_file_path is not None,

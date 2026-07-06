@@ -62,6 +62,9 @@ backend/models/**/*.bak
 
 # OS/editor noise
 .DS_Store
+._*
+.AppleDouble
+.LSOverride
 .idea/
 .vscode/
 *.local

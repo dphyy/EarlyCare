@@ -74,6 +74,12 @@ export interface TranscriptSegment {
   speaker?: string | null;
 }
 
+export interface TranscriptionAttempt {
+  provider: string;
+  status: "success" | "failed" | "skipped";
+  reason?: string | null;
+}
+
 export interface RiskSignal {
   id: string;
   label: string;
@@ -99,6 +105,7 @@ export interface CallRecord {
   transcriptMessages: TranscriptMessage[];
   translationProvider: string;
   translationFallbackUsed: boolean;
+  transcriptionAttempts?: TranscriptionAttempt[];
   audioFilePath?: string | null;
   audioUrl?: string | null;
   audioAvailable: boolean;

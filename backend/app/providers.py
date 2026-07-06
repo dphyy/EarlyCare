@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from app.models import ProviderResult, TranscriptSegment
+from app.models import ProviderResult, TranscriptSegment, TranscriptionAttempt
 
 
 GOOGLE_TRANSLATE_URL = "https://translation.googleapis.com/language/translate/v2"
@@ -182,6 +182,13 @@ def _auth_headers(api_key: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {api_key}", "X-API-Key": api_key, "Content-Type": "application/json"}
 
 
+def _safe_error_reason(exc: Exception) -> str:
+    reason = str(exc).strip() or exc.__class__.__name__
+    reason = re.sub(r"(?i)(api[_ -]?key|authorization|x-api-key|xi-api-key)[^,\n;]*", r"\1 redacted", reason)
+    reason = re.sub(r"Bearer\s+[A-Za-z0-9._~+/=-]+", "Bearer redacted", reason)
+    return reason[:240]
+
+
 class MeralionProvider:
     name = "meralion"
 
@@ -348,13 +355,16 @@ def transcribe_with_fallback(language: str, audio_hint: str, audio_path: Path | 
     providers = [MeralionProvider(), ElevenLabsSpeechToTextProvider(), GoogleTranslateProvider(), TranscriptFallbackProvider()]
     last_error: Exception | None = None
     current_hint = clean_transcript_text(audio_hint)
+    attempts: list[TranscriptionAttempt] = []
 
     for provider in providers:
         try:
             result = provider.transcribe(language=language, audio_hint=current_hint, audio_path=audio_path)
+            attempts.append(TranscriptionAttempt(provider=result.provider, status="success"))
             if provider.name == "elevenlabs-stt" and language.lower() != "english":
                 try:
                     translated = GoogleTranslateProvider().transcribe(language=language, audio_hint=result.transcript, audio_path=None)
+                    attempts.append(TranscriptionAttempt(provider=translated.provider, status="success"))
                     segments = result.segments or translated.segments
                     if len(segments) == 1:
                         segments[0].englishText = translated.translation
@@ -367,12 +377,24 @@ def transcribe_with_fallback(language: str, audio_hint: str, audio_path: Path | 
                             "provider": f"{result.provider}+{translated.provider}",
                             "confidence": min(result.confidence, translated.confidence),
                             "segments": segments,
+                            "attempts": attempts,
                         }
                     )
                 except Exception as exc:
+                    attempts.append(
+                        TranscriptionAttempt(provider=GoogleTranslateProvider.name, status="failed", reason=_safe_error_reason(exc))
+                    )
                     last_error = exc
-            return result
+            if provider.name == "google-translate" and language.lower() == "english":
+                attempts[-1] = TranscriptionAttempt(
+                    provider=provider.name,
+                    status="skipped",
+                    reason="Google Translate fallback skipped for English transcript",
+                )
+            return result.model_copy(update={"attempts": attempts})
         except Exception as exc:
+            status = "skipped" if provider.name == "google-translate" and language.lower() == "english" else "failed"
+            attempts.append(TranscriptionAttempt(provider=provider.name, status=status, reason=_safe_error_reason(exc)))
             last_error = exc
 
     raise RuntimeError(f"No ASR or translation provider available: {last_error}")

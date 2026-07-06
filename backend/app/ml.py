@@ -40,7 +40,6 @@ def assess_speech_deviation(baseline: SpeechProfile, request: SpeechDeviationReq
     pause_delta = abs(current.avgPauseMs - baseline.avgPauseMs) / max(baseline.avgPauseMs, 1)
     latency_delta = abs(current.responseLatencyMs - baseline.responseLatencyMs) / max(baseline.responseLatencyMs, 1)
     pitch_delta = abs(current.pitchVariability - baseline.pitchVariability) / max(baseline.pitchVariability, 0.1)
-    phrase_delta = max(0, baseline.phraseAccuracy - current.phraseAccuracy)
 
     speech_deviation = _score(
         embedding_delta * 0.45
@@ -48,14 +47,12 @@ def assess_speech_deviation(baseline: SpeechProfile, request: SpeechDeviationReq
         + pause_delta * 24
         + latency_delta * 18
         + pitch_delta * 20
-        + phrase_delta * 35
     )
 
     parkinsons_watch = _score(
         (22 if current.speechRate < baseline.speechRate * 0.8 else 0)
         + (24 if current.avgPauseMs > baseline.avgPauseMs * 1.55 else 0)
         + (22 if current.pitchVariability < baseline.pitchVariability * 0.7 else 0)
-        + (14 if current.phraseAccuracy < baseline.phraseAccuracy * 0.88 else 0)
         + min(18, speech_deviation * 0.22)
     )
 

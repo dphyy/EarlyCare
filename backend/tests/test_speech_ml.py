@@ -130,7 +130,7 @@ class SpeechMlTests(unittest.TestCase):
         self.assertIsNotNone(result.features_summary)
 
     @unittest.skipUnless(importlib.util.find_spec("joblib"), "joblib is optional")
-    def test_long_conversational_audio_is_not_scored_confidently(self) -> None:
+    def test_long_patient_speech_audio_is_scored_in_chunks(self) -> None:
         import joblib  # type: ignore
 
         with TemporaryDirectory() as temp_dir:
@@ -145,9 +145,11 @@ class SpeechMlTests(unittest.TestCase):
 
             result = predict_speech_marker(audio_path, artifacts)
 
-        self.assertIsNone(result.probability)
-        self.assertTrue(any("long conversational audio" in warning.lower() for warning in result.warnings))
-        self.assertEqual(result.features_summary["speechModelUsable"], "false")
+        self.assertEqual(result.probability, 0.8)
+        self.assertFalse(any("long conversational audio" in warning.lower() for warning in result.warnings))
+        self.assertTrue(any("scored" in warning.lower() and "chunks" in warning.lower() for warning in result.warnings))
+        self.assertEqual(result.features_summary["speechModelUsable"], "true")
+        self.assertGreater(result.features_summary["scoredChunkCount"], 1)
 
     @unittest.skipUnless(
         all(importlib.util.find_spec(package) for package in ["pandas", "sklearn", "joblib"]),
