@@ -1,4 +1,5 @@
 export type RiskLevel = "Green" | "Watch" | "Amber" | "Red";
+export type SafeguardLevel = "None" | "Support" | "Urgent" | "Emergency";
 export type CheckInStatus = "Checked in" | "Missed" | "Needs follow-up" | "Urgent";
 export type Language = "English" | "Mandarin" | "Malay" | "Tamil" | "Singlish/Dialect";
 
@@ -92,6 +93,14 @@ export interface RiskSignal {
   endTimeSeconds?: number | null;
 }
 
+export interface CrisisResource {
+  name: string;
+  phone?: string | null;
+  text?: string | null;
+  url?: string | null;
+  description: string;
+}
+
 export interface CallRecord {
   id: string;
   seniorId: string;
@@ -126,6 +135,13 @@ export interface CallRecord {
   riskSignals?: RiskSignal[];
   aiRiskFallbackUsed?: boolean;
   aiRiskFailureReason?: string | null;
+  safeguardReviewAvailable?: boolean;
+  safeguardLevel?: SafeguardLevel;
+  safeguardCategory?: string | null;
+  safeguardEvidence?: string[];
+  safeguardRecommendedAction?: string | null;
+  safeguardResources?: CrisisResource[];
+  safeguardFailureReason?: string | null;
   riskAssessment: RiskAssessment;
   recommendedAction: string;
 }

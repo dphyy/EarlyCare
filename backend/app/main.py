@@ -20,9 +20,11 @@ from app.ml import assess_speech_deviation, extract_demo_embedding_note
 from app.models import (
     CallRecord,
     CheckInSession,
+    CrisisResource,
     ProviderResult,
     RiskAssessment,
     RiskSignal,
+    SafeguardLevel,
     SavedCallResponse,
     Senior,
     SpeechProfile,
@@ -50,6 +52,35 @@ CONTENT_TYPE_AUDIO_EXTENSIONS = {
     "audio/wave": ".wav",
     "audio/x-wav": ".wav",
     "audio/webm": ".webm",
+}
+SINGAPORE_CRISIS_RESOURCES = [
+    CrisisResource(
+        name="Emergency medical services",
+        phone="995",
+        description="Call for immediate medical danger or urgent ambulance support in Singapore.",
+    ),
+    CrisisResource(
+        name="Police emergency",
+        phone="999",
+        description="Call if there is immediate danger, violence, or urgent police assistance is needed in Singapore.",
+    ),
+    CrisisResource(
+        name="Samaritans of Singapore hotline",
+        phone="1767",
+        description="24-hour emotional support and crisis hotline in Singapore.",
+    ),
+    CrisisResource(
+        name="Samaritans of Singapore CareText",
+        text="WhatsApp 9151 1767",
+        url="https://www.sos.org.sg/",
+        description="24-hour WhatsApp text support for emotional support or crisis-related concerns.",
+    ),
+]
+SAFEGUARD_LEVEL_RISK: dict[str, str] = {
+    "None": "Green",
+    "Support": "Watch",
+    "Urgent": "Amber",
+    "Emergency": "Red",
 }
 
 app.add_middleware(
@@ -632,6 +663,33 @@ def _risk_schema() -> dict[str, object]:
     }
 
 
+def _safeguard_schema() -> dict[str, object]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "level": {"type": "string", "enum": ["None", "Support", "Urgent", "Emergency"]},
+            "category": {
+                "type": ["string", "null"],
+                "enum": [
+                    "emotional_distress",
+                    "self_harm_or_suicidal_ideation",
+                    "abuse_or_neglect",
+                    "medical_emergency",
+                    "unsafe_environment",
+                    "other",
+                    None,
+                ],
+            },
+            "summary": {"type": "string"},
+            "recommendedAction": {"type": ["string", "null"]},
+            "evidence": {"type": "array", "items": {"type": "string"}},
+            "resourceNames": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["level", "category", "summary", "recommendedAction", "evidence", "resourceNames"],
+    }
+
+
 def _extract_openai_text(payload: dict[str, object]) -> str:
     output_text = payload.get("output_text")
     if isinstance(output_text, str):
@@ -700,6 +758,10 @@ def _attach_segment_timestamps(signals: list[RiskSignal], segments: list[Transcr
 def _is_patient_segment(segment: TranscriptSegment) -> bool:
     text = segment.englishText or segment.originalText or segment.text
     return segment.role == "Patient" or segment.speaker == "Patient" or text.startswith("Patient:")
+
+
+def _patient_review_segments(segments: list[TranscriptSegment]) -> list[TranscriptSegment]:
+    return [segment for segment in segments if _is_patient_segment(segment)]
 
 
 def _is_agent_segment(segment: TranscriptSegment) -> bool:
@@ -865,16 +927,134 @@ def _speech_model_review(audio_path: Path | None) -> tuple[str | None, float | N
         return None, None, [f"Speech model review unavailable: {detail}"], None
 
 
+def _manual_safeguard_review(failure_reason: str | None = None) -> tuple[bool, SafeguardLevel, str | None, list[str], str | None, list[CrisisResource], str | None]:
+    return False, "None", None, [], None, [], failure_reason
+
+
+def _normalize_match_text(text: str) -> str:
+    return re.sub(r"\s+", " ", clean_transcript_text(text).lower()).strip()
+
+
+def _validated_safeguard_evidence(evidence: list[str], segments: list[TranscriptSegment]) -> list[str]:
+    patient_texts = [_normalize_match_text(segment.englishText or segment.text) for segment in segments]
+    validated: list[str] = []
+    for item in evidence:
+        cleaned = clean_transcript_text(str(item))
+        normalized = _normalize_match_text(cleaned)
+        if not normalized:
+            continue
+        if any(normalized in patient_text or patient_text in normalized for patient_text in patient_texts):
+            validated.append(cleaned)
+    return validated
+
+
+def _selected_safeguard_resources(level: SafeguardLevel, resource_names: list[str]) -> list[CrisisResource]:
+    if level == "None":
+        return []
+    by_name = {resource.name.lower(): resource for resource in SINGAPORE_CRISIS_RESOURCES}
+    selected: list[CrisisResource] = []
+    for name in resource_names:
+        resource = by_name.get(str(name).lower())
+        if resource and resource.name not in {item.name for item in selected}:
+            selected.append(resource)
+
+    if selected:
+        return selected
+    if level == "Emergency":
+        return SINGAPORE_CRISIS_RESOURCES[:3]
+    return SINGAPORE_CRISIS_RESOURCES[2:]
+
+
+def _risk_level_with_safeguard(risk_level: str, safeguard_level: SafeguardLevel) -> str:
+    order = {"Green": 0, "Watch": 1, "Amber": 2, "Red": 3}
+    safeguard_risk = SAFEGUARD_LEVEL_RISK.get(safeguard_level, "Green")
+    return risk_level if order.get(risk_level, 0) >= order.get(safeguard_risk, 0) else safeguard_risk
+
+
+def _openai_safeguard_review(
+    segments: list[TranscriptSegment],
+) -> tuple[bool, SafeguardLevel, str | None, list[str], str | None, list[CrisisResource], str | None]:
+    patient_segments = _patient_review_segments(segments)
+    if not patient_segments:
+        return True, "None", None, [], None, [], None
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return _manual_safeguard_review("OPENAI_API_KEY is not configured.")
+
+    patient_transcript = "\n".join(segment.englishText or segment.text for segment in patient_segments)
+    resources_payload = [resource.model_dump() for resource in SINGAPORE_CRISIS_RESOURCES]
+
+    try:
+        response = httpx.post(
+            "https://api.openai.com/v1/responses",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": os.getenv("OPENAI_SAFEGUARD_MODEL", os.getenv("OPENAI_MODEL", "gpt-4o-mini")),
+                "input": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are an EarlyCare safeguard classifier for elderly wellbeing calls in Singapore. "
+                            "Classify only what the patient says. Ignore agent questions, examples, safety instructions, and summaries. "
+                            "Do not diagnose, counsel, or write a script for the agent. Use None when the patient denies distress, "
+                            "the evidence is ambiguous, or the only concerning wording appears in an agent turn. "
+                            "Use Support for non-emergency emotional distress, loneliness, grief, or anxiety where supportive outreach is appropriate. "
+                            "Use Urgent for serious distress, self-harm ideation without immediate danger, abuse or neglect concern, or inability to stay safe without prompt human follow-up. "
+                            "Use Emergency for immediate danger, stated intent or plan to self-harm, ongoing attempt, violence, or urgent medical danger. "
+                            "Evidence must be exact English patient text from the supplied patient sentences. Select resourceNames only from the supplied resource list."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "patientOnlyTranscript": patient_transcript,
+                                "sentences": [
+                                    {
+                                        "sentenceIndex": index,
+                                        "englishText": segment.englishText or segment.text,
+                                        "startTimeSeconds": segment.startTimeSeconds,
+                                        "endTimeSeconds": segment.endTimeSeconds,
+                                    }
+                                    for index, segment in enumerate(patient_segments)
+                                ],
+                                "availableResources": resources_payload,
+                            }
+                        ),
+                    },
+                ],
+                "text": {
+                    "format": {
+                        "type": "json_schema",
+                        "name": "earlycare_safeguard_review",
+                        "schema": _safeguard_schema(),
+                        "strict": True,
+                    }
+                },
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        result = json.loads(_extract_openai_text(response.json()))
+        level: SafeguardLevel = result.get("level", "None")
+        category = result.get("category")
+        evidence = _validated_safeguard_evidence(result.get("evidence", []), patient_segments)
+        if level != "None" and not evidence:
+            return True, "None", None, [], None, [], None
+        resources = _selected_safeguard_resources(level, result.get("resourceNames", []))
+        recommended_action = result.get("recommendedAction") if level != "None" else None
+        return True, level, category if level != "None" else None, evidence, recommended_action, resources, None
+    except Exception as exc:
+        return _manual_safeguard_review(_safe_error_reason(exc))
+
+
 def _openai_risk_review(english_transcript: str, segments: list[TranscriptSegment]) -> tuple[Symptoms, RiskAssessment, list[RiskSignal], str, bool, str | None]:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         return _manual_risk_review("OPENAI_API_KEY is not configured.")
 
-    patient_segments = [
-        segment
-        for segment in segments
-        if (segment.role == "Patient" or segment.speaker == "Patient" or (segment.englishText or segment.text).startswith("Patient:"))
-    ]
+    patient_segments = _patient_review_segments(segments)
     review_segments = patient_segments or segments
     patient_transcript = "\n".join(segment.englishText or segment.text for segment in review_segments)
 
@@ -1167,6 +1347,23 @@ async def save_call(
             _add_warning(transcript_alignment_warnings, "Provider segment timing was unavailable; segment times were estimated from live transcript event times.")
             translation.segments = timed_segments
     _, assessment, risk_signals, recommended_action, ai_fallback_used, ai_failure_reason = _openai_risk_review(english_transcript, translation.segments)
+    (
+        safeguard_review_available,
+        safeguard_level,
+        safeguard_category,
+        safeguard_evidence,
+        safeguard_recommended_action,
+        safeguard_resources,
+        safeguard_failure_reason,
+    ) = _openai_safeguard_review(translation.segments)
+    combined_risk_level = _risk_level_with_safeguard(assessment.riskLevel, safeguard_level)
+    if combined_risk_level != assessment.riskLevel:
+        safeguard_reason = f"Safeguard review flagged {safeguard_level.lower()} concern"
+        if safeguard_category:
+            safeguard_reason = f"{safeguard_reason}: {safeguard_category.replace('_', ' ')}"
+        assessment = assessment.model_copy(update={"riskLevel": combined_risk_level, "reasons": [*assessment.reasons, safeguard_reason]})
+    if safeguard_level != "None" and safeguard_recommended_action:
+        recommended_action = f"{recommended_action} Safeguard: {safeguard_recommended_action}"
     audio_url = f"/calls/{call_id}/audio" if audio_file_path else None
     patient_audio_url = f"/calls/{call_id}/patient-audio" if patient_audio_file_path else None
     current_speech_profile = _estimate_current_speech_profile(messages, startedAt, completedAt, translation.segments)
@@ -1224,6 +1421,13 @@ async def save_call(
         riskSignals=risk_signals,
         aiRiskFallbackUsed=ai_fallback_used,
         aiRiskFailureReason=ai_failure_reason,
+        safeguardReviewAvailable=safeguard_review_available,
+        safeguardLevel=safeguard_level,
+        safeguardCategory=safeguard_category,
+        safeguardEvidence=safeguard_evidence,
+        safeguardRecommendedAction=safeguard_recommended_action,
+        safeguardResources=safeguard_resources,
+        safeguardFailureReason=safeguard_failure_reason,
         speechModelVersion=speech_model_version,
         speechModelProbability=speech_model_probability,
         speechModelWarnings=speech_model_warnings,

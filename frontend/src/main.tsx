@@ -15,13 +15,36 @@ import {
   UserRoundCheck
 } from "lucide-react";
 import { createElevenLabsSession, fetchCalls, fetchSeniors, fetchSessions, fetchVolunteerTasks, getCallAudioUrl, saveCall } from "./api";
-import type { CallRecord, CheckInSession, RiskLevel, RiskSignal, Senior, TranscriptMessage, TranscriptSegment, VolunteerTask } from "./types";
+import type { CallRecord, CheckInSession, CrisisResource, RiskLevel, SafeguardLevel, Senior, TranscriptMessage, TranscriptSegment, VolunteerTask } from "./types";
 import "./styles.css";
 
 const riskOrder: Record<RiskLevel, number> = { Green: 0, Watch: 1, Amber: 2, Red: 3 };
 type AppView = "call" | "dashboard";
 type CallState = "Ready" | "Connecting" | "In call" | "Saving" | "Analysing" | "Complete" | "Failed";
 type AgentAudioFormat = "pcm_8000" | "pcm_16000" | "pcm_22050" | "pcm_24000" | "pcm_44100" | "pcm_48000" | "ulaw_8000";
+const singaporeCrisisResources: CrisisResource[] = [
+  {
+    name: "Emergency medical services",
+    phone: "995",
+    description: "Call for immediate medical danger or urgent ambulance support in Singapore."
+  },
+  {
+    name: "Police emergency",
+    phone: "999",
+    description: "Call if there is immediate danger, violence, or urgent police assistance is needed in Singapore."
+  },
+  {
+    name: "Samaritans of Singapore hotline",
+    phone: "1767",
+    description: "24-hour emotional support and crisis hotline in Singapore."
+  },
+  {
+    name: "Samaritans of Singapore CareText",
+    text: "WhatsApp 9151 1767",
+    url: "https://www.sos.org.sg/",
+    description: "24-hour WhatsApp text support for emotional support or crisis-related concerns."
+  }
+];
 interface WavRecorder {
   chunks: Float32Array[];
   input: AudioNode;
@@ -32,6 +55,16 @@ interface WavRecorder {
 interface PreparedMicStream {
   stream: MediaStream;
   warning: string;
+}
+interface TranscriptHighlight {
+  id: string;
+  kind: "risk" | "safeguard";
+  label: string;
+  text: string;
+  severity: RiskLevel;
+  startTimeSeconds?: number | null;
+  endTimeSeconds?: number | null;
+  sentenceIndex?: number | null;
 }
 
 function StatCard({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
@@ -199,6 +232,9 @@ function createAgentAudioBuffer(audioContext: AudioContext, base64Audio: string,
 }
 
 function multilingualAgentPrompt(senior: Senior): string {
+  const resourceText = singaporeCrisisResources
+    .map((resource) => `${resource.name}: ${resource.phone || resource.text || resource.url || ""}`)
+    .join("; ");
   return [
     `You are EarlyCare calling ${senior.name} for a routine wellbeing check-in.`,
     `The patient profile says their preferred language is ${senior.preferredLanguage}, but they may speak English, Mandarin, Malay, Tamil, Singlish, or a mix.`,
@@ -206,6 +242,8 @@ function multilingualAgentPrompt(senior: Senior): string {
     "For each agent reply, use the language or dialect that the patient used the most in their immediately previous response. If the patient code-switches, follow the dominant language from that one previous response.",
     "If the patient asks to speak Chinese or any other language, switch immediately.",
     "Ask concise turn-by-turn questions about falls, head impact, headache, dizziness, vomiting, confusion, weakness, speech difficulty, food and water, and whether they can ask for help.",
+    "If the patient expresses immediate danger, intent to self-harm, inability to stay safe, abuse, neglect, or severe emotional distress, stay calm, do not diagnose or provide counselling, encourage them to contact trusted nearby help, and share the relevant Singapore emergency or crisis support resource.",
+    `Singapore support resources available to mention when relevant: ${resourceText}.`,
     "Do not add bracketed emotional cues such as [concerned] or [happy]."
   ].join(" ");
 }
@@ -352,20 +390,58 @@ function buildTranscriptText(call: CallRecord, language: "original" | "english")
   return call.originalTranscript.replace(/\bSenior:/g, "Patient:");
 }
 
+function evidenceMatchesPatientText(evidence: string, patientText: string): boolean {
+  const normalizedEvidence = cleanTranscriptText(evidence).toLowerCase();
+  const normalizedPatientText = cleanTranscriptText(patientText).toLowerCase();
+  return Boolean(normalizedEvidence) && (normalizedPatientText.includes(normalizedEvidence) || normalizedEvidence.includes(normalizedPatientText));
+}
+
+function safeguardHighlightsForCall(call: CallRecord, segments: TranscriptSegment[], patientSegments: { segment: TranscriptSegment; segmentIndex: number }[]): TranscriptHighlight[] {
+  const level = safeguardLevel(call);
+  if (level === "None") return [];
+  const severity: RiskLevel = level === "Emergency" ? "Red" : level === "Urgent" ? "Amber" : "Watch";
+  return (call.safeguardEvidence ?? []).flatMap((evidence, index) => {
+    const match = patientSegments.find(({ segment }) => evidenceMatchesPatientText(evidence, textWithoutSpeakerLabel(segment.englishText || segment.text)));
+    if (!match) return [];
+    return [
+      {
+        id: `safeguard-${index}`,
+        kind: "safeguard",
+        label: safeguardTitle(call),
+        text: evidence,
+        severity,
+        startTimeSeconds: previousAgentReplyEnd(segments, match.segmentIndex) ?? match.segment.startTimeSeconds,
+        endTimeSeconds: match.segment.endTimeSeconds,
+        sentenceIndex: patientSegments.findIndex((item) => item.segmentIndex === match.segmentIndex)
+      }
+    ];
+  });
+}
+
 function HighlightedEnglishTranscript({
   call,
   highlightedSignalId,
-  onSelectSignal
+  onSelectHighlight
 }: {
   call: CallRecord;
   highlightedSignalId: string | null;
-  onSelectSignal: (signal: RiskSignal) => void;
+  onSelectHighlight: (highlight: TranscriptHighlight) => void;
 }) {
   const segments = getEnglishTranscriptSegments(call);
   const patientSegments = segments
     .map((segment, segmentIndex) => ({ segment, segmentIndex }))
     .filter(({ segment }) => isPatientSegment(segment));
-  const signals = call.riskSignals ?? [];
+  const riskHighlights: TranscriptHighlight[] = (call.riskSignals ?? []).map((signal) => ({
+    id: signal.id,
+    kind: "risk",
+    label: signal.label,
+    text: signal.highlightText || signal.quotedText,
+    severity: signal.severity,
+    startTimeSeconds: signal.startTimeSeconds,
+    endTimeSeconds: signal.endTimeSeconds,
+    sentenceIndex: signal.sentenceIndex
+  }));
+  const highlights = [...safeguardHighlightsForCall(call, segments, patientSegments), ...riskHighlights];
 
   return (
     <div className="highlighted-transcript">
@@ -373,42 +449,44 @@ function HighlightedEnglishTranscript({
         const text = displaySegmentText(segment);
         const patientIndex = patientSegments.findIndex((item) => item.segmentIndex === segmentIndex);
         const patientOnly = patientIndex >= 0;
-        const matches = signals.filter((signal) => {
-          const highlight = cleanTranscriptText(signal.highlightText || signal.quotedText);
+        const matches = highlights.filter((highlightItem) => {
+          const highlight = cleanTranscriptText(highlightItem.text);
           if (!patientOnly || !highlight) return false;
           const lowerHighlight = highlight.toLowerCase();
           const patientText = textWithoutSpeakerLabel(text).toLowerCase();
           const exactPatientMatchExists = patientSegments.some((item) =>
             textWithoutSpeakerLabel(item.segment.englishText || item.segment.text).toLowerCase().includes(lowerHighlight)
           );
-          return patientText.includes(lowerHighlight) || (!exactPatientMatchExists && signal.sentenceIndex === patientIndex);
+          return patientText.includes(lowerHighlight) || (!exactPatientMatchExists && highlightItem.sentenceIndex === patientIndex);
         });
 
         if (!matches.length || !text) {
           return <p key={`${call.id}-segment-${segmentIndex}`}>{text}</p>;
         }
 
-        const signal = matches[0];
-        const signalWithSentenceTime: RiskSignal = {
-          ...signal,
-          startTimeSeconds: previousAgentReplyEnd(segments, segmentIndex) ?? segment.startTimeSeconds ?? signal.startTimeSeconds,
-          endTimeSeconds: segment.endTimeSeconds ?? signal.endTimeSeconds,
-          sentenceIndex: patientIndex >= 0 ? patientIndex : signal.sentenceIndex
+        const highlightItem = matches[0];
+        const highlightWithSentenceTime: TranscriptHighlight = {
+          ...highlightItem,
+          startTimeSeconds: highlightItem.startTimeSeconds ?? previousAgentReplyEnd(segments, segmentIndex) ?? segment.startTimeSeconds,
+          endTimeSeconds: highlightItem.endTimeSeconds ?? segment.endTimeSeconds,
+          sentenceIndex: patientIndex >= 0 ? patientIndex : highlightItem.sentenceIndex
         };
-        const highlight = cleanTranscriptText(signal.highlightText || signal.quotedText);
+        const highlight = cleanTranscriptText(highlightItem.text);
         const patientText = textWithoutSpeakerLabel(text);
         const patientTextStart = text.indexOf(patientText);
         const matchIndexInPatientText = patientText.toLowerCase().indexOf(highlight.toLowerCase());
         const matchIndex = matchIndexInPatientText >= 0 ? Math.max(0, patientTextStart) + matchIndexInPatientText : -1;
+        const activeId = `${call.id}-${highlightItem.id}`;
         if (matchIndex < 0) {
           return (
             <p key={`${call.id}-segment-${segmentIndex}`}>
               <button
-                className={`transcript-highlight ${highlightedSignalId === `${call.id}-${signal.id}` ? "active" : ""}`}
-                id={`signal-${call.id}-${signal.id}`}
-                onClick={() => onSelectSignal(signalWithSentenceTime)}
+                className={`transcript-highlight transcript-highlight-${highlightItem.kind} ${highlightedSignalId === activeId ? "active" : ""}`}
+                id={`signal-${activeId}`}
+                onClick={() => onSelectHighlight(highlightWithSentenceTime)}
               >
                 {text}
+                {typeof highlightWithSentenceTime.startTimeSeconds === "number" ? <span>{formatTimestamp(highlightWithSentenceTime.startTimeSeconds)}</span> : null}
               </button>
             </p>
           );
@@ -421,11 +499,12 @@ function HighlightedEnglishTranscript({
           <p key={`${call.id}-segment-${segmentIndex}`}>
             {before}
             <button
-              className={`transcript-highlight ${highlightedSignalId === `${call.id}-${signal.id}` ? "active" : ""}`}
-              id={`signal-${call.id}-${signal.id}`}
-              onClick={() => onSelectSignal(signalWithSentenceTime)}
+              className={`transcript-highlight transcript-highlight-${highlightItem.kind} ${highlightedSignalId === activeId ? "active" : ""}`}
+              id={`signal-${activeId}`}
+              onClick={() => onSelectHighlight(highlightWithSentenceTime)}
             >
               {matched}
+              {typeof highlightWithSentenceTime.startTimeSeconds === "number" ? <span>{formatTimestamp(highlightWithSentenceTime.startTimeSeconds)}</span> : null}
             </button>
             {after}
           </p>
@@ -443,6 +522,13 @@ function formatMetric(value: number | undefined | null, suffix = ""): string {
 function formatSeconds(value: number | undefined | null): string {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return "Not enough data";
   return value >= 10 ? `${Math.round(value)}s` : `${value.toFixed(1)}s`;
+}
+
+function formatTimestamp(value: number): string {
+  const totalSeconds = Math.max(0, Math.floor(value));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
 function formatPercent(value: number | undefined | null): string {
@@ -605,19 +691,6 @@ function speechMarkerDescription(call: CallRecord): string {
     : "Patient-only audio is not available for speech-marker scoring.";
 }
 
-function transcriptionAttemptSummary(call: CallRecord): string {
-  const attempts = call.transcriptionAttempts ?? [];
-  if (!attempts.length) {
-    return `${call.translationProvider}${call.translationFallbackUsed ? " fallback" : ""}`;
-  }
-  return attempts
-    .map((attempt) => {
-      const reason = attempt.reason ? ` (${attempt.reason})` : "";
-      return `${attempt.provider} ${attempt.status}${reason}`;
-    })
-    .join(" -> ");
-}
-
 function aiReviewNote(call: CallRecord): string | null {
   if (!call.aiRiskFallbackUsed) return null;
   if (call.aiRiskFailureReason) return `Manual review required: ${call.aiRiskFailureReason}`;
@@ -626,9 +699,52 @@ function aiReviewNote(call: CallRecord): string | null {
     : "Manual review required; AI risk highlights are unavailable for this call.";
 }
 
-function alignmentWarningText(call: CallRecord): string | null {
-  const warnings = call.transcriptAlignmentWarnings ?? [];
-  return warnings.length ? warnings.join(" ") : null;
+function safeguardLevel(call: CallRecord): SafeguardLevel {
+  return call.safeguardLevel ?? "None";
+}
+
+function safeguardTitle(call: CallRecord): string {
+  const level = safeguardLevel(call);
+  if (call.safeguardFailureReason) return "Safeguard review unavailable";
+  if (!call.safeguardReviewAvailable) return "Safeguard review unavailable";
+  if (level === "None") return "No distress safeguard flagged";
+  return `${level} safeguard flagged`;
+}
+
+function safeguardDescription(call: CallRecord): string {
+  if (call.safeguardFailureReason) return `Manual review required: ${call.safeguardFailureReason}`;
+  if (!call.safeguardReviewAvailable) return "Manual review required; safeguard classification is unavailable for this call.";
+  const level = safeguardLevel(call);
+  if (level === "None") return "OpenAI safeguard review did not find patient-stated distress requiring hotline guidance.";
+  const category = call.safeguardCategory ? call.safeguardCategory.replace(/_/g, " ") : "distress";
+  return call.safeguardRecommendedAction || `Patient-stated ${category} should receive human follow-up.`;
+}
+
+function safeguardResourceText(call: CallRecord): string | null {
+  const resources = call.safeguardResources ?? [];
+  if (!resources.length) return null;
+  return resources
+    .map((resource) => `${resource.name}: ${resource.phone || resource.text || resource.url || resource.description}`)
+    .join("; ");
+}
+
+function visibleAssessmentReasons(call: CallRecord): string[] {
+  return call.riskAssessment.reasons.filter((reason) => !reason.toLowerCase().startsWith("safeguard review flagged"));
+}
+
+function callReviewStatus(call: CallRecord): string {
+  if (call.aiRiskFallbackUsed || call.safeguardFailureReason) return "Needs manual review";
+  if (safeguardLevel(call) !== "None") return safeguardTitle(call);
+  return call.riskSignals?.length ? "Clinical risk cues found" : "No urgent cue found";
+}
+
+function callRecordingSummary(call: CallRecord): string {
+  const parts = [
+    call.audioAvailable ? "recording saved" : "no recording",
+    call.patientAudioAvailable ? "patient audio saved" : "patient audio missing",
+    call.agentAudioCaptured ? "agent voice captured" : "agent voice not confirmed"
+  ];
+  return parts.join(" · ");
 }
 
 function AgentsCall({
@@ -788,7 +904,8 @@ function AgentsCall({
           living_alone: selectedSenior.livingAlone,
           caregiver_contact: selectedSenior.caregiverContact,
           check_in_reason: "Routine living-alone wellbeing check-in",
-          baseline_reminder: "Use EarlyCare's stored personal baseline context without saying exact baseline metrics aloud."
+          baseline_reminder: "Use EarlyCare's stored personal baseline context without saying exact baseline metrics aloud.",
+          crisis_resources: singaporeCrisisResources.map((resource) => `${resource.name}: ${resource.phone || resource.text || resource.url}`).join("; ")
         }
       });
     } catch (error) {
@@ -927,15 +1044,15 @@ function OfficerDashboard({
     (risk, level) => (riskOrder[level] > riskOrder[risk] ? level : risk),
     "Green"
   );
-  const playRiskSignal = (call: CallRecord, signal: RiskSignal) => {
-    setHighlightedSignalId(`${call.id}-${signal.id}`);
+  const playTranscriptHighlight = (call: CallRecord, highlight: TranscriptHighlight) => {
+    setHighlightedSignalId(`${call.id}-${highlight.id}`);
     const audio = audioRefs.current[call.id];
-    if (audio && typeof signal.startTimeSeconds === "number") {
-      audio.currentTime = Math.max(0, signal.startTimeSeconds);
+    if (audio && typeof highlight.startTimeSeconds === "number") {
+      audio.currentTime = Math.max(0, highlight.startTimeSeconds);
       void audio.play();
       return;
     }
-    document.getElementById(`signal-${call.id}-${signal.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    document.getElementById(`signal-${call.id}-${highlight.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
 
   return (
@@ -988,45 +1105,54 @@ function OfficerDashboard({
 
         <SpeechTimingPanel senior={selectedSenior} call={latestSignal} calls={selectedCalls} />
 
-        <section className="analysis-panel dashboard-analysis">
+        <section className="analysis-panel dashboard-analysis safety-snapshot">
           <div className="analysis-header">
             <div>
-              <span className="eyebrow">Deviation from baseline</span>
-              <h2>AI Risk Review</h2>
+              <span className="eyebrow">Latest call</span>
+              <h2>Safety Snapshot</h2>
             </div>
             <RiskBadge level={latestSignal?.riskLevel ?? "Green"} />
           </div>
-          {latestAssessment ? (
+          {latestSignal && latestAssessment ? (
             <>
-              <div className="reason-box">
-                <h3>Reasons</h3>
-                <ul>
-                  {latestAssessment.reasons.map((reason) => (
-                    <li key={reason}>{reason}</li>
-                  ))}
-                </ul>
+              <div className="snapshot-lead">
+                <div>
+                  <strong>{callReviewStatus(latestSignal)}</strong>
+                  <p>{latestSignal.recommendedAction}</p>
+                </div>
+                <small>{new Date(latestSignal.completedAt).toLocaleString()}</small>
               </div>
-              {"translationProvider" in latestSignal ? (
-                <div className="model-card">
+              <div className="snapshot-grid">
+                <div className="snapshot-card">
                   <Brain size={22} />
                   <div>
-                    <strong>{latestSignal.aiRiskFallbackUsed ? "Manual review required" : "AI review completed"}</strong>
-                    <p>
-                      Transcript pipeline: {transcriptionAttemptSummary(latestSignal)}. Audio recording:{" "}
-                      {latestSignal.audioAvailable ? "saved" : "not available"}.
-                    </p>
-                    {aiReviewNote(latestSignal) ? <p>{aiReviewNote(latestSignal)}</p> : null}
-                    {alignmentWarningText(latestSignal) ? <p>{alignmentWarningText(latestSignal)}</p> : null}
+                    <span>Clinical review</span>
+                    <strong>{latestSignal.aiRiskFallbackUsed ? "Manual review" : `${latestSignal.riskSignals?.length ?? 0} cue${(latestSignal.riskSignals?.length ?? 0) === 1 ? "" : "s"}`}</strong>
+                    {aiReviewNote(latestSignal) ? <small>{aiReviewNote(latestSignal)}</small> : null}
                   </div>
                 </div>
-              ) : null}
-              {latestSignal.patientAudioAvailable || latestSignal.speechModelWarnings?.length || latestSignal.speechModelProbability !== null ? (
-                <div className="model-card">
+                <div className={`snapshot-card safeguard-card safeguard-${safeguardLevel(latestSignal).toLowerCase()}`}>
+                  <ShieldCheck size={22} />
+                  <div>
+                    <span>Distress safeguard</span>
+                    <strong>{safeguardTitle(latestSignal)}</strong>
+                    <small>{safeguardDescription(latestSignal)}</small>
+                  </div>
+                </div>
+                <div className="snapshot-card">
                   <Activity size={22} />
                   <div>
+                    <span>Speech signal</span>
                     <strong>{speechMarkerTitle(latestSignal)}</strong>
-                    <p>{speechMarkerDescription(latestSignal)}</p>
+                    <small>{speechMarkerDescription(latestSignal)}</small>
                   </div>
+                </div>
+              </div>
+              {visibleAssessmentReasons(latestSignal).length ? (
+                <div className="reason-box compact-reasons">
+                  {visibleAssessmentReasons(latestSignal).slice(0, 3).map((reason) => (
+                    <p key={reason}>{reason}</p>
+                  ))}
                 </div>
               ) : null}
             </>
@@ -1036,7 +1162,13 @@ function OfficerDashboard({
         </section>
 
         <section className="saved-calls">
-          <h3>Saved Agents Calls</h3>
+          <div className="section-title-row">
+            <div>
+              <span className="eyebrow">Call archive</span>
+              <h3>Saved Agent Calls</h3>
+            </div>
+            <small>{selectedCalls.length} saved</small>
+          </div>
           {selectedCalls.length ? (
             <div className="call-record-list">
               {selectedCalls.map((call) => {
@@ -1047,22 +1179,19 @@ function OfficerDashboard({
                       <div>
                         <RiskBadge level={call.riskLevel} />
                         <strong>{new Date(call.completedAt).toLocaleString()}</strong>
+                        <small>{callReviewStatus(call)}</small>
                       </div>
-                      <small>
-                        {transcriptionAttemptSummary(call)} · audio {call.audioAvailable ? "saved" : "missing"} · patient audio{" "}
-                        {call.patientAudioAvailable ? "saved" : "missing"} · agent voice {call.agentAudioCaptured ? "captured" : "not confirmed"}
-                      </small>
+                      <small>{callRecordingSummary(call)}</small>
                     </div>
-                    <p>
-                      <strong>Recommended action:</strong> {call.recommendedAction}
-                    </p>
-                    {call.patientAudioAvailable || call.speechModelWarnings?.length || call.speechModelProbability !== null ? (
-                      <p>
-                        <strong>{speechMarkerTitle(call)}:</strong> {speechMarkerDescription(call)}
-                      </p>
-                    ) : null}
+                    <p className="call-action-summary">{call.recommendedAction}</p>
                     {aiReviewNote(call) ? <p className="metric-note">{aiReviewNote(call)}</p> : null}
-                    {alignmentWarningText(call) ? <p className="metric-note">{alignmentWarningText(call)}</p> : null}
+                    {safeguardLevel(call) !== "None" || call.safeguardFailureReason ? (
+                      <div className={`safeguard-summary safeguard-${safeguardLevel(call).toLowerCase()}`}>
+                        <strong>{safeguardTitle(call)}</strong>
+                        <p>{safeguardDescription(call)}</p>
+                        {safeguardResourceText(call) ? <small>{safeguardResourceText(call)}</small> : null}
+                      </div>
+                    ) : null}
 
                     <div className="recording-player">
                       <h4>Original recording</h4>
@@ -1085,7 +1214,7 @@ function OfficerDashboard({
                         <HighlightedEnglishTranscript
                           call={call}
                           highlightedSignalId={highlightedSignalId}
-                          onSelectSignal={(signal) => playRiskSignal(call, signal)}
+                          onSelectHighlight={(highlight) => playTranscriptHighlight(call, highlight)}
                         />
                       </div>
                       <div>

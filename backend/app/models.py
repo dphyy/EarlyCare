@@ -6,6 +6,7 @@ from pydantic import BaseModel
 RiskLevel = Literal["Green", "Watch", "Amber", "Red"]
 Language = Literal["English", "Mandarin", "Malay", "Tamil", "Singlish/Dialect"]
 VolunteerTaskStatus = Literal["Open", "In progress", "Closed"]
+SafeguardLevel = Literal["None", "Support", "Urgent", "Emergency"]
 
 
 class SpeechProfile(BaseModel):
@@ -129,6 +130,14 @@ class RiskSignal(BaseModel):
     endTimeSeconds: float | None = None
 
 
+class CrisisResource(BaseModel):
+    name: str
+    phone: str | None = None
+    text: str | None = None
+    url: str | None = None
+    description: str
+
+
 class CallRecord(BaseModel):
     id: str
     seniorId: str
@@ -159,6 +168,13 @@ class CallRecord(BaseModel):
     riskSignals: list[RiskSignal] = []
     aiRiskFallbackUsed: bool = False
     aiRiskFailureReason: str | None = None
+    safeguardReviewAvailable: bool = False
+    safeguardLevel: SafeguardLevel = "None"
+    safeguardCategory: str | None = None
+    safeguardEvidence: list[str] = []
+    safeguardRecommendedAction: str | None = None
+    safeguardResources: list[CrisisResource] = []
+    safeguardFailureReason: str | None = None
     speechModelVersion: str | None = None
     speechModelProbability: float | None = None
     speechModelWarnings: list[str] = []

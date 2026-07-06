@@ -846,6 +846,104 @@ class CallWorkflowTests(unittest.TestCase):
         self.assertIn("redacted", failure_reason)
         self.assertNotIn("secret-token", failure_reason)
 
+    def test_openai_safeguard_review_flags_patient_distress_with_resources(self) -> None:
+        segments = [
+            TranscriptSegment(text="Agent: Are you safe?", englishText="Agent: Are you safe?", role="Agent", speaker="Agent", startTimeSeconds=0),
+            TranscriptSegment(
+                text="Patient: I want to hurt myself tonight.",
+                englishText="Patient: I want to hurt myself tonight.",
+                role="Patient",
+                speaker="Patient",
+                startTimeSeconds=4,
+            ),
+        ]
+        payload = {
+            "output_text": json.dumps(
+                {
+                    "level": "Emergency",
+                    "category": "self_harm_or_suicidal_ideation",
+                    "summary": "Patient stated imminent self-harm intent.",
+                    "recommendedAction": "Encourage immediate emergency help and alert a human responder.",
+                    "evidence": ["I want to hurt myself tonight."],
+                    "resourceNames": ["Emergency medical services", "Samaritans of Singapore hotline"],
+                }
+            )
+        }
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = payload
+
+        with patch.dict(main.os.environ, {"OPENAI_API_KEY": "test-key"}), patch.object(main.httpx, "post", return_value=response) as post:
+            available, level, category, evidence, action, resources, failure_reason = main._openai_safeguard_review(segments)
+
+        request_json = post.call_args.kwargs["json"]
+        user_payload = json.loads(request_json["input"][1]["content"])
+        self.assertTrue(available)
+        self.assertEqual(level, "Emergency")
+        self.assertEqual(category, "self_harm_or_suicidal_ideation")
+        self.assertEqual(evidence, ["I want to hurt myself tonight."])
+        self.assertIn("emergency", action.lower())
+        self.assertEqual([resource.name for resource in resources], ["Emergency medical services", "Samaritans of Singapore hotline"])
+        self.assertIsNone(failure_reason)
+        self.assertEqual(user_payload["patientOnlyTranscript"], "Patient: I want to hurt myself tonight.")
+        self.assertEqual(len(user_payload["sentences"]), 1)
+
+    def test_openai_safeguard_review_drops_flags_without_patient_evidence(self) -> None:
+        segments = [
+            TranscriptSegment(text="Agent: Are you thinking of hurting yourself?", englishText="Agent: Are you thinking of hurting yourself?", role="Agent", speaker="Agent"),
+            TranscriptSegment(text="Patient: No, I am okay.", englishText="Patient: No, I am okay.", role="Patient", speaker="Patient"),
+        ]
+        payload = {
+            "output_text": json.dumps(
+                {
+                    "level": "Emergency",
+                    "category": "self_harm_or_suicidal_ideation",
+                    "summary": "Incorrectly used agent wording.",
+                    "recommendedAction": "Call emergency services.",
+                    "evidence": ["Are you thinking of hurting yourself?"],
+                    "resourceNames": ["Emergency medical services"],
+                }
+            )
+        }
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = payload
+
+        with patch.dict(main.os.environ, {"OPENAI_API_KEY": "test-key"}), patch.object(main.httpx, "post", return_value=response):
+            available, level, category, evidence, action, resources, failure_reason = main._openai_safeguard_review(segments)
+
+        self.assertTrue(available)
+        self.assertEqual(level, "None")
+        self.assertIsNone(category)
+        self.assertEqual(evidence, [])
+        self.assertIsNone(action)
+        self.assertEqual(resources, [])
+        self.assertIsNone(failure_reason)
+
+    def test_openai_safeguard_review_records_sanitized_failure_reason(self) -> None:
+        segments = [
+            TranscriptSegment(text="Patient: I feel hopeless.", englishText="Patient: I feel hopeless.", role="Patient", speaker="Patient"),
+        ]
+        response = Mock()
+        response.raise_for_status.side_effect = RuntimeError("Authorization: Bearer secret-token failed")
+        response.json.return_value = {}
+
+        with patch.dict(main.os.environ, {"OPENAI_API_KEY": "test-key"}), patch.object(main.httpx, "post", return_value=response):
+            available, level, _, evidence, _, resources, failure_reason = main._openai_safeguard_review(segments)
+
+        self.assertFalse(available)
+        self.assertEqual(level, "None")
+        self.assertEqual(evidence, [])
+        self.assertEqual(resources, [])
+        self.assertIsNotNone(failure_reason)
+        assert failure_reason is not None
+        self.assertIn("redacted", failure_reason)
+        self.assertNotIn("secret-token", failure_reason)
+
+    def test_safeguard_level_can_lift_visible_risk_level(self) -> None:
+        self.assertEqual(main._risk_level_with_safeguard("Green", "Emergency"), "Red")
+        self.assertEqual(main._risk_level_with_safeguard("Red", "Support"), "Red")
+
     def test_attach_segment_timestamps_drops_agent_only_signal(self) -> None:
         signals = [
             main.RiskSignal(
