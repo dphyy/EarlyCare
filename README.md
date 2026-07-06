@@ -63,6 +63,7 @@ EarlyCare is decision support, not diagnosis. It helps care teams notice risk si
 | AI review | OpenAI API | Structured patient-only risk extraction and separate distress safeguard classification. |
 | Emotion/tone | ElevenLabs data collection | Optional `user_emotional_state` summary and per-response tags. |
 | Speech model | Conversational-compatible tabular voice-feature model | Optional speech-marker score from patient-only pitch, jitter, and noise features. |
+| Concussion speech review | Vendored WavLM speech-abnormality inference path | Optional post-call `patient-speech.wav` review for `normal`, `dysarthria_like`, `dysphonia_like`, or `low_audio_quality` research labels. |
 | Persistence | Local filesystem | Hackathon-friendly storage under `backend/storage/calls/`. |
 
 ## Speech ML Research Path
@@ -107,6 +108,47 @@ The current saved winner is `earlycare-conversational-parkinsons-marker-random_f
 
 The speech-marker score is saved as `speechModelProbability` and displayed as a research screening signal. It does not diagnose Parkinson's disease and does not currently determine the call's main `riskLevel`; the visible risk level comes from AI risk review, safeguard review, and tone modifiers.
 
+## Concussion Speech Review
+
+When `EARLYCARE_CONCUSSION_SPEECH_MODEL_ENABLED=true`, the backend runs the
+bundled speech-abnormality model after a call is saved.
+It scores the derived patient-only speech file, stores the result as
+`concussionSpeechReview`, and shows it in the Patient overview.
+
+The repo includes the runtime inference code under
+`backend/app/concussion_speech_model/` and the trained pilot artifacts under
+`backend/models/concussion_speech/`. Training datasets, embedding caches, and raw
+TORGO/VOICED files are intentionally not required for local website inference and
+should not be pushed. On a new machine, install `backend/requirements-ml.txt`;
+the first model run may download the configured WavLM backbone into the user's
+Hugging Face cache unless a local `HF_HOME` cache is provided.
+
+For project-side inference, everything EarlyCare needs is now inside this repo:
+the adapter, the vendored inference package, and the trained classifier
+artifacts. External runtime dependencies are still installed through
+`backend/requirements-ml.txt`, and the WavLM backbone weights are loaded by
+Transformers from the user's Hugging Face cache or downloaded on first use.
+
+### Concussion Speech Model Provenance
+
+The bundled `backend/models/concussion_speech` artifacts come from the internal
+`pilot_full` speech-abnormality model. Training used:
+
+| Component | Use | Citation |
+| --- | --- | --- |
+| TORGO Database | Dysarthria-like and normal/control speech examples | [The TORGO Database: Acoustic and articulatory speech from speakers with dysarthria](https://www.cs.toronto.edu/~complingweb/data/TORGO/torgo.html) |
+| VOICED Database v1.0.0 | Dysphonia-like and normal/healthy voice examples | [VOICED Database v1.0.0 on PhysioNet](https://physionet.org/content/voiced/1.0.0/) |
+| WavLM Base | Frozen 16 kHz speech embedding backbone configured as `microsoft/wavlm-base` | [microsoft/wavlm-base](https://huggingface.co/microsoft/wavlm-base), [WavLM paper](https://arxiv.org/abs/2110.13900) |
+| scikit-learn LogisticRegression | Calibrated, class-balanced classifier saved in `model.joblib` | [sklearn.linear_model.LogisticRegression](https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LogisticRegression.html) |
+
+Full citation text is in [CITATIONS.md](CITATIONS.md).
+
+This is not concussion detection or diagnosis. The model returns research labels
+only. If the patient reports concussion-relevant symptoms and the speech model
+also flags abnormal speech, EarlyCare raises the call for human review. If the
+model flags speech without reported symptoms, it is treated as a watch-level
+audio review signal.
+
 ## Setup
 
 ### 1. Create Env Files
@@ -137,6 +179,8 @@ OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
 OPENAI_SAFEGUARD_MODEL=
 EARLYCARE_SPEECH_MODEL_ENABLED=true
+EARLYCARE_CONCUSSION_SPEECH_MODEL_ENABLED=true
+EARLYCARE_CONCUSSION_SPEECH_DEVICE=cpu
 ```
 
 Never commit real `.env` files.
@@ -210,6 +254,8 @@ Open the Vite URL, usually `http://localhost:5173`.
 - `frontend/` contains the React + Vite interface.
 - `backend/` contains the FastAPI service and provider integrations.
 - `backend/models/speech/` contains the checked-in conversational speech-marker artifacts: model, schema, metrics, model card, and reference ranges.
+- `backend/models/concussion_speech/` contains the checked-in concussion speech-abnormality pilot artifacts needed for inference.
+- `backend/app/concussion_speech_model/` contains the vendored speech-abnormality inference package.
 - `backend/tests/` contains backend workflow tests.
 - `backend/storage/` contains generated local call artifacts and is ignored.
 - `.env.example` files document configuration without secrets.

@@ -503,6 +503,88 @@ class CallWorkflowTests(unittest.TestCase):
         assert reviewed_paths[0] is not None
         self.assertTrue(reviewed_paths[0].name.endswith("patient-speech.wav"))
 
+    def test_concussion_speech_review_lifts_symptom_call_for_human_review(self) -> None:
+        symptoms = main.Symptoms(headache=True, dizziness=True)
+        assessment = main._empty_assessment("Green", ["Patient reported mild symptoms."])
+        review = main.ConcussionSpeechReview(
+            modelVersion="pilot_full",
+            predictedLabel="dysarthria_like",
+            probabilities={"normal": 0.2, "dysarthria_like": 0.8},
+            qualityOk=True,
+            riskContribution="Watch",
+            riskReason="Speech-abnormality model predicted dysarthria_like.",
+            warning="Research-only.",
+        )
+
+        lifted = main._apply_concussion_speech_modifier(assessment, symptoms, review)
+
+        self.assertEqual(lifted.riskLevel, "Amber")
+        self.assertTrue(any("concussion-relevant symptoms" in reason for reason in lifted.reasons))
+
+    def test_save_call_stores_concussion_speech_review(self) -> None:
+        messages = [
+            {"role": "Agent", "text": "Any headache or dizziness?", "timestamp": "2026-07-04T10:00:00+08:00"},
+            {"role": "Senior", "text": "I feel dizzy.", "timestamp": "2026-07-04T10:00:03+08:00"},
+        ]
+        provider_result = ProviderResult(
+            provider="fallback",
+            language="English",
+            transcript="Agent: Any headache or dizziness?\nPatient: I feel dizzy.",
+            translation="Agent: Any headache or dizziness?\nPatient: I feel dizzy.",
+            confidence=0.5,
+            fallbackUsed=True,
+        )
+        review = main.ConcussionSpeechReview(
+            modelVersion="pilot_full",
+            predictedLabel="dysarthria_like",
+            probabilities={"normal": 0.2, "dysarthria_like": 0.8},
+            qualityOk=True,
+            riskContribution="Watch",
+            riskReason="Speech-abnormality model predicted dysarthria_like.",
+            warning="Research-only.",
+        )
+
+        with TemporaryDirectory() as temp_dir:
+            with (
+                patch.object(main, "CALL_STORAGE_ROOT", Path(temp_dir)),
+                patch.object(main, "transcribe_with_fallback", return_value=provider_result),
+                patch.object(
+                    main,
+                    "_openai_risk_review",
+                    return_value=(
+                        main.Symptoms(dizziness=True),
+                        main._empty_assessment("Green", ["Patient reported dizziness."]),
+                        [],
+                        "Review the call.",
+                        False,
+                        None,
+                    ),
+                ),
+                patch.object(main, "_speech_model_review", return_value=(None, None, [], None)),
+                patch.object(main, "review_concussion_speech", return_value=review),
+            ):
+                client = TestClient(main.app)
+                response = client.post(
+                    "/calls",
+                    data={
+                        "seniorId": "s-001",
+                        "status": "Complete",
+                        "startedAt": "2026-07-04T10:00:00+08:00",
+                        "completedAt": "2026-07-04T10:01:00+08:00",
+                        "transcriptMessages": json.dumps(messages),
+                    },
+                    files={
+                        "audio": ("full-call.wav", _test_wav_bytes(2), "audio/wav"),
+                        "patientAudio": ("patient-audio.wav", _test_wav_bytes(4, [(1.2, 2.3)]), "audio/wav"),
+                    },
+                )
+
+        call = response.json()["call"]
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(call["riskLevel"], "Amber")
+        self.assertEqual(call["concussionSpeechReview"]["predictedLabel"], "dysarthria_like")
+        self.assertIn("Speech abnormality model", call["recommendedAction"])
+
     def test_patient_speech_audio_endpoint_returns_404_when_missing(self) -> None:
         with TemporaryDirectory() as temp_dir:
             with patch.object(main, "CALL_STORAGE_ROOT", Path(temp_dir)):

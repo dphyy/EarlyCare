@@ -143,6 +143,13 @@ function createWavRecorder(audioContext: AudioContext, input: AudioNode): WavRec
 }
 
 async function requestCleanMicrophoneStream(): Promise<PreparedMicStream> {
+  const getUserMedia = navigator.mediaDevices?.getUserMedia?.bind(navigator.mediaDevices);
+  if (!getUserMedia) {
+    throw new Error(
+      "Microphone access is unavailable in this browser context. Open EarlyCare from http://127.0.0.1:5173 or http://localhost:5173 in a supported browser and allow microphone permission."
+    );
+  }
+
   const enhancedConstraints: MediaStreamConstraints = {
     audio: {
       echoCancellation: true,
@@ -153,7 +160,7 @@ async function requestCleanMicrophoneStream(): Promise<PreparedMicStream> {
     }
   };
   try {
-    const stream = await navigator.mediaDevices.getUserMedia(enhancedConstraints);
+    const stream = await getUserMedia(enhancedConstraints);
     const settings = stream.getAudioTracks()[0]?.getSettings?.() ?? {};
     const unavailable = [
       settings.echoCancellation === false ? "echo cancellation" : "",
@@ -165,7 +172,7 @@ async function requestCleanMicrophoneStream(): Promise<PreparedMicStream> {
       warning: unavailable.length ? `Browser microphone cleanup is limited: ${unavailable.join(", ")} unavailable.` : ""
     };
   } catch (error) {
-    const fallbackStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const fallbackStream = await getUserMedia({ audio: true });
     const reason = error instanceof Error ? error.message : "enhanced constraints were rejected";
     return {
       stream: fallbackStream,
@@ -719,6 +726,30 @@ function speechMarkerDescription(call: CallRecord): string {
     : "Patient-only audio is not available for speech-marker scoring.";
 }
 
+function concussionSpeechTitle(call: CallRecord): string {
+  const review = call.concussionSpeechReview;
+  if (!review) return "Not run";
+  if (review.failureReason) return "Unavailable";
+  if (!review.qualityOk) return "Low audio quality";
+  if (review.predictedLabel && review.predictedLabel !== "normal") {
+    return `Speech review: ${review.predictedLabel.replace(/_/g, " ")}`;
+  }
+  return "No abnormal speech flag";
+}
+
+function concussionSpeechDescription(call: CallRecord): string {
+  const review = call.concussionSpeechReview;
+  if (!review) return "Enable concussion speech review to score derived patient speech after each call.";
+  if (review.failureReason) return review.failureReason;
+  if (!review.qualityOk) return review.qualityReason || "Patient speech audio did not pass quality checks.";
+  if (review.riskReason) return `${review.riskReason} Research-only; not a diagnosis.`;
+  const normalProbability = review.probabilities?.normal;
+  if (typeof normalProbability === "number") {
+    return `${Math.round(normalProbability * 100)}% normal probability. Research-only; not a diagnosis.`;
+  }
+  return review.warning;
+}
+
 function aiReviewNote(call: CallRecord): string | null {
   if (!call.aiRiskFallbackUsed) return null;
   if (call.aiRiskFailureReason) return `Manual review required: ${call.aiRiskFailureReason}`;
@@ -1195,6 +1226,14 @@ function OfficerDashboard({
                     <span>Speech signal</span>
                     <strong>{speechMarkerTitle(latestSignal)}</strong>
                     <small>{speechMarkerDescription(latestSignal)}</small>
+                  </div>
+                </div>
+                <div className="snapshot-card">
+                  <AlertTriangle size={22} />
+                  <div>
+                    <span>Concussion speech review</span>
+                    <strong>{concussionSpeechTitle(latestSignal)}</strong>
+                    <small>{concussionSpeechDescription(latestSignal)}</small>
                   </div>
                 </div>
               </div>

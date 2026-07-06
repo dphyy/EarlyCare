@@ -124,6 +124,48 @@ The bundled `data/parkinsons.data` uses the [Kaggle Parkinson's Disease Data Set
 
 Runtime inference scores derived `patient-speech.wav`, which contains stitched voiced patient clips rather than the full mic-only timeline. Longer derived clips are scored in shorter patient-speech chunks and aggregated with a median probability. `feature_reference_ranges.json` gates the selected feature space; one out-of-range feature yields low confidence, while three or more out-of-range features make the score unavailable. Returned model values are screening research signals, not a Parkinson's diagnosis, and do not currently determine the main call risk level.
 
+### Concussion Speech-Abnormality Review
+
+EarlyCare can also run the bundled speech-abnormality model after each saved call
+when `EARLYCARE_CONCUSSION_SPEECH_MODEL_ENABLED=true`.
+The backend scores the derived `patient-speech.wav`, saves the structured result
+as `concussionSpeechReview`, and displays it separately from the Parkinsonian
+speech-marker score.
+
+Default local configuration points to the checked-in runtime artifacts:
+
+```text
+backend\models\concussion_speech
+backend\app\concussion_speech_model
+```
+
+The checked-in artifacts are only the runtime files needed for inference:
+`model.joblib`, `config.json`, `metrics.json`, and the small vendored
+`speech_abnormality` inference package. Do not push TORGO, VOICED, embedding
+caches, rejected-audio reports, or raw recordings. A fresh machine still needs
+the optional ML dependencies from `requirements-ml.txt`; on first use,
+Transformers may download the configured WavLM backbone into the user's Hugging
+Face cache unless `HF_HOME` points to an existing local cache.
+
+For project-side inference, EarlyCare now contains the adapter, vendored
+inference package, and trained classifier artifacts. The model was trained from
+TORGO dysarthria/control examples and VOICED pathological/healthy voice examples,
+with frozen `microsoft/wavlm-base` embeddings and a calibrated class-balanced
+scikit-learn logistic regression classifier. See `../CITATIONS.md` for dataset,
+model, and classifier citations.
+
+The output labels are research labels only: `normal`, `dysarthria_like`,
+`dysphonia_like`, or `low_audio_quality`. They are not diagnoses. If the patient
+also reports concussion-relevant symptoms such as fall, head impact, headache,
+dizziness, vomiting, confusion, slurred speech, or weakness, an abnormal speech
+result can raise the visible call risk for human review. Without patient-reported
+symptoms, an abnormal speech result raises at most a watch-level review signal.
+
+The bundled artifacts come from the `pilot_full` model. The normal-augmented
+model reduces normal false positives but missed too many external
+dysarthria-like examples in current pilot tests, so it is not bundled as the
+default.
+
 ## Audio Seeking
 
 For Patient overview verification, risk-signal timestamps are tied to patient segments. The frontend starts playback from immediately after the previous agent question/statement so the caregiver hears the full patient answer in context.

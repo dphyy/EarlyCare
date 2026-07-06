@@ -115,6 +115,22 @@ export interface CrisisResource {
   description: string;
 }
 
+export interface ConcussionSpeechReview {
+  modelVersion?: string | null;
+  predictedLabel?: string | null;
+  probabilities: Record<string, number>;
+  qualityOk: boolean;
+  qualityReason?: string | null;
+  durationSec?: number | null;
+  sampleRate?: number | null;
+  rms?: number | null;
+  clippingFraction?: number | null;
+  riskContribution: RiskLevel;
+  riskReason?: string | null;
+  warning: string;
+  failureReason?: string | null;
+}
+
 export interface CallRecord {
   id: string;
   seniorId: string;
@@ -144,6 +160,7 @@ export interface CallRecord {
   speechModelProbability?: number | null;
   speechModelWarnings?: string[];
   speechModelFeaturesSummary?: Record<string, number | string | null>;
+  concussionSpeechReview?: ConcussionSpeechReview | null;
   currentSpeechProfile?: SpeechProfile | null;
   transcriptSegments?: TranscriptSegment[];
   transcriptAlignmentWarnings?: string[];

@@ -154,6 +154,22 @@ class EmotionProviderResult(BaseModel):
     failureReason: str | None = None
 
 
+class ConcussionSpeechReview(BaseModel):
+    modelVersion: str | None = None
+    predictedLabel: str | None = None
+    probabilities: dict[str, float] = {}
+    qualityOk: bool = False
+    qualityReason: str | None = None
+    durationSec: float | None = None
+    sampleRate: int | None = None
+    rms: float | None = None
+    clippingFraction: float | None = None
+    riskContribution: RiskLevel = "Green"
+    riskReason: str | None = None
+    warning: str
+    failureReason: str | None = None
+
+
 class CrisisResource(BaseModel):
     name: str
     phone: str | None = None
@@ -212,6 +228,7 @@ class CallRecord(BaseModel):
     speechModelProbability: float | None = None
     speechModelWarnings: list[str] = []
     speechModelFeaturesSummary: dict[str, float | int | str | None] | None = None
+    concussionSpeechReview: ConcussionSpeechReview | None = None
     riskAssessment: RiskAssessment
     recommendedAction: str
 

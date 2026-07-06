@@ -17,9 +17,11 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from app.data import CHECKINS, SENIORS, VOLUNTEER_TASKS
+from app.concussion_speech import review_concussion_speech
 from app.ml import assess_speech_deviation, extract_demo_embedding_note
 from app.models import (
     CallRecord,
+    ConcussionSpeechReview,
     CheckInSession,
     CrisisResource,
     EmotionConcernLevel,
@@ -1205,6 +1207,47 @@ def _risk_level_with_safeguard(risk_level: str, safeguard_level: SafeguardLevel)
     return risk_level if order.get(risk_level, 0) >= order.get(safeguard_risk, 0) else safeguard_risk
 
 
+def _risk_level_at_least(risk_level: str, minimum: str) -> str:
+    order = {"Green": 0, "Watch": 1, "Amber": 2, "Red": 3}
+    return risk_level if order.get(risk_level, 0) >= order.get(minimum, 0) else minimum
+
+
+def _has_concussion_symptom_evidence(symptoms: Symptoms) -> bool:
+    return any(
+        [
+            symptoms.fall,
+            symptoms.headImpact,
+            symptoms.headache,
+            symptoms.dizziness,
+            symptoms.vomiting,
+            symptoms.confusion,
+            symptoms.slurredSpeech,
+            symptoms.weakness,
+        ]
+    )
+
+
+def _apply_concussion_speech_modifier(
+    assessment: RiskAssessment,
+    symptoms: Symptoms,
+    review: ConcussionSpeechReview | None,
+) -> RiskAssessment:
+    if review is None or review.riskContribution == "Green" or not review.qualityOk:
+        return assessment
+
+    reasons = list(assessment.reasons)
+    if review.riskReason and review.riskReason not in reasons:
+        reasons.append(review.riskReason)
+
+    if _has_concussion_symptom_evidence(symptoms):
+        reasons.append("Patient-reported concussion-relevant symptoms plus abnormal speech model output require human review.")
+        minimum_level = "Red" if any([symptoms.vomiting, symptoms.confusion, symptoms.slurredSpeech, symptoms.weakness]) else "Amber"
+        return assessment.model_copy(update={"riskLevel": _risk_level_at_least(assessment.riskLevel, minimum_level), "reasons": reasons})
+
+    reasons.append("Speech-abnormality model output is present without patient-reported concussion symptoms; review audio before acting.")
+    return assessment.model_copy(update={"riskLevel": _risk_level_at_least(assessment.riskLevel, "Watch"), "reasons": reasons})
+
+
 def _openai_safeguard_review(
     segments: list[TranscriptSegment],
 ) -> tuple[bool, SafeguardLevel, str | None, list[str], str | None, list[CrisisResource], str | None]:
@@ -1581,7 +1624,7 @@ async def save_call(
         if timed_segments:
             _add_warning(transcript_alignment_warnings, "Provider segment timing was unavailable; segment times were estimated from live transcript event times.")
             translation.segments = timed_segments
-    _, assessment, risk_signals, recommended_action, ai_fallback_used, ai_failure_reason = _openai_risk_review(english_transcript, translation.segments)
+    symptoms, assessment, risk_signals, recommended_action, ai_fallback_used, ai_failure_reason = _openai_risk_review(english_transcript, translation.segments)
     (
         safeguard_review_available,
         safeguard_level,
@@ -1619,6 +1662,14 @@ async def save_call(
     speech_model_version, speech_model_probability, speech_model_warnings, speech_model_features = _speech_model_review(
         patient_speech_path
     )
+    concussion_speech_review = review_concussion_speech(patient_speech_path)
+    previous_risk_level = assessment.riskLevel
+    assessment = _apply_concussion_speech_modifier(assessment, symptoms, concussion_speech_review)
+    if concussion_speech_review and assessment.riskLevel != previous_risk_level:
+        recommended_action = (
+            f"{recommended_action} Speech abnormality model also flagged a research-only review signal; "
+            "compare the patient audio with the transcript and escalate to a clinician or emergency service if symptoms are acute."
+        )
     speech_model_warnings = [*speech_extraction_warnings, *speech_model_warnings]
     if speech_model_features is not None:
         speech_model_features = {**speech_model_features, **speech_extraction_summary}
@@ -1678,6 +1729,7 @@ async def save_call(
         speechModelProbability=speech_model_probability,
         speechModelWarnings=speech_model_warnings,
         speechModelFeaturesSummary=speech_model_features,
+        concussionSpeechReview=concussion_speech_review,
         riskAssessment=assessment,
         recommendedAction=recommended_action,
     )

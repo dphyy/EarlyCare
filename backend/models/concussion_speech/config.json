@@ -1,0 +1,21 @@
+{
+  "classifier": {
+    "calibrate": true,
+    "class_weight": "balanced",
+    "max_iter": 1000,
+    "type": "logistic_regression"
+  },
+  "clipping_fraction_threshold": 0.01,
+  "clipping_threshold": 0.99,
+  "max_seconds": 5.0,
+  "min_seconds": 0.5,
+  "model_name": "microsoft/wavlm-base",
+  "sample_rate": 16000,
+  "silence_rms_threshold": 0.001,
+  "splits": {
+    "seed": 42,
+    "test": 0.15,
+    "train": 0.7,
+    "val": 0.15
+  }
+}

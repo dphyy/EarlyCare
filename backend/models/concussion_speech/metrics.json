@@ -1,0 +1,828 @@
+{
+  "n_total_manifest_rows": 17843,
+  "n_embeddings": 16968,
+  "n_rejected_audio": 875,
+  "classes": [
+    "dysarthria_like",
+    "dysphonia_like",
+    "normal"
+  ],
+  "splits": {
+    "train": {
+      "accuracy": 0.9341577266399148,
+      "macro_f1": 0.9234257047577232,
+      "per_class": {
+        "dysarthria_like": {
+          "precision": 0.9949894514767933,
+          "recall": 0.8305084745762712,
+          "f1": 0.9053389322135573,
+          "support": 4543
+        },
+        "dysphonia_like": {
+          "precision": 0.968421052631579,
+          "recall": 0.8679245283018868,
+          "f1": 0.9154228855721394,
+          "support": 106
+        },
+        "normal": {
+          "precision": 0.9060547813551177,
+          "recall": 0.9973551970378207,
+          "f1": 0.9495152964874732,
+          "support": 7562
+        }
+      },
+      "abnormal_vs_normal": {
+        "auroc": 0.9951754106257135,
+        "auprc": 0.9927019593123618
+      },
+      "calibration": {
+        "ece": 0.12073041547107202,
+        "brier_multiclass": 0.1268843780354306
+      },
+      "normal_false_positive_rate": 0.0026448029621793175,
+      "confusion_matrix": {
+        "labels": [
+          "dysarthria_like",
+          "dysphonia_like",
+          "normal"
+        ],
+        "matrix": [
+          [
+            3773,
+            0,
+            770
+          ],
+          [
+            2,
+            92,
+            12
+          ],
+          [
+            17,
+            3,
+            7542
+          ]
+        ]
+      },
+      "classification_report": {
+        "dysarthria_like": {
+          "precision": 0.9949894514767933,
+          "recall": 0.8305084745762712,
+          "f1-score": 0.9053389322135573,
+          "support": 4543.0
+        },
+        "dysphonia_like": {
+          "precision": 0.968421052631579,
+          "recall": 0.8679245283018868,
+          "f1-score": 0.9154228855721394,
+          "support": 106.0
+        },
+        "normal": {
+          "precision": 0.9060547813551177,
+          "recall": 0.9973551970378207,
+          "f1-score": 0.9495152964874732,
+          "support": 7562.0
+        },
+        "accuracy": 0.9341577266399148,
+        "macro avg": {
+          "precision": 0.95648842848783,
+          "recall": 0.8985960666386595,
+          "f1-score": 0.9234257047577232,
+          "support": 12211.0
+        },
+        "weighted avg": {
+          "precision": 0.939683561235396,
+          "recall": 0.9341577266399148,
+          "f1-score": 0.9327839052456893,
+          "support": 12211.0
+        }
+      },
+      "groups": {
+        "torgo": {
+          "accuracy": 0.9347699958557811,
+          "macro_f1": 0.9278683181257743,
+          "per_class": {
+            "dysarthria_like": {
+              "precision": 0.9955145118733509,
+              "recall": 0.8305084745762712,
+              "f1": 0.90555622224889,
+              "support": 4543
+            },
+            "dysphonia_like": {
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "support": 0
+            },
+            "normal": {
+              "precision": 0.9069486404833836,
+              "recall": 0.9977399627758575,
+              "f1": 0.9501804140026587,
+              "support": 7522
+            }
+          },
+          "abnormal_vs_normal": {
+            "auroc": 0.9954514815825592,
+            "auprc": 0.9930289926938792
+          },
+          "calibration": {
+            "ece": 0.11899977480777306,
+            "brier_multiclass": 0.12467138538271458
+          },
+          "normal_false_positive_rate": 0.002260037224142515,
+          "confusion_matrix": {
+            "labels": [
+              "dysarthria_like",
+              "dysphonia_like",
+              "normal"
+            ],
+            "matrix": [
+              [
+                3773,
+                0,
+                770
+              ],
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                17,
+                0,
+                7505
+              ]
+            ]
+          },
+          "classification_report": {
+            "dysarthria_like": {
+              "precision": 0.9955145118733509,
+              "recall": 0.8305084745762712,
+              "f1-score": 0.90555622224889,
+              "support": 4543.0
+            },
+            "dysphonia_like": {
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1-score": 0.0,
+              "support": 0.0
+            },
+            "normal": {
+              "precision": 0.9069486404833836,
+              "recall": 0.9977399627758575,
+              "f1-score": 0.9501804140026587,
+              "support": 7522.0
+            },
+            "accuracy": 0.9347699958557811,
+            "macro avg": {
+              "precision": 0.6341543841189116,
+              "recall": 0.6094161457840429,
+              "f1-score": 0.6185788787505162,
+              "support": 12065.0
+            },
+            "weighted avg": {
+              "precision": 0.9402975632952046,
+              "recall": 0.9347699958557811,
+              "f1-score": 0.9333774547703859,
+              "support": 12065.0
+            }
+          }
+        },
+        "voiced": {
+          "accuracy": 0.8835616438356164,
+          "macro_f1": 0.5822945199098143,
+          "per_class": {
+            "dysarthria_like": {
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "support": 0
+            },
+            "dysphonia_like": {
+              "precision": 0.968421052631579,
+              "recall": 0.8679245283018868,
+              "f1": 0.9154228855721394,
+              "support": 106
+            },
+            "normal": {
+              "precision": 0.7551020408163265,
+              "recall": 0.925,
+              "f1": 0.8314606741573034,
+              "support": 40
+            }
+          },
+          "abnormal_vs_normal": {
+            "auroc": 0.9674528301886793,
+            "auprc": 0.9880037291919135
+          },
+          "calibration": {
+            "ece": 0.2637465620694095,
+            "brier_multiclass": 0.30975942156295705
+          },
+          "normal_false_positive_rate": 0.075,
+          "confusion_matrix": {
+            "labels": [
+              "dysarthria_like",
+              "dysphonia_like",
+              "normal"
+            ],
+            "matrix": [
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                2,
+                92,
+                12
+              ],
+              [
+                0,
+                3,
+                37
+              ]
+            ]
+          },
+          "classification_report": {
+            "dysarthria_like": {
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1-score": 0.0,
+              "support": 0.0
+            },
+            "dysphonia_like": {
+              "precision": 0.968421052631579,
+              "recall": 0.8679245283018868,
+              "f1-score": 0.9154228855721394,
+              "support": 106.0
+            },
+            "normal": {
+              "precision": 0.7551020408163265,
+              "recall": 0.925,
+              "f1-score": 0.8314606741573034,
+              "support": 40.0
+            },
+            "accuracy": 0.8835616438356164,
+            "macro avg": {
+              "precision": 0.5745076978159686,
+              "recall": 0.5976415094339623,
+              "f1-score": 0.5822945199098143,
+              "support": 146.0
+            },
+            "weighted avg": {
+              "precision": 0.9099774877506879,
+              "recall": 0.8835616438356164,
+              "f1-score": 0.8924195399790336,
+              "support": 146.0
+            }
+          }
+        }
+      }
+    },
+    "val": {
+      "accuracy": 0.7541355822251055,
+      "macro_f1": 0.5669617400674214,
+      "per_class": {
+        "dysarthria_like": {
+          "precision": 0.7098214285714286,
+          "recall": 0.19041916167664671,
+          "f1": 0.3002832861189802,
+          "support": 835
+        },
+        "dysphonia_like": {
+          "precision": 0.6470588235294118,
+          "recall": 0.4782608695652174,
+          "f1": 0.55,
+          "support": 23
+        },
+        "normal": {
+          "precision": 0.7582688247712879,
+          "recall": 0.9685393258426966,
+          "f1": 0.850601934083284,
+          "support": 2225
+        }
+      },
+      "abnormal_vs_normal": {
+        "auroc": 0.7477556900028811,
+        "auprc": 0.5694645976873671
+      },
+      "calibration": {
+        "ece": 0.037673653061421605,
+        "brier_multiclass": 0.3383142205193633
+      },
+      "normal_false_positive_rate": 0.03146067415730337,
+      "confusion_matrix": {
+        "labels": [
+          "dysarthria_like",
+          "dysphonia_like",
+          "normal"
+        ],
+        "matrix": [
+          [
+            159,
+            0,
+            676
+          ],
+          [
+            1,
+            11,
+            11
+          ],
+          [
+            64,
+            6,
+            2155
+          ]
+        ]
+      },
+      "classification_report": {
+        "dysarthria_like": {
+          "precision": 0.7098214285714286,
+          "recall": 0.19041916167664671,
+          "f1-score": 0.3002832861189802,
+          "support": 835.0
+        },
+        "dysphonia_like": {
+          "precision": 0.6470588235294118,
+          "recall": 0.4782608695652174,
+          "f1-score": 0.55,
+          "support": 23.0
+        },
+        "normal": {
+          "precision": 0.7582688247712879,
+          "recall": 0.9685393258426966,
+          "f1-score": 0.850601934083284,
+          "support": 2225.0
+        },
+        "accuracy": 0.7541355822251055,
+        "macro avg": {
+          "precision": 0.7050496922907095,
+          "recall": 0.5457397856948536,
+          "f1-score": 0.5669617400674214,
+          "support": 3083.0
+        },
+        "weighted avg": {
+          "precision": 0.7443176713961839,
+          "recall": 0.7541355822251055,
+          "f1-score": 0.6993110111075754,
+          "support": 3083.0
+        }
+      },
+      "groups": {
+        "torgo": {
+          "accuracy": 0.7574565716158637,
+          "macro_f1": 0.5769290733042609,
+          "per_class": {
+            "dysarthria_like": {
+              "precision": 0.7130044843049327,
+              "recall": 0.19041916167664671,
+              "f1": 0.3005671077504726,
+              "support": 835
+            },
+            "dysphonia_like": {
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "support": 0
+            },
+            "normal": {
+              "precision": 0.7609618104667609,
+              "recall": 0.9711191335740073,
+              "f1": 0.8532910388580491,
+              "support": 2216
+            }
+          },
+          "abnormal_vs_normal": {
+            "auroc": 0.7439806307961694,
+            "auprc": 0.5599348455542197
+          },
+          "calibration": {
+            "ece": 0.03633603959621191,
+            "brier_multiclass": 0.33630529712995494
+          },
+          "normal_false_positive_rate": 0.02888086642599278,
+          "confusion_matrix": {
+            "labels": [
+              "dysarthria_like",
+              "dysphonia_like",
+              "normal"
+            ],
+            "matrix": [
+              [
+                159,
+                0,
+                676
+              ],
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                64,
+                0,
+                2152
+              ]
+            ]
+          },
+          "classification_report": {
+            "dysarthria_like": {
+              "precision": 0.7130044843049327,
+              "recall": 0.19041916167664671,
+              "f1-score": 0.3005671077504726,
+              "support": 835.0
+            },
+            "dysphonia_like": {
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1-score": 0.0,
+              "support": 0.0
+            },
+            "normal": {
+              "precision": 0.7609618104667609,
+              "recall": 0.9711191335740073,
+              "f1-score": 0.8532910388580491,
+              "support": 2216.0
+            },
+            "accuracy": 0.7574565716158637,
+            "macro avg": {
+              "precision": 0.4913220982572312,
+              "recall": 0.38717943175021796,
+              "f1-score": 0.3846193822028406,
+              "support": 3051.0
+            },
+            "weighted avg": {
+              "precision": 0.7478368129757329,
+              "recall": 0.7574565716158637,
+              "f1-score": 0.7020211330976996,
+              "support": 3051.0
+            }
+          }
+        },
+        "voiced": {
+          "accuracy": 0.4375,
+          "macro_f1": 0.2702898550724638,
+          "per_class": {
+            "dysarthria_like": {
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "support": 0
+            },
+            "dysphonia_like": {
+              "precision": 0.6470588235294118,
+              "recall": 0.4782608695652174,
+              "f1": 0.55,
+              "support": 23
+            },
+            "normal": {
+              "precision": 0.21428571428571427,
+              "recall": 0.3333333333333333,
+              "f1": 0.2608695652173913,
+              "support": 9
+            }
+          },
+          "abnormal_vs_normal": {
+            "auroc": 0.48792270531400966,
+            "auprc": 0.7839066475670079
+          },
+          "calibration": {
+            "ece": 0.19488008506596088,
+            "brier_multiclass": 0.5298525099282589
+          },
+          "normal_false_positive_rate": 0.6666666666666666,
+          "confusion_matrix": {
+            "labels": [
+              "dysarthria_like",
+              "dysphonia_like",
+              "normal"
+            ],
+            "matrix": [
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                1,
+                11,
+                11
+              ],
+              [
+                0,
+                6,
+                3
+              ]
+            ]
+          },
+          "classification_report": {
+            "dysarthria_like": {
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1-score": 0.0,
+              "support": 0.0
+            },
+            "dysphonia_like": {
+              "precision": 0.6470588235294118,
+              "recall": 0.4782608695652174,
+              "f1-score": 0.55,
+              "support": 23.0
+            },
+            "normal": {
+              "precision": 0.21428571428571427,
+              "recall": 0.3333333333333333,
+              "f1-score": 0.2608695652173913,
+              "support": 9.0
+            },
+            "accuracy": 0.4375,
+            "macro avg": {
+              "precision": 0.2871148459383754,
+              "recall": 0.2705314009661836,
+              "f1-score": 0.2702898550724638,
+              "support": 32.0
+            },
+            "weighted avg": {
+              "precision": 0.5253413865546218,
+              "recall": 0.4375,
+              "f1-score": 0.4686820652173913,
+              "support": 32.0
+            }
+          }
+        }
+      }
+    },
+    "test": {
+      "accuracy": 0.8763440860215054,
+      "macro_f1": 0.809732467213912,
+      "per_class": {
+        "dysarthria_like": {
+          "precision": 0.5763097949886105,
+          "recall": 0.9511278195488722,
+          "f1": 0.7177304964539007,
+          "support": 266
+        },
+        "dysphonia_like": {
+          "precision": 0.8095238095238095,
+          "recall": 0.7727272727272727,
+          "f1": 0.7906976744186046,
+          "support": 22
+        },
+        "normal": {
+          "precision": 0.985996705107084,
+          "recall": 0.8636363636363636,
+          "f1": 0.9207692307692308,
+          "support": 1386
+        }
+      },
+      "abnormal_vs_normal": {
+        "auroc": 0.9664902998236332,
+        "auprc": 0.9041949549508059
+      },
+      "calibration": {
+        "ece": 0.1319961817923982,
+        "brier_multiclass": 0.220896287384505
+      },
+      "normal_false_positive_rate": 0.13636363636363635,
+      "confusion_matrix": {
+        "labels": [
+          "dysarthria_like",
+          "dysphonia_like",
+          "normal"
+        ],
+        "matrix": [
+          [
+            253,
+            1,
+            12
+          ],
+          [
+            0,
+            17,
+            5
+          ],
+          [
+            186,
+            3,
+            1197
+          ]
+        ]
+      },
+      "classification_report": {
+        "dysarthria_like": {
+          "precision": 0.5763097949886105,
+          "recall": 0.9511278195488722,
+          "f1-score": 0.7177304964539007,
+          "support": 266.0
+        },
+        "dysphonia_like": {
+          "precision": 0.8095238095238095,
+          "recall": 0.7727272727272727,
+          "f1-score": 0.7906976744186046,
+          "support": 22.0
+        },
+        "normal": {
+          "precision": 0.985996705107084,
+          "recall": 0.8636363636363636,
+          "f1-score": 0.9207692307692308,
+          "support": 1386.0
+        },
+        "accuracy": 0.8763440860215054,
+        "macro avg": {
+          "precision": 0.7906101032065013,
+          "recall": 0.8624971519708362,
+          "f1-score": 0.809732467213912,
+          "support": 1674.0
+        },
+        "weighted avg": {
+          "precision": 0.9185778748834603,
+          "recall": 0.8763440860215054,
+          "f1-score": 0.8867967829988656,
+          "support": 1674.0
+        }
+      },
+      "groups": {
+        "torgo": {
+          "accuracy": 0.8789537712895377,
+          "macro_f1": 0.5470152519808896,
+          "per_class": {
+            "dysarthria_like": {
+              "precision": 0.5763097949886105,
+              "recall": 0.9511278195488722,
+              "f1": 0.7177304964539007,
+              "support": 266
+            },
+            "dysphonia_like": {
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "support": 0
+            },
+            "normal": {
+              "precision": 0.9900332225913622,
+              "recall": 0.865021770682148,
+              "f1": 0.9233152594887684,
+              "support": 1378
+            }
+          },
+          "abnormal_vs_normal": {
+            "auroc": 0.9744262688651962,
+            "auprc": 0.9247862861576683
+          },
+          "calibration": {
+            "ece": 0.13005295107616996,
+            "brier_multiclass": 0.21593126743757418
+          },
+          "normal_false_positive_rate": 0.13497822931785197,
+          "confusion_matrix": {
+            "labels": [
+              "dysarthria_like",
+              "dysphonia_like",
+              "normal"
+            ],
+            "matrix": [
+              [
+                253,
+                1,
+                12
+              ],
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                186,
+                0,
+                1192
+              ]
+            ]
+          },
+          "classification_report": {
+            "dysarthria_like": {
+              "precision": 0.5763097949886105,
+              "recall": 0.9511278195488722,
+              "f1-score": 0.7177304964539007,
+              "support": 266.0
+            },
+            "dysphonia_like": {
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1-score": 0.0,
+              "support": 0.0
+            },
+            "normal": {
+              "precision": 0.9900332225913622,
+              "recall": 0.865021770682148,
+              "f1-score": 0.9233152594887684,
+              "support": 1378.0
+            },
+            "accuracy": 0.8789537712895377,
+            "macro avg": {
+              "precision": 0.5221143391933242,
+              "recall": 0.6053831967436735,
+              "f1-score": 0.5470152519808896,
+              "support": 1644.0
+            },
+            "weighted avg": {
+              "precision": 0.9230925706799681,
+              "recall": 0.8789537712895377,
+              "f1-score": 0.8900515447884795,
+              "support": 1644.0
+            }
+          }
+        },
+        "voiced": {
+          "accuracy": 0.7333333333333333,
+          "macro_f1": 0.6825396825396826,
+          "per_class": {
+            "dysarthria_like": {
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "support": 0
+            },
+            "dysphonia_like": {
+              "precision": 0.85,
+              "recall": 0.7727272727272727,
+              "f1": 0.8095238095238095,
+              "support": 22
+            },
+            "normal": {
+              "precision": 0.5,
+              "recall": 0.625,
+              "f1": 0.5555555555555556,
+              "support": 8
+            }
+          },
+          "abnormal_vs_normal": {
+            "auroc": 0.6079545454545454,
+            "auprc": 0.7978640854651174
+          },
+          "calibration": {
+            "ece": 0.30491540928681693,
+            "brier_multiclass": 0.49297938047631595
+          },
+          "normal_false_positive_rate": 0.375,
+          "confusion_matrix": {
+            "labels": [
+              "dysarthria_like",
+              "dysphonia_like",
+              "normal"
+            ],
+            "matrix": [
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                17,
+                5
+              ],
+              [
+                0,
+                3,
+                5
+              ]
+            ]
+          },
+          "classification_report": {
+            "dysarthria_like": {
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1-score": 0.0,
+              "support": 0.0
+            },
+            "dysphonia_like": {
+              "precision": 0.85,
+              "recall": 0.7727272727272727,
+              "f1-score": 0.8095238095238095,
+              "support": 22.0
+            },
+            "normal": {
+              "precision": 0.5,
+              "recall": 0.625,
+              "f1-score": 0.5555555555555556,
+              "support": 8.0
+            },
+            "accuracy": 0.7333333333333333,
+            "macro avg": {
+              "precision": 0.45,
+              "recall": 0.4659090909090909,
+              "f1-score": 0.45502645502645506,
+              "support": 30.0
+            },
+            "weighted avg": {
+              "precision": 0.7566666666666666,
+              "recall": 0.7333333333333333,
+              "f1-score": 0.7417989417989418,
+              "support": 30.0
+            }
+          }
+        }
+      }
+    }
+  }
+}
