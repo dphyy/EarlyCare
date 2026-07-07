@@ -696,6 +696,58 @@ class CallWorkflowTests(unittest.TestCase):
         self.assertEqual(lifted.riskLevel, "Amber")
         self.assertTrue(any("concussion-relevant symptoms" in reason for reason in lifted.reasons))
 
+    def test_volunteer_task_for_call_is_derived_from_assessed_risk(self) -> None:
+        senior = main.SENIORS[0]
+        assessment = main._empty_assessment("Amber", ["Patient reported near fall."])
+        signals = [
+            main.RiskSignal(
+                id="risk-fall",
+                label="Near fall",
+                severity="Amber",
+                quotedText="I almost fell.",
+                reason="Fall risk cue.",
+            )
+        ]
+
+        task = main._volunteer_task_for_call(
+            "call-risk",
+            senior,
+            assessment,
+            "Arrange same-day volunteer check-in.",
+            "None",
+            None,
+            signals,
+            "2026-07-04T10:01:00+08:00",
+        )
+
+        self.assertIsNotNone(task)
+        assert task is not None
+        self.assertEqual(task.id, "task-call-risk")
+        self.assertEqual(task.seniorId, senior.id)
+        self.assertEqual(task.priority, "Urgent")
+        self.assertEqual(task.reason, "Near fall")
+        self.assertEqual(task.recommendedAction, "Arrange same-day volunteer check-in.")
+
+    def test_upsert_volunteer_task_for_call_replaces_existing_call_task(self) -> None:
+        first = main.VolunteerTask(
+            id="task-call-risk",
+            seniorId="s-001",
+            priority="Today",
+            reason="Earlier reason",
+            recommendedAction="Check later.",
+            assignedTo="Community volunteer follow-up team",
+            status="Open",
+            createdAt="2026-07-04T10:01:00+08:00",
+        )
+        replacement = first.model_copy(update={"priority": "Urgent", "reason": "Updated reason"})
+
+        with patch.object(main, "VOLUNTEER_TASKS", [first]):
+            main._upsert_volunteer_task_for_call(replacement)
+
+            self.assertEqual(len(main.VOLUNTEER_TASKS), 1)
+            self.assertEqual(main.VOLUNTEER_TASKS[0].priority, "Urgent")
+            self.assertEqual(main.VOLUNTEER_TASKS[0].reason, "Updated reason")
+
     def test_save_call_stores_concussion_speech_review(self) -> None:
         messages = [
             {"role": "Agent", "text": "Any fall, headache, or dizziness?", "timestamp": "2026-07-04T10:00:00+08:00"},

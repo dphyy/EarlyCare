@@ -1966,6 +1966,7 @@ function App() {
             onSelectSenior={setSelectedSeniorId}
             onSavedCall={(call) => {
               setLoadedCalls((calls) => [call, ...calls.filter((item) => item.id !== call.id)]);
+              void fetchVolunteerTasks().then(setLoadedTasks);
             }}
           />
         </ConversationProvider>

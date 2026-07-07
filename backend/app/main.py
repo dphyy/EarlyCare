@@ -1185,6 +1185,60 @@ def _parkinsons_explanations(review: ParkinsonsSpeechReview) -> list[ModelExplan
     return [item for _, item in sorted(scored, key=lambda row: row[0], reverse=True)[:3]]
 
 
+def _volunteer_task_for_call(
+    call_id: str,
+    senior: Senior,
+    assessment: RiskAssessment,
+    recommended_action: str,
+    safeguard_level: SafeguardLevel,
+    safeguard_category: str | None,
+    risk_signals: list[RiskSignal],
+    created_at: str,
+) -> VolunteerTask | None:
+    if assessment.riskLevel == "Green" and safeguard_level == "None":
+        return None
+
+    if assessment.riskLevel in {"Red", "Amber"} or safeguard_level in {"Emergency", "Urgent"}:
+        priority = "Urgent"
+    elif assessment.riskLevel == "Watch" or safeguard_level == "Support":
+        priority = "Today"
+    else:
+        priority = "Routine"
+
+    if safeguard_level != "None":
+        reason = f"Safeguard {safeguard_level.lower()} concern"
+        if safeguard_category:
+            reason = f"{reason}: {safeguard_category.replace('_', ' ')}"
+    elif risk_signals:
+        reason = risk_signals[0].label
+    elif assessment.reasons:
+        reason = assessment.reasons[0]
+    else:
+        reason = f"{assessment.riskLevel} follow-up"
+
+    task_id = f"task-{call_id}"
+    return VolunteerTask(
+        id=task_id,
+        seniorId=senior.id,
+        priority=priority,
+        reason=reason[:120],
+        recommendedAction=recommended_action,
+        assignedTo="Community volunteer follow-up team",
+        status="Open",
+        createdAt=created_at,
+    )
+
+
+def _upsert_volunteer_task_for_call(task: VolunteerTask | None) -> None:
+    if task is None:
+        return
+    for index, existing in enumerate(VOLUNTEER_TASKS):
+        if existing.id == task.id:
+            VOLUNTEER_TASKS[index] = task
+            return
+    VOLUNTEER_TASKS.insert(0, task)
+
+
 FALL_OR_NEAR_FALL_RE = re.compile(
     r"\b("
     r"fall|falls|fallen|falling|fell|"
@@ -2275,6 +2329,18 @@ async def save_call(
         operatorId=operatorId or "demo-operator",
         riskAssessment=assessment,
         recommendedAction=recommended_action,
+    )
+    _upsert_volunteer_task_for_call(
+        _volunteer_task_for_call(
+            call_id,
+            senior,
+            assessment,
+            recommended_action,
+            safeguard_level,
+            safeguard_category,
+            risk_signals,
+            completed_at_value,
+        )
     )
     _call_metadata_path(call_id).write_text(call.model_dump_json(indent=2))
     return SavedCallResponse(call=call)
