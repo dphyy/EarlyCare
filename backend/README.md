@@ -1,6 +1,6 @@
 # EarlyCare Backend
 
-FastAPI service for EarlyCare call sessions, call artifact storage, transcription, translation, OpenAI-assisted patient-risk review, safeguard classification, ElevenLabs tone ingestion, Parkinson voice-feature scoring, and concussion speech-abnormality review.
+FastAPI service for EarlyCare call sessions, call artifact storage, transcription, translation, OpenAI-assisted patient-risk review, safeguard classification, consultation-memory extraction, ElevenLabs tone ingestion, Parkinson voice-feature scoring, and concussion speech-abnormality review.
 
 ## What It Does
 
@@ -15,6 +15,7 @@ FastAPI service for EarlyCare call sessions, call artifact storage, transcriptio
 - Saves sanitized provider attempt diagnostics so fallback reasons are visible in `metadata.json` and the dashboard.
 - Uses OpenAI structured output to detect patient-only risk signals.
 - Uses a separate OpenAI safeguard classifier for patient-stated distress, self-harm, abuse/neglect, unsafe environment, and emergency cues.
+- Extracts dated consultation-memory items from patient-only speech for AIC monitoring and doctor handoff briefs.
 - Reads ElevenLabs `user_emotional_state` data collection results and attaches per-response tone evidence when available.
 - Attaches risk evidence to patient transcript segments and audio seek times.
 - Applies safeguard/tone modifiers to the visible call risk level while preserving the underlying reasons in `riskAssessment`.
@@ -38,9 +39,10 @@ When the frontend posts to `POST /calls`, the backend:
 11. Derives `patient-speech.wav` by finding agent-bounded answer windows, falling back to patient-segment or full-audio VAD when needed, and stitching voiced patient clips from `patient-audio.wav`.
 12. Queries ElevenLabs conversation data collection for `user_emotional_state` and maps tone evidence to patient segments when possible.
 13. Scores the saved Parkinson voice-feature model and saved concussion speech-abnormality model when patient speech is available.
-14. Drops any risk or safeguard signal that cannot be validated against patient evidence.
-15. Saves `metadata.json`, `transcript-original.json`, `transcript-english.txt`, provider attempt history, and audio.
-16. Returns the saved call record to the frontend.
+14. Extracts consultation-memory items for falls, medication, meals/fluids, symptoms, pain, sleep, mobility, mood/safety, help-seeking, appointments, and other medical context.
+15. Drops any risk, safeguard, or consultation-memory item that cannot be validated against patient evidence.
+16. Saves `metadata.json`, `transcript-original.json`, `transcript-english.txt`, provider attempt history, consultation memory, and audio.
+17. Returns the saved call record to the frontend.
 
 Generated call artifacts are intentionally local-only and ignored by git.
 
@@ -73,6 +75,22 @@ OpenAI returns:
 If OpenAI is unavailable, the call still saves with `aiRiskFallbackUsed=true` and a manual-review recommendation.
 
 EarlyCare does not diagnose medical conditions.
+
+## Consultation Memory
+
+Consultation memory is a longitudinal record for AIC/community care coordinators and the printable Doctor Brief. It is not a doctor dashboard and it is not a diagnosis. It captures compact, dated facts patients may forget during clinic visits.
+
+Each `consultationMemory` item includes:
+
+- category: `fall`, `medication`, `meal_intake`, `symptom`, `pain`, `sleep`, `mobility`, `mood`, `help_needed`, `appointment`, or `other_medical`
+- short summary for care coordinators
+- exact patient quote
+- call ID and check-in date/time
+- transcript/audio timestamp when available
+- severity: `info`, `watch`, or `urgent`
+- status: `new`, `ongoing`, `resolved`, or `unclear`
+
+When `OPENAI_API_KEY` is configured, the backend uses OpenAI structured output to extract these items from patient speech only. If OpenAI is unavailable, a deterministic keyword fallback extracts conservative evidence-backed items for hackathon demos. Agent questions and summaries are ignored, and items without exact patient evidence are dropped before saving.
 
 ## Safeguard And Tone Review
 
@@ -230,6 +248,7 @@ Never commit real `.env` files.
 | `GET /seniors` | Demo senior roster. |
 | `GET /calls` | Saved call records, newest first. |
 | `GET /calls/{call_id}` | One saved call record. |
+| `GET /seniors/{senior_id}/consultation-memory` | Aggregated consultation-memory items for one senior, newest first. |
 | `GET /calls/{call_id}/audio` | Replayable saved full-call recording. |
 | `GET /calls/{call_id}/patient-audio` | Saved patient-only microphone recording for ML research. |
 | `GET /calls/{call_id}/patient-speech-audio` | Derived patient-turn-only audio used for saved Parkinson and concussion speech review. |
@@ -258,7 +277,7 @@ Each call can include:
 - `transcript-original.json`
 - `transcript-english.txt`
 
-`metadata.json` includes the final transcript provider, fallback flag, provider attempt trail, live transcript messages, role-labeled transcript segments, AI risk fallback status, safeguard fields, tone/emotion fields, speech profile metrics, and speech-marker quality fields when available.
+`metadata.json` includes the final transcript provider, fallback flag, provider attempt trail, live transcript messages, role-labeled transcript segments, AI risk fallback status, safeguard fields, consultation-memory items, tone/emotion fields, speech profile metrics, and speech-marker quality fields when available.
 
 Generated storage is ignored by git and can be cleared between demo runs. This is intentionally simple for hackathon speed; use a database and object storage before any real pilot.
 

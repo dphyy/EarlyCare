@@ -3,6 +3,20 @@ export type SafeguardLevel = "None" | "Support" | "Urgent" | "Emergency";
 export type EmotionConcernLevel = "None" | "Watch" | "Review";
 export type CheckInStatus = "Checked in" | "Missed" | "Needs follow-up" | "Urgent";
 export type Language = "English" | "Mandarin" | "Malay" | "Tamil" | "Singlish/Dialect";
+export type ConsultationMemoryCategory =
+  | "fall"
+  | "medication"
+  | "meal_intake"
+  | "symptom"
+  | "pain"
+  | "sleep"
+  | "mobility"
+  | "mood"
+  | "help_needed"
+  | "appointment"
+  | "other_medical";
+export type ConsultationMemorySeverity = "info" | "watch" | "urgent";
+export type ConsultationMemoryStatus = "new" | "ongoing" | "resolved" | "unclear";
 
 export interface SpeechProfile {
   speechRate: number;
@@ -115,6 +129,20 @@ export interface CrisisResource {
   description: string;
 }
 
+export interface ConsultationMemoryItem {
+  id: string;
+  seniorId: string;
+  callId: string;
+  recordedAt: string;
+  category: ConsultationMemoryCategory;
+  summary: string;
+  exactQuote: string;
+  startTimeSeconds?: number | null;
+  endTimeSeconds?: number | null;
+  severity: ConsultationMemorySeverity;
+  status: ConsultationMemoryStatus;
+}
+
 export interface ConcussionSpeechReview {
   modelVersion?: string | null;
   predictedLabel?: string | null;
@@ -194,6 +222,7 @@ export interface CallRecord {
   safeguardRecommendedAction?: string | null;
   safeguardResources?: CrisisResource[];
   safeguardFailureReason?: string | null;
+  consultationMemory?: ConsultationMemoryItem[];
   riskAssessment: RiskAssessment;
   recommendedAction: string;
 }

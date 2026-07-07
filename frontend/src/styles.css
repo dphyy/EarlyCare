@@ -690,6 +690,117 @@ h3 {
   padding: 14px;
 }
 
+.doctor-brief {
+  margin-top: 20px;
+}
+
+.brief-section h4 {
+  margin: 0 0 10px;
+}
+
+.brief-item q {
+  color: #425047;
+  font-size: 13px;
+}
+
+.brief-toolbar {
+  align-items: flex-end;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.brief-toolbar h3 {
+  margin-bottom: 0;
+}
+
+.brief-sheet {
+  background: #ffffff;
+  border: 1px solid #dfe5d8;
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(23, 32, 26, 0.04);
+  padding: 18px;
+}
+
+.brief-header {
+  align-items: flex-start;
+  border-bottom: 1px solid #dfe5d8;
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  padding-bottom: 14px;
+}
+
+.brief-header h2,
+.brief-header p {
+  margin-bottom: 0;
+}
+
+.brief-risk {
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+}
+
+.brief-meta-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.brief-meta-grid div {
+  background: #f8faf5;
+  border: 1px solid #dfe5d8;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+}
+
+.brief-meta-grid span {
+  color: #667065;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.brief-sections {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.brief-section {
+  border: 1px solid #dfe5d8;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.brief-item {
+  display: grid;
+  gap: 4px;
+  padding: 8px 0;
+}
+
+.brief-item + .brief-item {
+  border-top: 1px solid #edf0e8;
+}
+
+.brief-item small {
+  display: block;
+}
+
+.brief-footer {
+  border-top: 1px solid #dfe5d8;
+  color: #667065;
+  font-size: 12px;
+  margin-top: 14px;
+  padding-top: 10px;
+}
+
 .compact-heading {
   margin-bottom: 12px;
 }
@@ -984,7 +1095,9 @@ h3 {
 
   .transcript-stack,
   .speech-metric-grid,
-  .snapshot-grid {
+  .snapshot-grid,
+  .brief-meta-grid,
+  .brief-sections {
     grid-template-columns: 1fr;
   }
 
@@ -995,6 +1108,48 @@ h3 {
 
   nav {
     overflow-x: auto;
+  }
+}
+
+@media print {
+  body {
+    background: #ffffff;
+  }
+
+  .no-print,
+  .topbar,
+  .hero-band,
+  .roster-panel,
+  .speech-timing-panel,
+  .safety-snapshot,
+  .saved-calls,
+  .volunteer-task-section,
+  .profile-header,
+  .metric-grid {
+    display: none !important;
+  }
+
+  .dashboard-grid {
+    display: block;
+    padding: 0;
+  }
+
+  .panel,
+  .detail-panel,
+  .doctor-brief,
+  .brief-sheet {
+    border: 0;
+    box-shadow: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .brief-sheet {
+    color: #111111;
+  }
+
+  .brief-sections {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

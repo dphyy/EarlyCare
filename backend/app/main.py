@@ -21,6 +21,7 @@ from app.concussion_speech import review_concussion_speech
 from app.ml import assess_speech_deviation, extract_demo_embedding_note
 from app.models import (
     CallRecord,
+    ConsultationMemoryItem,
     ConcussionSpeechReview,
     CheckInSession,
     CrisisResource,
@@ -698,6 +699,43 @@ def _safeguard_schema() -> dict[str, object]:
     }
 
 
+def _consultation_memory_schema() -> dict[str, object]:
+    item_schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "category": {
+                "type": "string",
+                "enum": [
+                    "fall",
+                    "medication",
+                    "meal_intake",
+                    "symptom",
+                    "pain",
+                    "sleep",
+                    "mobility",
+                    "mood",
+                    "help_needed",
+                    "appointment",
+                    "other_medical",
+                ],
+            },
+            "summary": {"type": "string"},
+            "exactQuote": {"type": "string"},
+            "sentenceIndex": {"type": ["integer", "null"]},
+            "severity": {"type": "string", "enum": ["info", "watch", "urgent"]},
+            "status": {"type": "string", "enum": ["new", "ongoing", "resolved", "unclear"]},
+        },
+        "required": ["category", "summary", "exactQuote", "sentenceIndex", "severity", "status"],
+    }
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {"items": {"type": "array", "items": item_schema}},
+        "required": ["items"],
+    }
+
+
 def _extract_openai_text(payload: dict[str, object]) -> str:
     output_text = payload.get("output_text")
     if isinstance(output_text, str):
@@ -1225,6 +1263,206 @@ def _selected_safeguard_resources(level: SafeguardLevel, resource_names: list[st
     return SINGAPORE_CRISIS_RESOURCES[2:]
 
 
+CONSULTATION_MEMORY_CATEGORIES = {
+    "fall",
+    "medication",
+    "meal_intake",
+    "symptom",
+    "pain",
+    "sleep",
+    "mobility",
+    "mood",
+    "help_needed",
+    "appointment",
+    "other_medical",
+}
+
+
+def _quote_matches_segment(quote: str, segment: TranscriptSegment) -> bool:
+    normalized_quote = _normalize_match_text(_strip_speaker_labels(quote))
+    normalized_segment = _normalize_match_text(_strip_speaker_labels(segment.englishText or segment.text))
+    return bool(normalized_quote) and (normalized_quote in normalized_segment or normalized_segment in normalized_quote)
+
+
+def _consultation_memory_item(
+    senior_id: str,
+    call_id: str,
+    recorded_at: str,
+    category: str,
+    summary: str,
+    exact_quote: str,
+    segment: TranscriptSegment,
+    index: int,
+    severity: str = "info",
+    status: str = "new",
+) -> ConsultationMemoryItem | None:
+    if not _quote_matches_segment(exact_quote, segment):
+        return None
+    safe_category = category if category in CONSULTATION_MEMORY_CATEGORIES else "other_medical"
+    safe_severity = severity if severity in {"info", "watch", "urgent"} else "info"
+    safe_status = status if status in {"new", "ongoing", "resolved", "unclear"} else "new"
+    quote = _strip_speaker_labels(exact_quote)
+    cleaned_summary = clean_transcript_text(summary) or quote
+    return ConsultationMemoryItem(
+        id=f"{call_id}-memory-{index}",
+        seniorId=senior_id,
+        callId=call_id,
+        recordedAt=recorded_at,
+        category=safe_category,  # type: ignore[arg-type]
+        summary=cleaned_summary[:220],
+        exactQuote=quote,
+        startTimeSeconds=segment.startTimeSeconds,
+        endTimeSeconds=segment.endTimeSeconds,
+        severity=safe_severity,  # type: ignore[arg-type]
+        status=safe_status,  # type: ignore[arg-type]
+    )
+
+
+def _fallback_consultation_memory(senior_id: str, call_id: str, recorded_at: str, segments: list[TranscriptSegment]) -> list[ConsultationMemoryItem]:
+    rules: list[tuple[str, str, str]] = [
+        ("fall", r"\b(fell|fall|fallen|slipped|tripped|hit my head|knocked my head)\b", "urgent"),
+        ("medication", r"\b(medicine|medication|pills?|dose|tablet|insulin|missed.*med|forgot.*med|took my med)\b", "watch"),
+        ("meal_intake", r"\b(ate|eat|meal|breakfast|lunch|dinner|appetite|hungry|water|drink|drank|dehydrat|skip.*meal)\b", "info"),
+        ("pain", r"\b(pain|hurt|ache|sore|headache|chest pain|stomach pain)\b", "watch"),
+        ("symptom", r"\b(dizzy|vomit|confus|weak|fever|breathless|nausea|blurred|numb|slurred)\b", "watch"),
+        ("sleep", r"\b(sleep|slept|insomnia|awake|tired|fatigue)\b", "info"),
+        ("mobility", r"\b(walk|walking|stand|standing|stairs|bath|toilet|cook|shower|move around)\b", "watch"),
+        ("mood", r"\b(lonely|sad|afraid|scared|worried|anxious|distress|depressed)\b", "watch"),
+        ("help_needed", r"\b(help|call my|caregiver|daughter|son|neighbour|neighbor|volunteer)\b", "info"),
+        ("appointment", r"\b(appointment|clinic|doctor|hospital|visit|consultation)\b", "info"),
+    ]
+    summaries = {
+        "fall": "Patient mentioned a fall or injury concern.",
+        "medication": "Patient mentioned medication timing or adherence.",
+        "meal_intake": "Patient mentioned eating, appetite, or fluid intake.",
+        "pain": "Patient mentioned pain or discomfort.",
+        "symptom": "Patient mentioned a symptom needing review.",
+        "sleep": "Patient mentioned sleep or fatigue.",
+        "mobility": "Patient mentioned mobility or daily-function changes.",
+        "mood": "Patient mentioned mood, fear, loneliness, or distress.",
+        "help_needed": "Patient mentioned help-seeking or care support.",
+        "appointment": "Patient mentioned an appointment or care visit.",
+    }
+    items: list[ConsultationMemoryItem] = []
+    seen: set[tuple[str, str]] = set()
+    for segment in segments:
+        quote = _strip_speaker_labels(segment.englishText or segment.text)
+        normalized = quote.lower()
+        if not normalized:
+            continue
+        for category, pattern, severity in rules:
+            if not re.search(pattern, normalized):
+                continue
+            key = (category, _normalize_match_text(quote))
+            if key in seen:
+                continue
+            seen.add(key)
+            if re.search(r"\b(no|not|never|don't|do not|didn't|did not)\b.{0,25}\b(fall|dizzy|pain|headache|vomit|weak|missed|forgot)\b", normalized):
+                item_status = "resolved"
+                item_severity = "info"
+            elif re.search(r"\b(not sure|can't remember|cannot remember|forgot|maybe|i think)\b", normalized):
+                item_status = "unclear"
+                item_severity = "watch"
+            else:
+                item_status = "new"
+                item_severity = severity
+            item = _consultation_memory_item(
+                senior_id,
+                call_id,
+                recorded_at,
+                category,
+                summaries[category],
+                quote,
+                segment,
+                len(items),
+                item_severity,
+                item_status,
+            )
+            if item:
+                items.append(item)
+                break
+    return items
+
+
+def _openai_consultation_memory(senior_id: str, call_id: str, recorded_at: str, segments: list[TranscriptSegment]) -> list[ConsultationMemoryItem]:
+    patient_segments = _patient_review_segments(segments)
+    if not patient_segments:
+        return []
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return _fallback_consultation_memory(senior_id, call_id, recorded_at, patient_segments)
+
+    try:
+        response = httpx.post(
+            "https://api.openai.com/v1/responses",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+                "input": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Extract a longitudinal consultation memory for an AIC/community care coordinator. "
+                            "Use only patient statements. Ignore agent questions and summaries. Return compact facts useful for a future clinic consultation. "
+                            "Every item must include an exact quote copied from the patient sentence. Do not infer facts without exact evidence."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "patientSentences": [
+                                    {
+                                        "sentenceIndex": index,
+                                        "englishText": _strip_speaker_labels(segment.englishText or segment.text),
+                                        "startTimeSeconds": segment.startTimeSeconds,
+                                        "endTimeSeconds": segment.endTimeSeconds,
+                                    }
+                                    for index, segment in enumerate(patient_segments)
+                                ],
+                                "categories": sorted(CONSULTATION_MEMORY_CATEGORIES),
+                            }
+                        ),
+                    },
+                ],
+                "text": {
+                    "format": {
+                        "type": "json_schema",
+                        "name": "earlycare_consultation_memory",
+                        "schema": _consultation_memory_schema(),
+                        "strict": True,
+                    }
+                },
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        result = json.loads(_extract_openai_text(response.json()))
+        items: list[ConsultationMemoryItem] = []
+        for raw_item in result.get("items", []):
+            sentence_index = raw_item.get("sentenceIndex")
+            if not isinstance(sentence_index, int) or not 0 <= sentence_index < len(patient_segments):
+                continue
+            item = _consultation_memory_item(
+                senior_id,
+                call_id,
+                recorded_at,
+                str(raw_item.get("category", "other_medical")),
+                str(raw_item.get("summary", "")),
+                str(raw_item.get("exactQuote", "")),
+                patient_segments[sentence_index],
+                len(items),
+                str(raw_item.get("severity", "info")),
+                str(raw_item.get("status", "new")),
+            )
+            if item:
+                items.append(item)
+        return items
+    except Exception:
+        return _fallback_consultation_memory(senior_id, call_id, recorded_at, patient_segments)
+
+
 def _risk_level_with_safeguard(risk_level: str, safeguard_level: SafeguardLevel) -> str:
     order = {"Green": 0, "Watch": 1, "Amber": 2, "Red": 3}
     safeguard_risk = SAFEGUARD_LEVEL_RISK.get(safeguard_level, "Green")
@@ -1465,6 +1703,19 @@ def get_call(call_id: str) -> CallRecord:
     return _load_call_record(path)
 
 
+@app.get("/seniors/{senior_id}/consultation-memory", response_model=list[ConsultationMemoryItem])
+def get_consultation_memory(senior_id: str) -> list[ConsultationMemoryItem]:
+    get_senior(senior_id)
+    if not CALL_STORAGE_ROOT.exists():
+        return []
+    items: list[ConsultationMemoryItem] = []
+    for path in CALL_STORAGE_ROOT.glob("*/metadata.json"):
+        record = _load_call_record(path)
+        if record.seniorId == senior_id:
+            items.extend(record.consultationMemory)
+    return sorted(items, key=lambda item: item.recordedAt, reverse=True)
+
+
 @app.get("/calls/{call_id}/audio")
 def get_call_audio(call_id: str) -> FileResponse:
     call_dir = CALL_STORAGE_ROOT / call_id
@@ -1584,6 +1835,7 @@ async def save_call(
     call_id = f"call-{uuid4().hex[:10]}"
     call_dir = CALL_STORAGE_ROOT / call_id
     call_dir.mkdir(parents=True, exist_ok=True)
+    completed_at_value = completedAt or _now_iso()
 
     audio_file_path, audio_path = await _save_uploaded_audio(audio, call_dir, "full-call")
     patient_audio_file_path, _ = await _save_uploaded_audio(patientAudio, call_dir, "patient-audio")
@@ -1692,6 +1944,7 @@ async def save_call(
             f"{recommended_action} Speech abnormality model also flagged a research-only review signal; "
             "compare the patient audio with the transcript and escalate to a clinician or emergency service if symptoms are acute."
         )
+    consultation_memory = _openai_consultation_memory(senior.id, call_id, completed_at_value, translation.segments)
     speech_model_warnings = [*speech_extraction_warnings, *parkinsons_speech_review.warnings]
     speech_model_features = parkinsons_speech_review.featuresSummary
     if speech_model_features is not None:
@@ -1713,7 +1966,7 @@ async def save_call(
         seniorId=senior.id,
         seniorName=senior.name,
         startedAt=startedAt,
-        completedAt=completedAt or _now_iso(),
+        completedAt=completed_at_value,
         status="Complete" if status not in {"Failed", "Saved"} else status,  # type: ignore[arg-type]
         riskLevel=assessment.riskLevel,
         originalTranscript=original_transcript,
@@ -1754,6 +2007,7 @@ async def save_call(
         safeguardRecommendedAction=safeguard_recommended_action,
         safeguardResources=safeguard_resources,
         safeguardFailureReason=safeguard_failure_reason,
+        consultationMemory=consultation_memory,
         parkinsonsSpeechReview=parkinsons_speech_review,
         speechModelVersion=parkinsons_speech_review.modelVersion,
         speechModelProbability=parkinsons_speech_review.probability,

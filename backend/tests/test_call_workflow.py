@@ -952,6 +952,104 @@ class CallWorkflowTests(unittest.TestCase):
         self.assertIn("redacted", failure_reason)
         self.assertNotIn("secret-token", failure_reason)
 
+    def test_consultation_memory_fallback_extracts_patient_evidence_only(self) -> None:
+        segments = [
+            TranscriptSegment(text="Agent: Did you fall or forget medicine?", englishText="Agent: Did you fall or forget medicine?", role="Agent", speaker="Agent", startTimeSeconds=0),
+            TranscriptSegment(
+                text="Patient: I forgot my medicine yesterday and I fell in the kitchen.",
+                englishText="Patient: I forgot my medicine yesterday and I fell in the kitchen.",
+                role="Patient",
+                speaker="Patient",
+                startTimeSeconds=4,
+                endTimeSeconds=8,
+            ),
+        ]
+
+        items = main._fallback_consultation_memory("s-001", "call-test", "2026-07-04T10:01:00+08:00", main._patient_review_segments(segments))
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].category, "fall")
+        self.assertIn("forgot my medicine", items[0].exactQuote)
+        self.assertEqual(items[0].startTimeSeconds, 4)
+        self.assertNotIn("Did you fall", items[0].exactQuote)
+
+    def test_consultation_memory_drops_summary_without_exact_patient_quote(self) -> None:
+        segment = TranscriptSegment(
+            text="Patient: I ate breakfast and took my medicine.",
+            englishText="Patient: I ate breakfast and took my medicine.",
+            role="Patient",
+            speaker="Patient",
+            startTimeSeconds=2,
+        )
+
+        item = main._consultation_memory_item(
+            "s-001",
+            "call-test",
+            "2026-07-04T10:01:00+08:00",
+            "medication",
+            "Patient had a fall.",
+            "I fell last night.",
+            segment,
+            0,
+        )
+
+        self.assertIsNone(item)
+
+    def test_consultation_memory_endpoint_aggregates_newest_first(self) -> None:
+        first = main.ConsultationMemoryItem(
+            id="call-old-memory-0",
+            seniorId="s-001",
+            callId="call-old",
+            recordedAt="2026-07-01T10:00:00+08:00",
+            category="medication",
+            summary="Patient mentioned medicine.",
+            exactQuote="I took medicine.",
+        )
+        second = main.ConsultationMemoryItem(
+            id="call-new-memory-0",
+            seniorId="s-001",
+            callId="call-new",
+            recordedAt="2026-07-04T10:00:00+08:00",
+            category="fall",
+            summary="Patient mentioned fall.",
+            exactQuote="I fell.",
+        )
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for call_id, completed_at, items in [
+                ("call-old", "2026-07-01T10:00:00+08:00", [first]),
+                ("call-new", "2026-07-04T10:00:00+08:00", [second]),
+            ]:
+                call_dir = root / call_id
+                call_dir.mkdir()
+                call = main.CallRecord(
+                    id=call_id,
+                    seniorId="s-001",
+                    seniorName="Mdm Tan Bee Hoon",
+                    startedAt=completed_at,
+                    completedAt=completed_at,
+                    status="Complete",
+                    riskLevel="Green",
+                    originalTranscript="Patient: okay",
+                    englishTranscript="Patient: okay",
+                    transcriptMessages=[],
+                    translationProvider="test",
+                    translationFallbackUsed=True,
+                    audioAvailable=False,
+                    riskAssessment=main._empty_assessment("Green", ["No risk."]),
+                    recommendedAction="Routine follow-up.",
+                    consultationMemory=items,
+                )
+                (call_dir / "metadata.json").write_text(call.model_dump_json())
+            with patch.object(main, "CALL_STORAGE_ROOT", root):
+                client = TestClient(main.app)
+                response = client.get("/seniors/s-001/consultation-memory")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual([item["id"] for item in payload], ["call-new-memory-0", "call-old-memory-0"])
+
     def test_openai_safeguard_review_flags_patient_distress_with_resources(self) -> None:
         segments = [
             TranscriptSegment(text="Agent: Are you safe?", englishText="Agent: Are you safe?", role="Agent", speaker="Agent", startTimeSeconds=0),

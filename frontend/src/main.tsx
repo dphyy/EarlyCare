@@ -6,16 +6,31 @@ import {
   AlertTriangle,
   Bell,
   Brain,
+  CalendarClock,
   CheckCircle2,
+  FileText,
   Headphones,
   HeartPulse,
   Languages,
   PhoneCall,
+  Printer,
   ShieldCheck,
   UserRoundCheck
 } from "lucide-react";
 import { createElevenLabsSession, fetchCalls, fetchSeniors, fetchSessions, fetchVolunteerTasks, getCallAudioUrl, saveCall } from "./api";
-import type { CallRecord, CheckInSession, CrisisResource, RiskLevel, SafeguardLevel, Senior, TranscriptMessage, TranscriptSegment, VolunteerTask } from "./types";
+import type {
+  CallRecord,
+  CheckInSession,
+  ConsultationMemoryCategory,
+  ConsultationMemoryItem,
+  CrisisResource,
+  RiskLevel,
+  SafeguardLevel,
+  Senior,
+  TranscriptMessage,
+  TranscriptSegment,
+  VolunteerTask
+} from "./types";
 import "./styles.css";
 
 const riskOrder: Record<RiskLevel, number> = { Green: 0, Watch: 1, Amber: 2, Red: 3 };
@@ -868,6 +883,160 @@ function emotionToneSummary(call: CallRecord): string | null {
   return null;
 }
 
+const memoryCategoryLabels: Record<ConsultationMemoryCategory, string> = {
+  fall: "Falls / injuries",
+  medication: "Medication",
+  meal_intake: "Meals / fluids",
+  symptom: "Symptoms",
+  pain: "Pain",
+  sleep: "Sleep / fatigue",
+  mobility: "Mobility / function",
+  mood: "Mood / safety",
+  help_needed: "Help / support",
+  appointment: "Appointments",
+  other_medical: "Other medical"
+};
+
+const doctorBriefCategoryOrder: ConsultationMemoryCategory[] = [
+  "fall",
+  "medication",
+  "meal_intake",
+  "symptom",
+  "pain",
+  "mood",
+  "mobility",
+  "sleep",
+  "help_needed",
+  "appointment",
+  "other_medical"
+];
+
+function memoryItemsFromCalls(calls: CallRecord[]): ConsultationMemoryItem[] {
+  return calls
+    .flatMap((call) => call.consultationMemory ?? [])
+    .sort((a, b) => new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime());
+}
+
+function groupMemoryItems(items: ConsultationMemoryItem[]): [ConsultationMemoryCategory, ConsultationMemoryItem[]][] {
+  return doctorBriefCategoryOrder
+    .map((category) => [category, items.filter((item) => item.category === category)] as [ConsultationMemoryCategory, ConsultationMemoryItem[]])
+    .filter(([, categoryItems]) => categoryItems.length > 0);
+}
+
+function formatDateTime(value: string): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return value;
+  return date.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function riskTrend(calls: CallRecord[]): { latest: RiskLevel; highest: RiskLevel; label: string } {
+  const latest = calls[0]?.riskLevel ?? "Green";
+  const highest = calls.map((call) => call.riskLevel).reduce<RiskLevel>((risk, level) => (riskOrder[level] > riskOrder[risk] ? level : risk), "Green");
+  const riskChanges = calls
+    .slice(0, 6)
+    .map((call) => call.riskLevel)
+    .filter((level, index, levels) => index === 0 || level !== levels[index - 1]);
+  return {
+    latest,
+    highest,
+    label: riskChanges.length > 1 ? riskChanges.join(" -> ") : `${latest} across recent reviewed calls`
+  };
+}
+
+function reportingWindow(calls: CallRecord[]): string {
+  if (!calls.length) return "No saved calls";
+  const sorted = [...calls].sort((a, b) => new Date(a.completedAt).getTime() - new Date(b.completedAt).getTime());
+  const first = formatDateTime(sorted[0].completedAt);
+  const last = formatDateTime(sorted[sorted.length - 1].completedAt);
+  return first === last ? `${first} · ${calls.length} check-in` : `${first} to ${last} · ${calls.length} check-ins`;
+}
+
+function DoctorBrief({
+  senior,
+  calls,
+  memoryItems
+}: {
+  senior: Senior;
+  calls: CallRecord[];
+  memoryItems: ConsultationMemoryItem[];
+}) {
+  const trend = riskTrend(calls);
+  const groups = groupMemoryItems(memoryItems);
+  return (
+    <section className="doctor-brief">
+      <div className="brief-toolbar no-print">
+        <div>
+          <span className="eyebrow">Doctor handoff</span>
+          <h3>EarlyCare Consultation Brief</h3>
+        </div>
+        <button className="primary-action" onClick={() => window.print()} type="button">
+          <Printer size={18} />
+          Print brief
+        </button>
+      </div>
+
+      <div className="brief-sheet">
+        <header className="brief-header">
+          <div>
+            <span className="eyebrow">EarlyCare Consultation Brief</span>
+            <h2>{senior.name}</h2>
+            <p>
+              {senior.age} · {senior.preferredLanguage} · check-in every {senior.checkInFrequencyDays} days
+            </p>
+          </div>
+          <div className="brief-risk">
+            <RiskBadge level={trend.latest} />
+            <small>Highest recent risk: {trend.highest}</small>
+          </div>
+        </header>
+
+        <div className="brief-meta-grid">
+          <div>
+            <span>Reporting window</span>
+            <strong>{reportingWindow(calls)}</strong>
+          </div>
+          <div>
+            <span>Caregiver contact</span>
+            <strong>{senior.caregiverContact}</strong>
+          </div>
+          <div>
+            <span>Risk trend</span>
+            <strong>{trend.label}</strong>
+          </div>
+        </div>
+
+        {groups.length ? (
+          <div className="brief-sections">
+            {groups.slice(0, 6).map(([category, categoryItems]) => (
+              <section className="brief-section" key={category}>
+                <h4>{memoryCategoryLabels[category]}</h4>
+                {categoryItems.slice(0, 3).map((item) => (
+                  <article className="brief-item" key={item.id}>
+                    <div>
+                      <strong>{item.summary}</strong>
+                      <small>
+                        {formatDateTime(item.recordedAt)} · {item.severity}
+                        {item.status !== "new" ? ` · ${item.status}` : ""}
+                      </small>
+                    </div>
+                    <q>{item.exactQuote}</q>
+                  </article>
+                ))}
+              </section>
+            ))}
+          </div>
+        ) : (
+          <p className="empty-state">No evidence-backed consultation items in the selected period.</p>
+        )}
+
+        <footer className="brief-footer">
+          Evidence is taken from dated patient check-ins and exact patient quotes. EarlyCare is decision support for AIC/care coordination and is not a diagnosis or medical device output.
+        </footer>
+      </div>
+    </section>
+  );
+}
+
 function AgentsCall({
   seniors,
   selectedSeniorId,
@@ -1167,6 +1336,7 @@ function OfficerDashboard({
   const selectedSenior = seniors.find((senior) => senior.id === selectedSeniorId) ?? seniors[0];
   const selectedTasks = tasks.filter((task) => task.seniorId === selectedSenior.id);
   const selectedCalls = calls.filter((call) => call.seniorId === selectedSenior.id);
+  const selectedMemory = memoryItemsFromCalls(selectedCalls);
   const latestSignal = selectedCalls[0] ?? null;
   const latestAssessment = latestSignal?.riskAssessment ?? null;
   const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({});
@@ -1232,9 +1402,13 @@ function OfficerDashboard({
         <div className="metric-grid">
           <StatCard label="Language" value={selectedSenior.preferredLanguage} icon={<Languages size={20} />} />
           <StatCard label="Caregiver" value={selectedSenior.caregiverContact} icon={<UserRoundCheck size={20} />} />
+          <StatCard label="Memory items" value={`${selectedMemory.length}`} icon={<FileText size={20} />} />
+          <StatCard label="Reporting window" value={reportingWindow(selectedCalls)} icon={<CalendarClock size={20} />} />
         </div>
 
         <SpeechTimingPanel senior={selectedSenior} call={latestSignal} calls={selectedCalls} />
+
+        <DoctorBrief senior={selectedSenior} calls={selectedCalls} memoryItems={selectedMemory} />
 
         <section className="analysis-panel dashboard-analysis safety-snapshot">
           <div className="analysis-header">
@@ -1313,7 +1487,7 @@ function OfficerDashboard({
               {selectedCalls.map((call) => {
                 const audioUrl = getCallAudioUrl(call);
                 return (
-                  <article className="call-record" key={call.id}>
+                  <article className="call-record" id={`call-record-${call.id}`} key={call.id}>
                     <div className="call-record-header">
                       <div>
                         <RiskBadge level={call.riskLevel} />

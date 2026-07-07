@@ -8,6 +8,21 @@ Language = Literal["English", "Mandarin", "Malay", "Tamil", "Singlish/Dialect"]
 VolunteerTaskStatus = Literal["Open", "In progress", "Closed"]
 SafeguardLevel = Literal["None", "Support", "Urgent", "Emergency"]
 EmotionConcernLevel = Literal["None", "Watch", "Review"]
+ConsultationMemoryCategory = Literal[
+    "fall",
+    "medication",
+    "meal_intake",
+    "symptom",
+    "pain",
+    "sleep",
+    "mobility",
+    "mood",
+    "help_needed",
+    "appointment",
+    "other_medical",
+]
+ConsultationMemorySeverity = Literal["info", "watch", "urgent"]
+ConsultationMemoryStatus = Literal["new", "ongoing", "resolved", "unclear"]
 
 
 class SpeechProfile(BaseModel):
@@ -154,6 +169,20 @@ class EmotionProviderResult(BaseModel):
     failureReason: str | None = None
 
 
+class ConsultationMemoryItem(BaseModel):
+    id: str
+    seniorId: str
+    callId: str
+    recordedAt: str
+    category: ConsultationMemoryCategory
+    summary: str
+    exactQuote: str
+    startTimeSeconds: float | None = None
+    endTimeSeconds: float | None = None
+    severity: ConsultationMemorySeverity = "info"
+    status: ConsultationMemoryStatus = "new"
+
+
 class ParkinsonsSpeechReview(BaseModel):
     modelVersion: str | None = None
     probability: float | None = None
@@ -235,6 +264,7 @@ class CallRecord(BaseModel):
     safeguardRecommendedAction: str | None = None
     safeguardResources: list[CrisisResource] = []
     safeguardFailureReason: str | None = None
+    consultationMemory: list[ConsultationMemoryItem] = []
     parkinsonsSpeechReview: ParkinsonsSpeechReview | None = None
     speechModelVersion: str | None = None
     speechModelProbability: float | None = None

@@ -5,7 +5,7 @@ React + Vite interface for the EarlyCare hackathon prototype.
 The frontend provides two main experiences:
 
 - **Agents call**: an in-browser call simulation powered by ElevenLabs Agents.
-- **Patient overview**: a care-team view for recordings, transcripts, patient speech quality, Parkinson and concussion model cards, inline AI risk/safeguard/tone highlights, and follow-up recommendations.
+- **Patient overview**: an AIC/community care-team view for recordings, transcripts, patient speech quality, Parkinson and concussion model cards, inline AI risk/safeguard/tone highlights, follow-up recommendations, and a printable Doctor Brief.
 
 ## Agents Call
 
@@ -28,6 +28,7 @@ The call page does not translate the live transcript. Translation happens after 
 The Patient overview:
 
 - lists living-alone seniors and their saved calls
+- positions the dashboard as an AIC/care-coordinator monitoring surface, not a doctor-facing system doctors must manage
 - shows the full-call recording in a browser audio player
 - shows translated English transcript first
 - shows original transcript below it
@@ -35,6 +36,7 @@ The Patient overview:
 - shows the **Patient speech quality** panel with patient-speech duration, speech coverage, response latency, speaking rate, Parkinson model readiness, and concussion review readiness
 - shows separate Parkinson and concussion cards for each model's interpretation
 - shows OpenAI risk review status and recommended action
+- shows a printable **EarlyCare Consultation Brief** generated from recent consultation-memory items
 - shows OpenAI distress safeguard status and Singapore resource text when returned
 - shows ElevenLabs tone/emotion summary when `user_emotional_state` data collection is available
 - renders risk evidence inline inside the English transcript
@@ -43,6 +45,21 @@ The Patient overview:
 - starts audio playback from immediately after the previous agent question when a highlight is clicked
 
 Risk, safeguard, and tone signals are not rendered as separate evidence cards. The transcript itself is the review surface.
+
+## Doctor Brief
+
+The Doctor Brief is the point-of-care handoff artifact for clinic visits or risk escalation. AIC/community care teams can print it from the Patient overview instead of asking doctors to use another dashboard.
+
+The brief includes:
+
+- patient details, preferred language, caregiver contact, and check-in frequency
+- reporting window and number of check-ins reviewed
+- latest and highest recent risk level
+- grouped consultation-memory items for falls/injuries, medication, meals/fluids, symptoms, pain, mood/safety, mobility/function, sleep/fatigue, help/support, and appointments
+- exact patient quotes and check-in dates for evidence
+- a decision-support disclaimer
+
+The frontend displays consultation memory through the Doctor Brief only, keeping the AIC dashboard less cluttered while preserving the underlying longitudinal record in saved call metadata.
 
 ## Patient Speech Quality And Model Cards
 
@@ -96,7 +113,7 @@ The app usually runs at `http://localhost:5173`.
 | --- | --- |
 | `src/main.tsx` | Main React app, Agents call flow, Patient overview, audio mixing, transcript highlights. |
 | `src/api.ts` | Backend API helpers and audio URL construction. |
-| `src/types.ts` | Shared frontend types for seniors, calls, transcripts, speech profiles, risk signals, safeguards, and emotion/tone segments. |
+| `src/types.ts` | Shared frontend types for seniors, calls, transcripts, speech profiles, risk signals, safeguards, consultation memory, and emotion/tone segments. |
 | `src/styles.css` | Application styling. |
 
 ## ElevenLabs Notes
