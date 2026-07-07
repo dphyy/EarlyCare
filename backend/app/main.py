@@ -252,6 +252,10 @@ def _strip_speaker_labels(text: str) -> str:
         cleaned = stripped
 
 
+def _contains_non_english_script(text: str) -> bool:
+    return bool(re.search(r"[\u4e00-\u9fff\u3040-\u30ff\u0b80-\u0bff\u0d00-\u0d7f\u0600-\u06ff]", text))
+
+
 def _role_line(role: str, text: str) -> str:
     return f"{_display_role(role)}: {_strip_speaker_labels(text)}"
 
@@ -392,11 +396,18 @@ def _provider_text_units(text: str) -> list[str]:
 
 
 def _translate_message_text(language: str, text: str) -> str:
-    if language.lower() == "english":
-        return _clean_transcript_text(text)
+    cleaned = _clean_transcript_text(text)
+    if language.lower() == "english" and not _contains_non_english_script(cleaned):
+        return cleaned
+    translate_language = "auto" if language.lower() == "english" else language
+    if not _contains_non_english_script(cleaned) and translate_language == "auto":
+        return cleaned
     try:
-        return GoogleTranslateProvider().transcribe(language=language, audio_hint=text, audio_path=None).translation
+        return GoogleTranslateProvider().transcribe(language=translate_language, audio_hint=cleaned, audio_path=None).translation
     except Exception:
+        translated = _openai_translate_text_to_english(cleaned)
+        if translated != cleaned:
+            return translated
         return _clean_transcript_text(text)
 
 
@@ -414,8 +425,6 @@ def _role_labeled_english_transcript(
     if not messages:
         _add_warning(warnings, "English transcript used provider text because no live transcript messages were available.")
         return _clean_transcript_text(fallback_translation)
-    if language.lower() == "english":
-        return _transcript_to_text(messages)
 
     lines: list[str] = []
     translated_any = False
@@ -776,6 +785,42 @@ def _extract_openai_text(payload: dict[str, object]) -> str:
     return ""
 
 
+def _openai_translate_text_to_english(text: str) -> str:
+    cleaned = _clean_transcript_text(text)
+    if not cleaned:
+        return ""
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return cleaned
+
+    try:
+        response = httpx.post(
+            "https://api.openai.com/v1/responses",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": os.getenv("OPENAI_TRANSLATION_MODEL", os.getenv("OPENAI_MODEL", "gpt-4o-mini")),
+                "input": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Translate the user's text into natural English for a healthcare call transcript. "
+                            "Preserve meaning only. Do not add explanation, labels, quotes, or extra context. "
+                            "If the text is already English, return it unchanged."
+                        ),
+                    },
+                    {"role": "user", "content": cleaned},
+                ],
+            },
+            timeout=20,
+        )
+        response.raise_for_status()
+        translated = _clean_transcript_text(_extract_openai_text(response.json()))
+        return translated or cleaned
+    except Exception:
+        return cleaned
+
+
 def _attach_segment_timestamps(signals: list[RiskSignal], segments: list[TranscriptSegment]) -> list[RiskSignal]:
     patient_segments = [
         segment
@@ -1084,17 +1129,17 @@ def _parkinsons_explanations(review: ParkinsonsSpeechReview) -> list[ModelExplan
         (
             "Pitch range",
             ["MDVP:Fo(Hz)", "MDVP:Fhi(Hz)", "MDVP:Flo(Hz)"],
-            "Pitch features describe the patient speech sample's fundamental-frequency range.",
+            "Fundamental-frequency range in patient speech.",
         ),
         (
             "Jitter stability",
             ["MDVP:Jitter(%)", "MDVP:RAP", "MDVP:PPQ", "Jitter:DDP"],
-            "Jitter features describe cycle-to-cycle pitch instability in voiced speech.",
+            "Cycle-to-cycle pitch stability in voiced speech.",
         ),
         (
             "Harmonic-noise clarity",
             ["NHR", "HNR"],
-            "Noise and harmonic features describe how clear or noise-heavy the voiced speech sounded.",
+            "Voice clarity versus noise in voiced speech.",
         ),
     ]
     scored: list[tuple[float, ModelExplanationItem]] = []
@@ -1114,15 +1159,9 @@ def _parkinsons_explanations(review: ParkinsonsSpeechReview) -> list[ModelExplan
         score, key, value, outside, direction, limits = best
         range_text = f"{_format_feature_value(key, limits['min'])}-{_format_feature_value(key, limits['max'])}"
         if outside:
-            explanation = (
-                f"{key} was {direction} the training reference range ({range_text}). "
-                f"{plain_language} Use this as a research review cue, not a diagnosis."
-            )
+            explanation = f"{plain_language} {key} was {direction} the reference range ({range_text})."
         else:
-            explanation = (
-                f"{key} was within the training reference range ({range_text}), but it was one of the more notable values in this sample. "
-                f"{plain_language}"
-            )
+            explanation = f"{plain_language} Reference range: {range_text}."
         scored.append(
             (
                 score,

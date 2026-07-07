@@ -294,6 +294,99 @@ class CallWorkflowTests(unittest.TestCase):
         self.assertNotEqual(call["transcriptSegments"][0]["speaker"], "SPEAKER_00")
         self.assertTrue(any("MERaLiON speaker labels ignored" in warning for warning in call["transcriptAlignmentWarnings"]))
 
+    def test_save_call_keeps_translation_when_english_profile_contains_non_english_speech(self) -> None:
+        messages = [
+            {"role": "Agent", "text": "Hello, this is EarlyCare.", "timestamp": "2026-07-04T10:00:00+08:00"},
+            {"role": "Senior", "text": "我有点头晕。", "timestamp": "2026-07-04T10:00:04+08:00"},
+        ]
+        provider_result = ProviderResult(
+            provider="meralion-audio-translation",
+            language="English",
+            transcript="Hello, this is EarlyCare. 我有点头晕。",
+            translation="Hello, this is EarlyCare. I feel a little dizzy.",
+            confidence=0.86,
+            fallbackUsed=False,
+            segments=[
+                TranscriptSegment(text="Hello, this is EarlyCare.", speaker="SPEAKER_00", startTimeSeconds=0, endTimeSeconds=3),
+                TranscriptSegment(text="我有点头晕。", speaker="SPEAKER_01", startTimeSeconds=4, endTimeSeconds=5),
+            ],
+        )
+
+        with TemporaryDirectory() as temp_dir:
+            with (
+                patch.object(main, "CALL_STORAGE_ROOT", Path(temp_dir)),
+                patch.object(main, "transcribe_with_fallback", return_value=provider_result),
+                patch.object(main, "_openai_risk_review", return_value=main._manual_risk_review()),
+            ):
+                client = TestClient(main.app)
+                response = client.post(
+                    "/calls",
+                    data={
+                        "seniorId": "s-002",
+                        "status": "Complete",
+                        "startedAt": "2026-07-04T10:00:00+08:00",
+                        "completedAt": "2026-07-04T10:01:00+08:00",
+                        "transcriptMessages": json.dumps(messages),
+                        "consentCaptured": "true",
+                        "consentVersion": "earlycare-demo-v1",
+                        "recordingNoticeShownAt": "2026-07-04T09:59:59+08:00",
+                        "retentionPolicy": "local-demo-delete-after-hackathon",
+                        "operatorId": "test-operator",
+                    },
+                    files={"audio": ("full-call.wav", _test_wav_bytes(2), "audio/wav")},
+                )
+
+        call = response.json()["call"]
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Patient: 我有点头晕。", call["originalTranscript"])
+        self.assertIn("Patient: I feel a little dizzy.", call["englishTranscript"])
+        self.assertNotEqual(call["englishTranscript"], "")
+
+    def test_role_labeled_english_transcript_uses_provider_translation_for_mixed_english_profile(self) -> None:
+        messages = [
+            main.TranscriptMessage(role="Agent", text="Hello, this is EarlyCare.", timestamp="2026-07-04T10:00:00+08:00"),
+            main.TranscriptMessage(role="Senior", text="我有点头晕。", timestamp="2026-07-04T10:00:04+08:00"),
+        ]
+
+        english_transcript = main._role_labeled_english_transcript(
+            messages,
+            "English",
+            "Hello, this is EarlyCare. I feel a little dizzy.",
+            [],
+        )
+
+        self.assertIn("Agent: Hello, this is EarlyCare.", english_transcript)
+        self.assertIn("Patient: I feel a little dizzy.", english_transcript)
+        self.assertNotIn("Patient: 我有点头晕。", english_transcript)
+
+    def test_role_labeled_english_transcript_translates_live_turns_when_provider_falls_back_to_dialogue(self) -> None:
+        messages = [
+            main.TranscriptMessage(role="Agent", text="How are you feeling today?", timestamp="2026-07-04T10:00:00+08:00"),
+            main.TranscriptMessage(role="Senior", text="我今天还好。", timestamp="2026-07-04T10:00:04+08:00"),
+            main.TranscriptMessage(role="Agent", text="Have you eaten?", timestamp="2026-07-04T10:00:08+08:00"),
+            main.TranscriptMessage(role="Senior", text="我是饱了，你呢？", timestamp="2026-07-04T10:00:12+08:00"),
+        ]
+
+        with patch.object(
+            main,
+            "_openai_translate_text_to_english",
+            side_effect=lambda text: {
+                "我今天还好。": "I am okay today.",
+                "我是饱了，你呢？": "I am full. What about you?",
+            }.get(text, text),
+        ):
+            english_transcript = main._role_labeled_english_transcript(
+                messages,
+                "Mandarin",
+                main._transcript_to_text(messages),
+                [],
+            )
+
+        self.assertIn("Patient: I am okay today.", english_transcript)
+        self.assertIn("Patient: I am full. What about you?", english_transcript)
+        self.assertNotIn("Patient: 我今天还好。", english_transcript)
+        self.assertNotIn("Patient: 我是饱了，你呢？", english_transcript)
+
     def test_save_call_ignores_swapped_provider_role_labels_when_live_roles_exist(self) -> None:
         messages = [
             {"role": "Agent", "text": "Did you fall?", "timestamp": "2026-07-04T10:00:00+08:00"},
@@ -565,6 +658,8 @@ class CallWorkflowTests(unittest.TestCase):
         self.assertTrue(explanations)
         self.assertTrue(any(item.status == "watch" for item in explanations))
         self.assertTrue(all(item.value for item in explanations))
+        self.assertFalse(any("one of the more notable" in item.explanation for item in explanations))
+        self.assertFalse(any("but it was" in item.explanation for item in explanations))
 
     def test_has_fall_or_near_fall_evidence_uses_patient_only_text(self) -> None:
         segments = [

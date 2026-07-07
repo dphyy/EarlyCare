@@ -375,9 +375,9 @@ export const demoCalls: CallRecord[] = [
       qualityOk: true,
       warning: "Research-only Parkinson voice-feature signal. This is not a Parkinson's diagnosis or medical device output.",
       explanations: [
-        { label: "Jitter stability", value: "0.0121", status: "watch", explanation: "Jitter was one of the more notable voice-stability values in this sample." },
-        { label: "Harmonic-noise clarity", value: "18.4 dB", status: "normal", explanation: "Harmonic-noise clarity stayed within the expected reference range." },
-        { label: "Pitch range", value: "282.2 Hz", status: "normal", explanation: "Pitch range was usable for review but should not be interpreted as diagnosis." }
+        { label: "Jitter stability", value: "0.0121", status: "watch", explanation: "Cycle-to-cycle pitch stability in voiced speech." },
+        { label: "Harmonic-noise clarity", value: "18.4 dB", status: "normal", explanation: "Voice clarity versus noise in voiced speech." },
+        { label: "Pitch range", value: "282.2 Hz", status: "normal", explanation: "Fundamental-frequency range in patient speech." }
       ]
     },
     concussionSpeechReview: {
@@ -568,9 +568,9 @@ export const demoCalls: CallRecord[] = [
       qualityOk: true,
       warning: "Research-only Parkinson voice-feature signal. This is not a Parkinson's diagnosis or medical device output.",
       explanations: [
-        { label: "Jitter stability", value: "0.0290", status: "watch", explanation: "Jitter was high relative to the training reference range, suggesting less stable pitch cycles in this sample." },
-        { label: "Harmonic-noise clarity", value: "9.4 dB", status: "watch", explanation: "Lower harmonic clarity means the voiced speech was noisier and should be reviewed by a human." },
-        { label: "Pitch range", value: "116.3 Hz", status: "normal", explanation: "Average pitch was inside the reference range, so the watch signal is mainly driven by stability and clarity." }
+        { label: "Jitter stability", value: "0.0290", status: "watch", explanation: "Cycle-to-cycle pitch stability in voiced speech." },
+        { label: "Harmonic-noise clarity", value: "9.4 dB", status: "watch", explanation: "Voice clarity versus noise in voiced speech." },
+        { label: "Pitch range", value: "116.3 Hz", status: "normal", explanation: "Fundamental-frequency range in patient speech." }
       ]
     },
     concussionSpeechReview: {
@@ -692,9 +692,9 @@ export const demoCalls: CallRecord[] = [
       qualityOk: true,
       warning: "Research-only Parkinson voice-feature signal. This is not a Parkinson's diagnosis or medical device output.",
       explanations: [
-        { label: "Harmonic-noise clarity", value: "24.5 dB", status: "normal", explanation: "The voiced speech was clear enough for the demo model review." },
-        { label: "Jitter stability", value: "0.0042", status: "normal", explanation: "Pitch-cycle stability stayed within the reference range." },
-        { label: "Pitch range", value: "128.1 Hz", status: "normal", explanation: "Pitch was within the model reference range for this sample." }
+        { label: "Harmonic-noise clarity", value: "24.5 dB", status: "normal", explanation: "Voice clarity versus noise in voiced speech." },
+        { label: "Jitter stability", value: "0.0042", status: "normal", explanation: "Cycle-to-cycle pitch stability in voiced speech." },
+        { label: "Pitch range", value: "128.1 Hz", status: "normal", explanation: "Fundamental-frequency range in patient speech." }
       ]
     },
     concussionSpeechReview: {

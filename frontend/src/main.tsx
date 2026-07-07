@@ -89,6 +89,36 @@ interface TranscriptHighlight {
   transcriptSegmentIndex?: number | null;
 }
 
+type DemoScenarioKind = "fall" | "speech" | "routine";
+
+function demoScenarioMeta(call: CallRecord): { title: string; cue: string; kind: DemoScenarioKind } {
+  if (call.id.includes("parkinsons")) {
+    return {
+      title: "Frailty watch + safeguard",
+      cue: "Slower speech, medication timing, loneliness support cue",
+      kind: "speech"
+    };
+  }
+  if (call.riskLevel === "Amber" || call.id.includes("fall")) {
+    return {
+      title: "Near-fall escalation",
+      cue: "Dizziness, near fall, caregiver follow-up requested",
+      kind: "fall"
+    };
+  }
+  return {
+    title: "Routine multilingual check",
+    cue: "Stable check-in, meal and medication confirmed",
+    kind: "routine"
+  };
+}
+
+function DemoScenarioIcon({ kind }: { kind: DemoScenarioKind }) {
+  if (kind === "fall") return <AlertTriangle size={20} />;
+  if (kind === "speech") return <Brain size={20} />;
+  return <CheckCircle2 size={20} />;
+}
+
 function StatCard({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
   return (
     <section className="stat-card">
@@ -105,19 +135,37 @@ function RiskBadge({ level }: { level: RiskLevel }) {
   return <span className={`risk-badge risk-${level.toLowerCase()}`}>{level}</span>;
 }
 
+function modelFeatureMeaning(item: ModelExplanationItem): string {
+  const meanings: Record<string, string> = {
+    "Pitch range": "Fundamental-frequency range in patient speech.",
+    "Jitter stability": "Cycle-to-cycle pitch stability in voiced speech.",
+    "Harmonic-noise clarity": "Voice clarity versus noise in voiced speech.",
+    "Predicted speech pattern": "Speech-pattern class returned by the review model.",
+    "Abnormal-class probability": "Likelihood of dysarthria-like or dysphonia-like speech.",
+    "Audio quality": "Whether the patient-speech clip is usable for review.",
+    "Voice features": "Extracted pitch, stability, and clarity measurements.",
+    Applicability: "Whether fall evidence made concussion speech review relevant."
+  };
+  return meanings[item.label] ?? item.explanation.split(".")[0];
+}
+
 function ExplanationList({ items, fallback }: { items?: ModelExplanationItem[] | null; fallback: string }) {
   if (!items?.length) return <small>{fallback}</small>;
+  const topItems = items.slice(0, 3);
   return (
-    <ul className="model-explanations">
-      {items.slice(0, 3).map((item) => (
-        <li className={`model-explanation model-explanation-${item.status}`} key={`${item.label}-${item.value}`}>
-          <strong>
-            {item.label}: {item.value}
-          </strong>
-          <span>{item.explanation}</span>
-        </li>
-      ))}
-    </ul>
+    <div className="model-explanation-group">
+      <span className="model-explanation-label">Top Features:</span>
+      <ul className="model-explanations">
+        {topItems.map((item) => (
+          <li className={`model-explanation model-explanation-${item.status}`} key={`${item.label}-${item.value}`}>
+            <strong>
+              {item.label}: {item.value}
+            </strong>
+            <span>{modelFeatureMeaning(item)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -305,23 +353,81 @@ function multilingualAgentPrompt(senior: Senior): string {
     .map((resource) => `${resource.name}: ${resource.phone || resource.text || resource.url || ""}`)
     .join("; ");
   return [
-    `You are EarlyCare calling ${senior.name} for a routine wellbeing check-in.`,
-    `The patient profile says their preferred language is ${senior.preferredLanguage}, but they may speak English, Mandarin, Malay, Tamil, Singlish, or a mix.`,
-    "The live call transcript must stay in the original spoken language. Do not translate the patient's message before responding.",
-    "For each agent reply, use the language or dialect that the patient used the most in their immediately previous response. If the patient code-switches, follow the dominant language from that one previous response.",
-    "If the patient asks to speak Chinese or any other language, switch immediately.",
-    "Ask concise turn-by-turn questions about falls, head impact, headache, dizziness, vomiting, confusion, weakness, speech difficulty, food and water, and whether they can ask for help.",
-    "If the patient expresses immediate danger, intent to self-harm, inability to stay safe, abuse, neglect, or severe emotional distress, stay calm, do not diagnose or provide counselling, encourage them to contact trusted nearby help, and share the relevant Singapore emergency or crisis support resource.",
+    "You are EarlyCare, a calm and respectful wellbeing check-in voice agent for elderly people living alone in Singapore.",
+    `You are calling ${senior.name}. The patient profile language is ${senior.preferredLanguage}, but the patient may speak English, Mandarin, Malay, Tamil, Hindi, Singlish, Hokkien, Cantonese, Teochew, or a mix of languages.`,
+    "Language behavior: for every spoken reply, use the language or language mix from the patient's most recent message.",
+    "If the patient changes language, switch in your next reply. If they code-switch, mirror naturally.",
+    "Do not force English and do not translate the patient's message before responding unless the patient asks for translation.",
+    "If unsure, use simple Singapore English.",
+    "If a contextual update says 'Reply language for next turn', treat it as a hard instruction for the next spoken response.",
+    "Ask one short question at a time. Keep replies warm, clear, and brief. If the patient seems confused, ask simpler yes/no questions.",
+    "Check general wellbeing, food, water, medication, falls or near-falls, head impact, headache, vomiting, blurred vision, unusual sleepiness, weakness, numbness, trouble speaking, whether they need help now, and final concerns.",
+    "If the patient expresses immediate danger, suicidal intent, severe distress, abuse, or urgent medical symptoms, stay calm, do not diagnose, encourage emergency help or a trusted nearby person, and mention Singapore emergency services 995/999 or crisis support 1767 where appropriate.",
+    "If the patient reports a fall with head impact, confusion, vomiting, severe headache, weakness, numbness, or trouble speaking, say: Thank you for telling me. This may be a possible concern, so EarlyCare will recommend urgent volunteer or caregiver follow-up.",
     `Singapore support resources available to mention when relevant: ${resourceText}.`,
+    "Do not say: you have concussion, you have Parkinson's, diagnosis, detected disease, disease detected. Use: possible concern, follow-up recommended, caregiver or volunteer should check on you.",
     "Do not add bracketed emotional cues such as [concerned] or [happy]."
   ].join(" ");
 }
 
-function nextReplyLanguageInstruction(patientText: string): string {
+type DetectedReplyLanguage = "English" | "Mandarin" | "Malay" | "Tamil" | "Hindi" | "Singlish" | "Hokkien" | "Cantonese" | "Teochew";
+
+const detectedReplyLanguages: DetectedReplyLanguage[] = ["English", "Mandarin", "Malay", "Tamil", "Hindi", "Singlish", "Hokkien", "Cantonese", "Teochew"];
+
+function profileReplyLanguage(profileLanguage: string): DetectedReplyLanguage | null {
+  return detectedReplyLanguages.find((language) => language.toLowerCase() === profileLanguage.toLowerCase()) ?? null;
+}
+
+function looksLikeClearEnglish(text: string): boolean {
+  return /\b(the|and|you|your|are|is|was|were|am|feel|feeling|today|fall|fell|dizzy|pain|medicine|water|eaten|ate|help|yes|no|sure|okay)\b/i.test(text);
+}
+
+function detectReplyLanguage(text: string, profileLanguage: string): DetectedReplyLanguage {
+  const lower = text.toLowerCase();
+  if (/[\u4e00-\u9fff]/.test(text)) return "Mandarin";
+  if (/[\u0b80-\u0bff]/.test(text)) return "Tamil";
+  if (/[\u0900-\u097f]/.test(text)) return "Hindi";
+  if (/\b(lah|lor|leh|meh|alamak|can one|cannot|paiseh)\b/i.test(text)) return "Singlish";
+  if (/\b(wa|wah|bo|boh|ho|hor|liao|lah|ai|mai|jiak|lim|simi|sian)\b/i.test(lower)) return "Hokkien";
+  if (/\b(ngo|nei|lei|hai|m4|mm|sik|dak|jau|hou|mou)\b/i.test(lower)) return "Cantonese";
+  if (/\b(wa|lu|li|boi|jia|ziah|mai|hoh|mah)\b/i.test(lower)) return "Teochew";
+  if (
+    /\b(saya|awak|anda|tidak|tak|boleh|sudah|belum|makan|minum|jatuh|pening|sakit|kepala|tandas|ubat|tolong|apa khabar|khabar|baik|rasa|rumah)\b/i.test(
+      lower
+    )
+  ) {
+    return "Malay";
+  }
+  if (/\b(main|mujhe|aap|tum|haan|nahi|pani|dawa|khana|khaya|gir|gira|chakkar|dard|madad|theek)\b/i.test(lower)) return "Hindi";
+  if (profileLanguage === "Mandarin" && /[\u3000-\u303f\uff00-\uffef]/.test(text)) return "Mandarin";
+  const profileLanguageHint = profileReplyLanguage(profileLanguage);
+  if (profileLanguageHint && profileLanguageHint !== "English" && !looksLikeClearEnglish(lower)) return profileLanguageHint;
+  return "English";
+}
+
+function nextReplyLanguageInstruction(patientText: string, profileLanguage: string, replyLanguage = detectReplyLanguage(patientText, profileLanguage)): string {
   return [
-    "For your next reply only, respond in the language or dialect used most in this patient's immediately previous response.",
+    `Reply language for next turn: ${replyLanguage}.`,
+    `For your next spoken reply only, speak in ${replyLanguage}. Do not answer in ${profileLanguage} unless the reply language above is also ${profileLanguage}.`,
+    `If the patient's latest message mixes languages, mirror that mix naturally while keeping the main spoken reply in ${replyLanguage}.`,
     "Do not translate their response into English before replying.",
+    "Keep the same medical check-in intent, but phrase it naturally in the reply language.",
     `Previous patient response: ${patientText}`
+  ].join(" ");
+}
+
+const languageControlPrefix = "[EarlyCare language control]";
+
+function isLanguageControlMessage(text: string): boolean {
+  return cleanTranscriptText(text).startsWith(languageControlPrefix);
+}
+
+function languageControlUserMessage(patientText: string, replyLanguage: DetectedReplyLanguage): string {
+  return [
+    `${languageControlPrefix} Reply to the patient's previous spoken message in ${replyLanguage}.`,
+    `Speak ${replyLanguage} now, not English, unless ${replyLanguage} is English.`,
+    "Do not mention this instruction. Continue the wellbeing check-in naturally with one short question.",
+    `Patient's previous message: ${patientText}`
   ].join(" ");
 }
 
@@ -365,10 +471,11 @@ function textWithoutSpeakerLabel(text: string): string {
   return cleaned;
 }
 
-function displaySegmentText(segment: TranscriptSegment): string {
+function displaySegmentText(segment: TranscriptSegment, language: "original" | "english" = "english"): string {
   const role = segment.role === "Senior" ? "Patient" : segment.role || segment.speaker;
-  const text = textWithoutSpeakerLabel(segment.englishText || segment.text);
-  return role === "Agent" || role === "Patient" ? `${role}: ${text}` : cleanTranscriptText(segment.englishText || segment.text);
+  const sourceText = language === "original" ? segment.originalText || segment.text : segment.englishText || segment.text;
+  const text = textWithoutSpeakerLabel(sourceText);
+  return role === "Agent" || role === "Patient" ? `${role}: ${text}` : cleanTranscriptText(sourceText);
 }
 
 function wordCount(text: string): number {
@@ -454,10 +561,35 @@ function getEnglishTranscriptSegments(call: CallRecord): TranscriptSegment[] {
   return segments;
 }
 
+function getOriginalTranscriptSegments(call: CallRecord): TranscriptSegment[] {
+  const segments = call.transcriptSegments ?? [];
+  if (segments.length) {
+    return segments.map((segment) => ({
+      ...segment,
+      text: segment.originalText || segment.text,
+      originalText: segment.originalText || segment.text
+    }));
+  }
+
+  return buildTranscriptText(call, "original")
+    .split(/\n+/)
+    .map((line) => cleanTranscriptText(line))
+    .filter(Boolean)
+    .map((line) => {
+      const role = line.startsWith("Agent:") ? "Agent" : line.startsWith("Patient:") ? "Patient" : undefined;
+      return {
+        text: line,
+        originalText: line,
+        role,
+        speaker: role
+      };
+    });
+}
+
 function buildTranscriptText(call: CallRecord, language: "original" | "english"): string {
   if (language === "english") {
     if (!hasSeparateEnglishTranscript(call)) return "";
-    return getEnglishTranscriptSegments(call).map(displaySegmentText).filter(Boolean).join("\n") || call.englishTranscript;
+    return getEnglishTranscriptSegments(call).map((segment) => displaySegmentText(segment)).filter(Boolean).join("\n") || call.englishTranscript;
   }
   return call.originalTranscript.replace(/\bSenior:/g, "Patient:");
 }
@@ -515,13 +647,15 @@ function highlightChipText(highlight: TranscriptHighlight): string | null {
 function HighlightedEnglishTranscript({
   call,
   highlightedSignalId,
-  onSelectHighlight
+  onSelectHighlight,
+  language = "english"
 }: {
   call: CallRecord;
   highlightedSignalId: string | null;
   onSelectHighlight: (highlight: TranscriptHighlight) => void;
+  language?: "original" | "english";
 }) {
-  const segments = getEnglishTranscriptSegments(call);
+  const segments = language === "original" ? getOriginalTranscriptSegments(call) : getEnglishTranscriptSegments(call);
   const patientSegments = segments
     .map((segment, segmentIndex) => ({ segment, segmentIndex }))
     .filter(({ segment }) => isPatientSegment(segment));
@@ -541,7 +675,7 @@ function HighlightedEnglishTranscript({
   return (
     <div className="highlighted-transcript">
       {segments.map((segment, segmentIndex) => {
-        const text = displaySegmentText(segment);
+        const text = displaySegmentText(segment, language);
         const patientIndex = patientSegments.findIndex((item) => item.segmentIndex === segmentIndex);
         const patientOnly = patientIndex >= 0;
         const matches = highlights.filter((highlightItem) => {
@@ -1109,6 +1243,8 @@ function AgentsCall({
   const [audioCleanupWarning, setAudioCleanupWarning] = useState("");
   const [recordingNoticeShownAt, setRecordingNoticeShownAt] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState<string | null>(null);
+  const [timerStoppedAt, setTimerStoppedAt] = useState<string | null>(null);
+  const [replyLanguageHint, setReplyLanguageHint] = useState<DetectedReplyLanguage | "Auto">("Auto");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const recorderRef = useRef<WavRecorder | null>(null);
   const patientRecorderRef = useRef<WavRecorder | null>(null);
@@ -1131,7 +1267,7 @@ function AgentsCall({
         const hasAgentMessage = transcriptRef.current.some((line) => line.role === "Agent");
         if (!hasAgentMessage) {
           conversation.sendUserMessage(
-            `Begin the EarlyCare check-in for ${selectedSenior.name}. The patient may answer in ${selectedSenior.preferredLanguage}, English, Mandarin, Malay, Tamil, Singlish, or a mix. Detect their language and continue in the language they use.`
+            `Begin the EarlyCare check-in for ${selectedSenior.name}. The patient may answer in ${selectedSenior.preferredLanguage}, English, Mandarin, Malay, Tamil, Hindi, Singlish, Hokkien, Cantonese, Teochew, or a mix. Detect their language and continue in the language they use.`
           );
           setCallMessage("Agent was silent, so EarlyCare nudged the session to begin.");
         }
@@ -1140,7 +1276,13 @@ function AgentsCall({
     onDisconnect: (details) => {
       const reason = JSON.stringify(details);
       setDebugMessage(reason);
-      setCallState((current) => (current === "In call" || current === "Connecting" ? "Failed" : current));
+      setTimerStoppedAt((current) => current ?? new Date().toISOString());
+      setCallState((current) => {
+        if (current === "In call" || current === "Connecting") {
+          return "Failed";
+        }
+        return current;
+      });
       setCallMessage(`Live call ended. ${reason}`);
     },
     onError: (message, context) => {
@@ -1180,6 +1322,7 @@ function AgentsCall({
       }
     },
     onMessage: (message) => {
+      if (isLanguageControlMessage(message.message)) return;
       const line: TranscriptMessage = {
         role: message.role === "agent" ? "Agent" : "Senior",
         text: cleanTranscriptText(message.message),
@@ -1187,7 +1330,16 @@ function AgentsCall({
       };
       transcriptRef.current = [...transcriptRef.current, line];
       if (line.role === "Senior" && line.text) {
-        conversation.sendContextualUpdate(nextReplyLanguageInstruction(line.text));
+        const replyLanguage = detectReplyLanguage(line.text, selectedSenior.preferredLanguage);
+        const languageInstruction = nextReplyLanguageInstruction(line.text, selectedSenior.preferredLanguage, replyLanguage);
+        setReplyLanguageHint(replyLanguage);
+        conversation.sendContextualUpdate(languageInstruction);
+        conversation.sendUserMessage(languageControlUserMessage(line.text, replyLanguage));
+        window.setTimeout(() => {
+          if (conversation.status === "connected") {
+            conversation.sendContextualUpdate(languageInstruction);
+          }
+        }, 350);
       }
     }
   });
@@ -1201,25 +1353,30 @@ function AgentsCall({
     const updateElapsed = () => {
       const startedTime = new Date(startedAt).getTime();
       if (Number.isFinite(startedTime)) {
-        setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedTime) / 1000)));
+        const endTime = timerStoppedAt ? new Date(timerStoppedAt).getTime() : Date.now();
+        if (Number.isFinite(endTime)) {
+          setElapsedSeconds(Math.max(0, Math.floor((endTime - startedTime) / 1000)));
+        }
       }
     };
 
     updateElapsed();
-    if (!["Connecting", "In call", "Saving", "Analysing"].includes(callState)) return;
+    if (timerStoppedAt || !["Connecting", "In call", "Saving", "Analysing"].includes(callState)) return;
     const intervalId = window.setInterval(updateElapsed, 1000);
     return () => window.clearInterval(intervalId);
-  }, [callState, startedAt]);
+  }, [callState, startedAt, timerStoppedAt]);
 
   const startCall = async () => {
     setCallState("Connecting");
     setCallMessage("Connecting live call...");
     setDebugMessage("");
     setAudioCleanupWarning("");
+    setReplyLanguageHint(profileReplyLanguage(selectedSenior.preferredLanguage) ?? "Auto");
     transcriptRef.current = [];
     elevenLabsConversationIdRef.current = null;
     const callStartedAt = new Date().toISOString();
     setStartedAt(callStartedAt);
+    setTimerStoppedAt(null);
     setRecordingNoticeShownAt(callStartedAt);
 
     try {
@@ -1288,6 +1445,7 @@ function AgentsCall({
   };
 
   const endAndSaveCall = async () => {
+    setTimerStoppedAt(new Date().toISOString());
     setCallState("Saving");
     setCallMessage("Ending call and saving transcript/audio...");
     if (conversation.status === "connected" || conversation.status === "connecting") {
@@ -1405,6 +1563,7 @@ function AgentsCall({
             <p>{callMessage}</p>
             {debugMessage ? <small>Debug: {debugMessage}</small> : null}
             {audioCleanupWarning ? <small>{audioCleanupWarning}</small> : null}
+            <small>Detected reply language: {replyLanguageHint}.</small>
             <small>
               SDK status: {conversation.status}. Mode: {conversation.mode}. {conversation.isSpeaking ? "Agent speaking." : conversation.isListening ? "Listening." : ""}
             </small>
@@ -1442,6 +1601,7 @@ function OfficerDashboard({
   const selectedMemory = memoryItemsFromCalls(selectedCalls);
   const latestSignal = selectedCalls[0] ?? null;
   const latestAssessment = latestSignal?.riskAssessment ?? null;
+  const demoScenarioCalls = calls.filter((call) => call.demoRecord);
   const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({});
   const [highlightedSignalId, setHighlightedSignalId] = useState<string | null>(null);
   const highestRisk = selectedCalls.map((call) => call.riskLevel).reduce<RiskLevel>(
@@ -1461,6 +1621,39 @@ function OfficerDashboard({
 
   return (
     <main className={`dashboard-grid ${demoMode ? "demo-dashboard" : ""}`}>
+      {demoMode && demoScenarioCalls.length ? (
+        <section className="demo-scenario-strip" aria-label="Demo scenarios">
+          <div>
+            <span className="eyebrow">Demo runner</span>
+            <h2>Scenario Cases</h2>
+          </div>
+          <div className="demo-scenario-list">
+            {demoScenarioCalls.map((call) => {
+              const meta = demoScenarioMeta(call);
+              const active = call.seniorId === selectedSenior.id;
+              return (
+                <button
+                  aria-pressed={active}
+                  className={`demo-scenario-card ${active ? "active" : ""} demo-scenario-${meta.kind}`}
+                  key={call.id}
+                  onClick={() => setSelectedSeniorId(call.seniorId)}
+                  type="button"
+                >
+                  <span className="demo-scenario-icon">
+                    <DemoScenarioIcon kind={meta.kind} />
+                  </span>
+                  <span>
+                    <strong>{meta.title}</strong>
+                    <small>{call.seniorName}</small>
+                    <em>{meta.cue}</em>
+                  </span>
+                  <RiskBadge level={call.riskLevel} />
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
       <section className="panel roster-panel">
         <div className="panel-heading">
           <h2>Living-Alone Roster</h2>
@@ -1620,6 +1813,7 @@ function OfficerDashboard({
 
                     <div className="recording-player">
                       <h4>Original recording</h4>
+                      <small>Recorded call audio in the spoken language. English translation is shown as transcript text below when available.</small>
                       {audioUrl ? (
                         <audio
                           controls
@@ -1646,7 +1840,16 @@ function OfficerDashboard({
                       ) : null}
                       <div>
                         <h4>Original transcript</h4>
-                        <pre>{buildTranscriptText(call, "original")}</pre>
+                        {showEnglishTranscript ? (
+                          <pre>{buildTranscriptText(call, "original")}</pre>
+                        ) : (
+                          <HighlightedEnglishTranscript
+                            call={call}
+                            highlightedSignalId={highlightedSignalId}
+                            language="original"
+                            onSelectHighlight={(highlight) => playTranscriptHighlight(call, highlight)}
+                          />
+                        )}
                       </div>
                     </div>
                   </article>
