@@ -18,12 +18,14 @@ import {
   UserRoundCheck
 } from "lucide-react";
 import { createElevenLabsSession, fetchCalls, fetchSeniors, fetchSessions, fetchVolunteerTasks, getCallAudioUrl, saveCall } from "./api";
+import { demoCalls } from "./data";
 import type {
   CallRecord,
   CheckInSession,
   ConsultationMemoryCategory,
   ConsultationMemoryItem,
   CrisisResource,
+  ModelExplanationItem,
   RiskLevel,
   SafeguardLevel,
   Senior,
@@ -34,7 +36,7 @@ import type {
 import "./styles.css";
 
 const riskOrder: Record<RiskLevel, number> = { Green: 0, Watch: 1, Amber: 2, Red: 3 };
-type AppView = "call" | "dashboard";
+type AppView = "call" | "dashboard" | "demo";
 type CallState = "Ready" | "Connecting" | "In call" | "Saving" | "Analysing" | "Complete" | "Failed";
 type AgentAudioFormat = "pcm_8000" | "pcm_16000" | "pcm_22050" | "pcm_24000" | "pcm_44100" | "pcm_48000" | "ulaw_8000";
 const singaporeCrisisResources: CrisisResource[] = [
@@ -97,6 +99,22 @@ function StatCard({ label, value, icon }: { label: string; value: string; icon: 
 
 function RiskBadge({ level }: { level: RiskLevel }) {
   return <span className={`risk-badge risk-${level.toLowerCase()}`}>{level}</span>;
+}
+
+function ExplanationList({ items, fallback }: { items?: ModelExplanationItem[] | null; fallback: string }) {
+  if (!items?.length) return <small>{fallback}</small>;
+  return (
+    <ul className="model-explanations">
+      {items.slice(0, 3).map((item) => (
+        <li className={`model-explanation model-explanation-${item.status}`} key={`${item.label}-${item.value}`}>
+          <strong>
+            {item.label}: {item.value}
+          </strong>
+          <span>{item.explanation}</span>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 function cleanTranscriptText(text: string): string {
@@ -692,6 +710,9 @@ function modelReadiness(call: CallRecord | null): { value: string; note: string 
 function concussionReviewReadiness(call: CallRecord | null): { value: string; note: string } {
   if (!call?.concussionSpeechReview) return { value: "Not run", note: "No concussion speech review result" };
   const review = call.concussionSpeechReview;
+  if (review.applicability === "not_applicable") {
+    return { value: "Not applicable", note: review.explanations?.[0]?.explanation ?? "No fall or near-fall evidence in the patient transcript" };
+  }
   const abnormalProbability = Math.max(
     review.probabilities?.dysarthria_like ?? 0,
     review.probabilities?.dysphonia_like ?? 0
@@ -794,6 +815,7 @@ function parkinsonsSpeechDescription(call: CallRecord): string {
 function concussionSpeechTitle(call: CallRecord): string {
   const review = call.concussionSpeechReview;
   if (!review) return "Not run";
+  if (review.applicability === "not_applicable") return "Not applicable";
   if (review.failureReason) return "Unavailable";
   if (!review.qualityOk) return "Low audio quality";
   if (review.predictedLabel && review.predictedLabel !== "normal") {
@@ -805,6 +827,7 @@ function concussionSpeechTitle(call: CallRecord): string {
 function concussionSpeechDescription(call: CallRecord): string {
   const review = call.concussionSpeechReview;
   if (!review) return "Concussion speech-abnormality review has not returned a result for this call.";
+  if (review.applicability === "not_applicable") return review.explanations?.[0]?.explanation ?? "No patient-stated fall or near-fall was found, so concussion speech review was not applied.";
   if (review.failureReason) return review.failureReason;
   if (!review.qualityOk) return review.qualityReason || "Patient speech audio did not pass quality checks.";
   if (review.riskReason) return `${review.riskReason} Research-only; not a diagnosis.`;
@@ -1053,6 +1076,8 @@ function AgentsCall({
   const [callMessage, setCallMessage] = useState("Ready to simulate a phone call through the website.");
   const [debugMessage, setDebugMessage] = useState("");
   const [audioCleanupWarning, setAudioCleanupWarning] = useState("");
+  const [consentAcknowledged, setConsentAcknowledged] = useState(false);
+  const [recordingNoticeShownAt, setRecordingNoticeShownAt] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState<string | null>(null);
   const recorderRef = useRef<WavRecorder | null>(null);
   const patientRecorderRef = useRef<WavRecorder | null>(null);
@@ -1137,6 +1162,10 @@ function AgentsCall({
   });
 
   const startCall = async () => {
+    if (!consentAcknowledged) {
+      setCallMessage("Confirm recording notice before starting the call.");
+      return;
+    }
     setCallState("Connecting");
     setCallMessage("Connecting to Agents...");
     setDebugMessage("");
@@ -1230,6 +1259,11 @@ function AgentsCall({
     formData.append("startedAt", startedAt ?? new Date().toISOString());
     formData.append("completedAt", new Date().toISOString());
     formData.append("transcriptMessages", JSON.stringify(transcriptRef.current));
+    formData.append("consentCaptured", String(consentAcknowledged));
+    formData.append("consentVersion", "earlycare-demo-v1");
+    formData.append("recordingNoticeShownAt", recordingNoticeShownAt ?? new Date().toISOString());
+    formData.append("retentionPolicy", "local-demo-delete-after-hackathon");
+    formData.append("operatorId", "demo-operator");
     if (elevenLabsConversationIdRef.current) {
       formData.append("elevenLabsConversationId", elevenLabsConversationIdRef.current);
     }
@@ -1292,7 +1326,7 @@ function AgentsCall({
             <button
               aria-label={canEndAndSave ? "End and save call" : "Start call"}
               className="call-orb-button"
-              disabled={busy}
+              disabled={busy || (!canEndAndSave && !consentAcknowledged)}
               onClick={() => void (canEndAndSave ? endAndSaveCall() : startCall())}
               type="button"
             >
@@ -1301,6 +1335,18 @@ function AgentsCall({
           </div>
 
           <div className="answer-box">
+            <label className="consent-row">
+              <input
+                checked={consentAcknowledged}
+                disabled={busy || callState === "In call"}
+                onChange={(event) => {
+                  setConsentAcknowledged(event.target.checked);
+                  setRecordingNoticeShownAt(event.target.checked ? new Date().toISOString() : null);
+                }}
+                type="checkbox"
+              />
+              Recording notice and demo consent captured
+            </label>
             <p>{callMessage}</p>
             {debugMessage ? <small>Debug: {debugMessage}</small> : null}
             {audioCleanupWarning ? <small>{audioCleanupWarning}</small> : null}
@@ -1323,7 +1369,8 @@ function OfficerDashboard({
   calls,
   selectedSeniorId,
   setSelectedSeniorId,
-  onStartCall
+  onStartCall,
+  demoMode
 }: {
   seniors: Senior[];
   sessions: CheckInSession[];
@@ -1332,6 +1379,7 @@ function OfficerDashboard({
   selectedSeniorId: string;
   setSelectedSeniorId: (id: string) => void;
   onStartCall: (id: string) => void;
+  demoMode: boolean;
 }) {
   const selectedSenior = seniors.find((senior) => senior.id === selectedSeniorId) ?? seniors[0];
   const selectedTasks = tasks.filter((task) => task.seniorId === selectedSenior.id);
@@ -1392,6 +1440,7 @@ function OfficerDashboard({
           </div>
           <div className="profile-actions">
             <RiskBadge level={highestRisk} />
+            {demoMode ? <span className="demo-state">Demo data loaded</span> : null}
             <button className="primary-action" onClick={() => onStartCall(selectedSenior.id)}>
               <PhoneCall size={18} />
               Start new call
@@ -1449,7 +1498,10 @@ function OfficerDashboard({
                   <div>
                     <span>Parkinson speech marker</span>
                     <strong>{parkinsonsSpeechTitle(latestSignal)}</strong>
-                    <small>{parkinsonsSpeechDescription(latestSignal)}</small>
+                    <ExplanationList
+                      items={latestSignal.parkinsonsSpeechReview?.explanations}
+                      fallback={parkinsonsSpeechDescription(latestSignal)}
+                    />
                   </div>
                 </div>
                 <div className="snapshot-card">
@@ -1457,7 +1509,10 @@ function OfficerDashboard({
                   <div>
                     <span>Concussion speech review</span>
                     <strong>{concussionSpeechTitle(latestSignal)}</strong>
-                    <small>{concussionSpeechDescription(latestSignal)}</small>
+                    <ExplanationList
+                      items={latestSignal.concussionSpeechReview?.explanations}
+                      fallback={concussionSpeechDescription(latestSignal)}
+                    />
                   </div>
                 </div>
               </div>
@@ -1593,6 +1648,11 @@ function App() {
 
   const urgentTasks = loadedTasks.filter((task) => task.priority === "Urgent").length;
   const openTasks = loadedTasks.filter((task) => task.status !== "Closed").length;
+  const visibleCalls = view === "demo" ? demoCalls : loadedCalls;
+  const runDemo = () => {
+    setSelectedSeniorId("s-001");
+    setView("demo");
+  };
 
   return (
     <div className="app-shell">
@@ -1615,6 +1675,10 @@ function App() {
             <Activity size={18} />
             Patient overview
           </button>
+          <button className={view === "demo" ? "active" : ""} onClick={runDemo}>
+            <FileText size={18} />
+            Demo runner
+          </button>
         </nav>
       </header>
 
@@ -1627,7 +1691,7 @@ function App() {
           <StatCard label="Open tasks" value={`${openTasks}`} icon={<Bell size={20} />} />
           <StatCard label="Urgent" value={`${urgentTasks}`} icon={<AlertTriangle size={20} />} />
           <StatCard label="Safety stance" value="No diagnosis" icon={<ShieldCheck size={20} />} />
-          <StatCard label="Saved calls" value={`${loadedCalls.length}`} icon={<CheckCircle2 size={20} />} />
+          <StatCard label="Saved calls" value={`${visibleCalls.length}`} icon={<CheckCircle2 size={20} />} />
         </div>
       </section>
 
@@ -1637,7 +1701,9 @@ function App() {
             seniors={loadedSeniors}
             selectedSeniorId={selectedSeniorId}
             onSelectSenior={setSelectedSeniorId}
-            onSavedCall={(call) => setLoadedCalls((calls) => [call, ...calls.filter((item) => item.id !== call.id)])}
+            onSavedCall={(call) => {
+              setLoadedCalls((calls) => [call, ...calls.filter((item) => item.id !== call.id)]);
+            }}
           />
         </ConversationProvider>
       ) : (
@@ -1645,13 +1711,14 @@ function App() {
           seniors={loadedSeniors}
           sessions={loadedSessions}
           tasks={loadedTasks}
-          calls={loadedCalls}
+          calls={visibleCalls}
           selectedSeniorId={selectedSeniorId}
           setSelectedSeniorId={setSelectedSeniorId}
           onStartCall={(id) => {
             setSelectedSeniorId(id);
             setView("call");
           }}
+          demoMode={view === "demo"}
         />
       )}
     </div>

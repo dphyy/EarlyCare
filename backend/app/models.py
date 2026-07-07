@@ -23,6 +23,8 @@ ConsultationMemoryCategory = Literal[
 ]
 ConsultationMemorySeverity = Literal["info", "watch", "urgent"]
 ConsultationMemoryStatus = Literal["new", "ongoing", "resolved", "unclear"]
+ModelExplanationStatus = Literal["normal", "watch", "unavailable"]
+ConcussionApplicability = Literal["applicable", "not_applicable"]
 
 
 class SpeechProfile(BaseModel):
@@ -183,6 +185,13 @@ class ConsultationMemoryItem(BaseModel):
     status: ConsultationMemoryStatus = "new"
 
 
+class ModelExplanationItem(BaseModel):
+    label: str
+    value: str
+    status: ModelExplanationStatus
+    explanation: str
+
+
 class ParkinsonsSpeechReview(BaseModel):
     modelVersion: str | None = None
     probability: float | None = None
@@ -190,11 +199,13 @@ class ParkinsonsSpeechReview(BaseModel):
     featuresSummary: dict[str, float | int | str | None] | None = None
     qualityOk: bool = False
     riskReason: str | None = None
+    explanations: list[ModelExplanationItem] = []
     warning: str = "Research-only Parkinson voice-feature signal. This is not a Parkinson's diagnosis or medical device output."
     failureReason: str | None = None
 
 
 class ConcussionSpeechReview(BaseModel):
+    applicability: ConcussionApplicability = "applicable"
     modelVersion: str | None = None
     predictedLabel: str | None = None
     probabilities: dict[str, float] = {}
@@ -206,6 +217,7 @@ class ConcussionSpeechReview(BaseModel):
     clippingFraction: float | None = None
     riskContribution: RiskLevel = "Green"
     riskReason: str | None = None
+    explanations: list[ModelExplanationItem] = []
     warning: str
     failureReason: str | None = None
 
@@ -271,6 +283,12 @@ class CallRecord(BaseModel):
     speechModelWarnings: list[str] = []
     speechModelFeaturesSummary: dict[str, float | int | str | None] | None = None
     concussionSpeechReview: ConcussionSpeechReview | None = None
+    consentCaptured: bool = False
+    consentVersion: str = "earlycare-demo-v1"
+    recordingNoticeShownAt: str | None = None
+    retentionPolicy: str = "local-demo-delete-after-hackathon"
+    operatorId: str = "demo-operator"
+    demoRecord: bool = False
     riskAssessment: RiskAssessment
     recommendedAction: str
 

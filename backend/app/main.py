@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from app.data import CHECKINS, SENIORS, VOLUNTEER_TASKS
-from app.concussion_speech import review_concussion_speech
+from app.concussion_speech import not_applicable_concussion_review, review_concussion_speech
 from app.ml import assess_speech_deviation, extract_demo_embedding_note
 from app.models import (
     CallRecord,
@@ -28,6 +28,7 @@ from app.models import (
     EmotionConcernLevel,
     EmotionProviderResult,
     EmotionSegment,
+    ModelExplanationItem,
     ParkinsonsSpeechReview,
     ProviderResult,
     RiskAssessment,
@@ -45,6 +46,7 @@ from app.models import (
     VolunteerTask,
 )
 from app.providers import GoogleTranslateProvider, _safe_error_reason, clean_transcript_text, transcribe_with_fallback
+from app.readiness import readiness_report
 
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -996,6 +998,186 @@ def _parkinsons_speech_review(audio_path: Path | None) -> ParkinsonsSpeechReview
     )
 
 
+def _feature_number(features: dict[str, float | int | str | None] | None, key: str) -> float | None:
+    if not features:
+        return None
+    value = features.get(key)
+    if isinstance(value, (int, float)) and np.isfinite(value):
+        return float(value)
+    return None
+
+
+def _format_feature_value(key: str, value: float) -> str:
+    if key.endswith("(Hz)") or key in {"HNR"}:
+        suffix = " Hz" if key.endswith("(Hz)") else " dB"
+        return f"{round(value, 1)}{suffix}"
+    if "Jitter(Abs)" in key:
+        return f"{value:.6f}"
+    if "Jitter" in key or key in {"MDVP:RAP", "MDVP:PPQ", "Jitter:DDP", "NHR"}:
+        return f"{value:.4f}"
+    return f"{round(value, 3)}"
+
+
+def _reference_range_score(value: float, limits: dict[str, float]) -> tuple[float, bool, str]:
+    min_value = limits["min"]
+    max_value = limits["max"]
+    width = max(max_value - min_value, 1e-9)
+    if value < min_value:
+        return (min_value - value) / width + 1, True, "below"
+    if value > max_value:
+        return (value - max_value) / width + 1, True, "above"
+    midpoint = (min_value + max_value) / 2
+    return abs(value - midpoint) / max(width / 2, 1e-9), False, "within"
+
+
+def _load_parkinsons_reference_ranges() -> dict[str, dict[str, float]]:
+    ranges_path = PARKINSONS_SPEECH_MODEL_ARTIFACT_ROOT / "feature_reference_ranges.json"
+    if not ranges_path.exists():
+        return {}
+    try:
+        loaded = json.loads(ranges_path.read_text())
+    except Exception:
+        return {}
+    ranges: dict[str, dict[str, float]] = {}
+    if not isinstance(loaded, dict):
+        return ranges
+    for key, value in loaded.items():
+        if not isinstance(value, dict):
+            continue
+        min_value = value.get("min")
+        max_value = value.get("max")
+        if isinstance(min_value, (int, float)) and isinstance(max_value, (int, float)):
+            ranges[str(key)] = {"min": float(min_value), "max": float(max_value)}
+    return ranges
+
+
+def _parkinsons_explanations(review: ParkinsonsSpeechReview) -> list[ModelExplanationItem]:
+    features = review.featuresSummary or {}
+    ranges = _load_parkinsons_reference_ranges()
+    if not features or not ranges:
+        return [
+            ModelExplanationItem(
+                label="Voice features",
+                value="Unavailable",
+                status="unavailable",
+                explanation="Patient-speech features were not available, so the Parkinson marker cannot be explained for this call.",
+            )
+        ]
+
+    groups = [
+        (
+            "Pitch range",
+            ["MDVP:Fo(Hz)", "MDVP:Fhi(Hz)", "MDVP:Flo(Hz)"],
+            "Pitch features describe the patient speech sample's fundamental-frequency range.",
+        ),
+        (
+            "Jitter stability",
+            ["MDVP:Jitter(%)", "MDVP:RAP", "MDVP:PPQ", "Jitter:DDP"],
+            "Jitter features describe cycle-to-cycle pitch instability in voiced speech.",
+        ),
+        (
+            "Harmonic-noise clarity",
+            ["NHR", "HNR"],
+            "Noise and harmonic features describe how clear or noise-heavy the voiced speech sounded.",
+        ),
+    ]
+    scored: list[tuple[float, ModelExplanationItem]] = []
+    for label, keys, plain_language in groups:
+        best: tuple[float, str, float, bool, str, dict[str, float]] | None = None
+        for key in keys:
+            value = _feature_number(features, key)
+            limits = ranges.get(key)
+            if value is None or limits is None:
+                continue
+            score, outside, direction = _reference_range_score(value, limits)
+            candidate = (score, key, value, outside, direction, limits)
+            if best is None or candidate[0] > best[0]:
+                best = candidate
+        if best is None:
+            continue
+        score, key, value, outside, direction, limits = best
+        range_text = f"{_format_feature_value(key, limits['min'])}-{_format_feature_value(key, limits['max'])}"
+        if outside:
+            explanation = (
+                f"{key} was {direction} the training reference range ({range_text}). "
+                f"{plain_language} Use this as a research review cue, not a diagnosis."
+            )
+        else:
+            explanation = (
+                f"{key} was within the training reference range ({range_text}), but it was one of the more notable values in this sample. "
+                f"{plain_language}"
+            )
+        scored.append(
+            (
+                score,
+                ModelExplanationItem(
+                    label=label,
+                    value=_format_feature_value(key, value),
+                    status="watch" if outside or score >= 0.75 else "normal",
+                    explanation=explanation,
+                ),
+            )
+        )
+    if not scored:
+        return [
+            ModelExplanationItem(
+                label="Voice features",
+                value="Unavailable",
+                status="unavailable",
+                explanation="Patient-speech features were not available, so the Parkinson marker cannot be explained for this call.",
+            )
+        ]
+    return [item for _, item in sorted(scored, key=lambda row: row[0], reverse=True)[:3]]
+
+
+FALL_OR_NEAR_FALL_RE = re.compile(
+    r"\b("
+    r"fall|falls|fallen|falling|fell|"
+    r"almost\s+fell|nearly\s+fell|nearly\s+fall|almost\s+fall|"
+    r"slipped|tripped|lost\s+my\s+balance|"
+    r"hit\s+my\s+head|knocked\s+my\s+head|bumped\s+my\s+head"
+    r")\b",
+    re.IGNORECASE,
+)
+FALL_NEGATION_RE = re.compile(
+    r"\b("
+    r"no|not|never|without|"
+    r"did\s+not|didn't|"
+    r"have\s+not|haven't|has\s+not|hasn't"
+    r")\b[^.!?\n]{0,36}\b("
+    r"fall|falls|fallen|falling|fell|"
+    r"slipped|tripped|"
+    r"hit\s+my\s+head|knocked\s+my\s+head|bumped\s+my\s+head"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _has_affirmed_fall_or_near_fall(text: str) -> bool:
+    for sentence in _split_sentences(text) or [text]:
+        if FALL_OR_NEAR_FALL_RE.search(sentence) and not FALL_NEGATION_RE.search(sentence):
+            return True
+    return False
+
+
+def has_fall_or_near_fall_evidence(
+    symptoms: Symptoms,
+    segments: list[TranscriptSegment],
+    signals: list[RiskSignal] | None = None,
+) -> bool:
+    if symptoms.fall or symptoms.headImpact:
+        return True
+    for segment in _patient_review_segments(segments):
+        patient_text = _strip_speaker_labels(segment.englishText or segment.originalText or segment.text)
+        if _has_affirmed_fall_or_near_fall(patient_text):
+            return True
+    for signal in signals or []:
+        signal_text = " ".join(filter(None, [signal.label, signal.quotedText, signal.highlightText, signal.reason]))
+        if _has_affirmed_fall_or_near_fall(signal_text):
+            return True
+    return False
+
+
 NEGATIVE_EMOTION_LABELS = {
     "angry",
     "anger",
@@ -1669,6 +1851,11 @@ def health() -> dict[str, str]:
     return {"status": "ok", "product": "EarlyCare"}
 
 
+@app.get("/readiness")
+def readiness() -> dict[str, object]:
+    return readiness_report(BACKEND_ROOT, CALL_STORAGE_ROOT)
+
+
 @app.get("/seniors", response_model=list[Senior])
 def get_seniors() -> list[Senior]:
     return SENIORS
@@ -1821,6 +2008,11 @@ async def save_call(
     transcriptMessages: str = Form(...),
     elevenLabsConversationId: str | None = Form(None),
     agentAudioCaptured: bool = Form(False),
+    consentCaptured: bool = Form(False),
+    consentVersion: str = Form("earlycare-demo-v1"),
+    recordingNoticeShownAt: str | None = Form(None),
+    retentionPolicy: str = Form("local-demo-delete-after-hackathon"),
+    operatorId: str = Form("demo-operator"),
     audio: UploadFile | None = File(None),
     patientAudio: UploadFile | None = File(None),
 ) -> SavedCallResponse:
@@ -1936,7 +2128,10 @@ async def save_call(
     emotion_result = _elevenlabs_emotion_review(elevenLabsConversationId, translation.segments)
     assessment = _apply_emotion_modifier(assessment, emotion_result)
     parkinsons_speech_review = _parkinsons_speech_review(patient_speech_path)
-    concussion_speech_review = review_concussion_speech(patient_speech_path)
+    if has_fall_or_near_fall_evidence(symptoms, translation.segments, risk_signals):
+        concussion_speech_review = review_concussion_speech(patient_speech_path)
+    else:
+        concussion_speech_review = not_applicable_concussion_review()
     previous_risk_level = assessment.riskLevel
     assessment = _apply_concussion_speech_modifier(assessment, symptoms, concussion_speech_review)
     if concussion_speech_review and assessment.riskLevel != previous_risk_level:
@@ -1955,6 +2150,9 @@ async def save_call(
         update={
             "warnings": speech_model_warnings,
             "featuresSummary": speech_model_features,
+            "explanations": _parkinsons_explanations(
+                parkinsons_speech_review.model_copy(update={"featuresSummary": speech_model_features})
+            ),
         }
     )
 
@@ -2014,6 +2212,11 @@ async def save_call(
         speechModelWarnings=speech_model_warnings,
         speechModelFeaturesSummary=speech_model_features,
         concussionSpeechReview=concussion_speech_review,
+        consentCaptured=consentCaptured,
+        consentVersion=consentVersion or "earlycare-demo-v1",
+        recordingNoticeShownAt=recordingNoticeShownAt,
+        retentionPolicy=retentionPolicy or "local-demo-delete-after-hackathon",
+        operatorId=operatorId or "demo-operator",
         riskAssessment=assessment,
         recommendedAction=recommended_action,
     )

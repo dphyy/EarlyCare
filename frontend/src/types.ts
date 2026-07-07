@@ -17,6 +17,9 @@ export type ConsultationMemoryCategory =
   | "other_medical";
 export type ConsultationMemorySeverity = "info" | "watch" | "urgent";
 export type ConsultationMemoryStatus = "new" | "ongoing" | "resolved" | "unclear";
+export type ModelExplanationStatus = "normal" | "watch" | "unavailable";
+export type ConcussionApplicability = "applicable" | "not_applicable";
+export type ReadinessStatus = "ready" | "degraded" | "blocked";
 
 export interface SpeechProfile {
   speechRate: number;
@@ -143,7 +146,27 @@ export interface ConsultationMemoryItem {
   status: ConsultationMemoryStatus;
 }
 
+export interface ModelExplanationItem {
+  label: string;
+  value: string;
+  status: ModelExplanationStatus;
+  explanation: string;
+}
+
+export interface ReadinessComponent {
+  name: string;
+  status: "ready" | "degraded" | "missing" | "blocked";
+  detail: string;
+}
+
+export interface ReadinessReport {
+  status: ReadinessStatus;
+  message: string;
+  components: ReadinessComponent[];
+}
+
 export interface ConcussionSpeechReview {
+  applicability?: ConcussionApplicability;
   modelVersion?: string | null;
   predictedLabel?: string | null;
   probabilities: Record<string, number>;
@@ -155,6 +178,7 @@ export interface ConcussionSpeechReview {
   clippingFraction?: number | null;
   riskContribution: RiskLevel;
   riskReason?: string | null;
+  explanations?: ModelExplanationItem[];
   warning: string;
   failureReason?: string | null;
 }
@@ -166,6 +190,7 @@ export interface ParkinsonsSpeechReview {
   featuresSummary?: Record<string, number | string | null> | null;
   qualityOk: boolean;
   riskReason?: string | null;
+  explanations?: ModelExplanationItem[];
   warning: string;
   failureReason?: string | null;
 }
@@ -223,6 +248,12 @@ export interface CallRecord {
   safeguardResources?: CrisisResource[];
   safeguardFailureReason?: string | null;
   consultationMemory?: ConsultationMemoryItem[];
+  consentCaptured?: boolean;
+  consentVersion?: string;
+  recordingNoticeShownAt?: string | null;
+  retentionPolicy?: string;
+  operatorId?: string;
+  demoRecord?: boolean;
   riskAssessment: RiskAssessment;
   recommendedAction: string;
 }

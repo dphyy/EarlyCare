@@ -1,5 +1,5 @@
 import { seniors, sessions, volunteerTasks } from "./data";
-import type { CallRecord, CheckInSession, ConsultationMemoryItem, Senior, VolunteerTask } from "./types";
+import type { CallRecord, CheckInSession, ConsultationMemoryItem, ReadinessReport, Senior, VolunteerTask } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string | undefined;
 
@@ -29,6 +29,14 @@ export function fetchVolunteerTasks(): Promise<VolunteerTask[]> {
 
 export function fetchCalls(): Promise<CallRecord[]> {
   return getJson<CallRecord[]>("/calls", []);
+}
+
+export function fetchReadiness(): Promise<ReadinessReport> {
+  return getJson<ReadinessReport>("/readiness", {
+    status: "blocked",
+    message: "Backend readiness is unavailable.",
+    components: [{ name: "Backend API", status: "blocked", detail: "Frontend could not reach the FastAPI readiness endpoint." }]
+  });
 }
 
 export function fetchConsultationMemory(seniorId: string): Promise<ConsultationMemoryItem[]> {

@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+import importlib.util
 import json
 import math
 from tempfile import TemporaryDirectory
@@ -274,6 +275,11 @@ class CallWorkflowTests(unittest.TestCase):
                         "startedAt": "2026-07-04T10:00:00+08:00",
                         "completedAt": "2026-07-04T10:01:00+08:00",
                         "transcriptMessages": json.dumps(messages),
+                        "consentCaptured": "true",
+                        "consentVersion": "earlycare-demo-v1",
+                        "recordingNoticeShownAt": "2026-07-04T09:59:59+08:00",
+                        "retentionPolicy": "local-demo-delete-after-hackathon",
+                        "operatorId": "test-operator",
                     },
                     files={"audio": ("full-call.wav", _test_wav_bytes(2), "audio/wav")},
                 )
@@ -320,6 +326,11 @@ class CallWorkflowTests(unittest.TestCase):
                         "startedAt": "2026-07-04T10:00:00+08:00",
                         "completedAt": "2026-07-04T10:01:00+08:00",
                         "transcriptMessages": json.dumps(messages),
+                        "consentCaptured": "true",
+                        "consentVersion": "earlycare-demo-v1",
+                        "recordingNoticeShownAt": "2026-07-04T09:59:59+08:00",
+                        "retentionPolicy": "local-demo-delete-after-hackathon",
+                        "operatorId": "test-operator",
                     },
                     files={"audio": ("full-call.wav", _test_wav_bytes(2), "audio/wav")},
                 )
@@ -430,6 +441,11 @@ class CallWorkflowTests(unittest.TestCase):
                         "startedAt": "2026-07-04T10:00:00+08:00",
                         "completedAt": "2026-07-04T10:01:00+08:00",
                         "transcriptMessages": json.dumps(messages),
+                        "consentCaptured": "true",
+                        "consentVersion": "earlycare-demo-v1",
+                        "recordingNoticeShownAt": "2026-07-04T09:59:59+08:00",
+                        "retentionPolicy": "local-demo-delete-after-hackathon",
+                        "operatorId": "test-operator",
                     },
                     files={
                         "audio": ("full-call.wav", _test_wav_bytes(2), "audio/wav"),
@@ -452,6 +468,9 @@ class CallWorkflowTests(unittest.TestCase):
         self.assertGreater(patient_speech_duration, 0.5)
         self.assertEqual(call["parkinsonsSpeechReview"]["probability"], 0.24)
         self.assertEqual(call["speechModelWarnings"], [])
+        self.assertTrue(call["consentCaptured"])
+        self.assertEqual(call["operatorId"], "test-operator")
+        self.assertEqual(call["retentionPolicy"], "local-demo-delete-after-hackathon")
         self.assertTrue(audio_response.content)
         self.assertTrue(patient_audio_response.content)
         self.assertTrue(patient_speech_response.content)
@@ -521,6 +540,47 @@ class CallWorkflowTests(unittest.TestCase):
         assert reviewed_paths[0] is not None
         self.assertTrue(reviewed_paths[0].name.endswith("patient-speech.wav"))
 
+    def test_parkinsons_explanations_use_existing_feature_summary(self) -> None:
+        review = ParkinsonsSpeechReview(
+            qualityOk=True,
+            probability=0.4,
+            featuresSummary={
+                "MDVP:Fo(Hz)": 130.0,
+                "MDVP:Fhi(Hz)": 700.0,
+                "MDVP:Flo(Hz)": 90.0,
+                "MDVP:Jitter(%)": 0.04,
+                "MDVP:RAP": 0.02,
+                "MDVP:PPQ": 0.01,
+                "Jitter:DDP": 0.06,
+                "NHR": 0.4,
+                "HNR": 10.0,
+            },
+        )
+
+        explanations = main._parkinsons_explanations(review)
+
+        self.assertLessEqual(len(explanations), 3)
+        self.assertTrue(explanations)
+        self.assertTrue(any(item.status == "watch" for item in explanations))
+        self.assertTrue(all(item.value for item in explanations))
+
+    def test_has_fall_or_near_fall_evidence_uses_patient_only_text(self) -> None:
+        segments = [
+            TranscriptSegment(text="Agent: Did you fall?", englishText="Agent: Did you fall?", role="Agent"),
+            TranscriptSegment(text="Patient: I nearly fell today.", englishText="Patient: I nearly fell today.", role="Patient"),
+        ]
+
+        self.assertTrue(main.has_fall_or_near_fall_evidence(main.Symptoms(), segments, []))
+
+        agent_only = [TranscriptSegment(text="Agent: Did you fall?", englishText="Agent: Did you fall?", role="Agent")]
+        self.assertFalse(main.has_fall_or_near_fall_evidence(main.Symptoms(), agent_only, []))
+
+        negated_patient = [
+            TranscriptSegment(text="Patient: No fall today.", englishText="Patient: No fall today.", role="Patient"),
+            TranscriptSegment(text="Patient: I did not hit my head.", englishText="Patient: I did not hit my head.", role="Patient"),
+        ]
+        self.assertFalse(main.has_fall_or_near_fall_evidence(main.Symptoms(), negated_patient, []))
+
     def test_concussion_speech_review_lifts_symptom_call_for_human_review(self) -> None:
         symptoms = main.Symptoms(headache=True, dizziness=True)
         assessment = main._empty_assessment("Green", ["Patient reported mild symptoms."])
@@ -541,14 +601,14 @@ class CallWorkflowTests(unittest.TestCase):
 
     def test_save_call_stores_concussion_speech_review(self) -> None:
         messages = [
-            {"role": "Agent", "text": "Any headache or dizziness?", "timestamp": "2026-07-04T10:00:00+08:00"},
-            {"role": "Senior", "text": "I feel dizzy.", "timestamp": "2026-07-04T10:00:03+08:00"},
+            {"role": "Agent", "text": "Any fall, headache, or dizziness?", "timestamp": "2026-07-04T10:00:00+08:00"},
+            {"role": "Senior", "text": "I fell and now I feel dizzy.", "timestamp": "2026-07-04T10:00:03+08:00"},
         ]
         provider_result = ProviderResult(
             provider="fallback",
             language="English",
-            transcript="Agent: Any headache or dizziness?\nPatient: I feel dizzy.",
-            translation="Agent: Any headache or dizziness?\nPatient: I feel dizzy.",
+            transcript="Agent: Any fall, headache, or dizziness?\nPatient: I fell and now I feel dizzy.",
+            translation="Agent: Any fall, headache, or dizziness?\nPatient: I fell and now I feel dizzy.",
             confidence=0.5,
             fallbackUsed=True,
         )
@@ -570,8 +630,8 @@ class CallWorkflowTests(unittest.TestCase):
                     main,
                     "_openai_risk_review",
                     return_value=(
-                        main.Symptoms(dizziness=True),
-                        main._empty_assessment("Green", ["Patient reported dizziness."]),
+                        main.Symptoms(fall=True, dizziness=True),
+                        main._empty_assessment("Green", ["Patient reported fall and dizziness."]),
                         [],
                         "Review the call.",
                         False,
@@ -604,8 +664,69 @@ class CallWorkflowTests(unittest.TestCase):
         call = response.json()["call"]
         self.assertEqual(response.status_code, 200)
         self.assertEqual(call["riskLevel"], "Amber")
+        self.assertEqual(call["concussionSpeechReview"]["applicability"], "applicable")
         self.assertEqual(call["concussionSpeechReview"]["predictedLabel"], "dysarthria_like")
         self.assertIn("Speech abnormality model", call["recommendedAction"])
+
+    def test_save_call_skips_concussion_review_without_fall_evidence(self) -> None:
+        messages = [
+            {"role": "Agent", "text": "How are you?", "timestamp": "2026-07-04T10:00:00+08:00"},
+            {"role": "Senior", "text": "I feel okay today.", "timestamp": "2026-07-04T10:00:03+08:00"},
+        ]
+        provider_result = ProviderResult(
+            provider="fallback",
+            language="English",
+            transcript="Agent: How are you?\nPatient: I feel okay today.",
+            translation="Agent: How are you?\nPatient: I feel okay today.",
+            confidence=0.5,
+            fallbackUsed=True,
+        )
+
+        with TemporaryDirectory() as temp_dir:
+            with (
+                patch.object(main, "CALL_STORAGE_ROOT", Path(temp_dir)),
+                patch.object(main, "transcribe_with_fallback", return_value=provider_result),
+                patch.object(
+                    main,
+                    "_openai_risk_review",
+                    return_value=(
+                        main.Symptoms(),
+                        main._empty_assessment("Green", ["No notable risk."]),
+                        [],
+                        "Continue routine follow-up.",
+                        False,
+                        None,
+                    ),
+                ),
+                patch.object(
+                    main,
+                    "_parkinsons_speech_review",
+                    return_value=ParkinsonsSpeechReview(qualityOk=False, warnings=[], featuresSummary=None),
+                ),
+                patch.object(main, "review_concussion_speech") as review_concussion,
+            ):
+                client = TestClient(main.app)
+                response = client.post(
+                    "/calls",
+                    data={
+                        "seniorId": "s-001",
+                        "status": "Complete",
+                        "startedAt": "2026-07-04T10:00:00+08:00",
+                        "completedAt": "2026-07-04T10:01:00+08:00",
+                        "transcriptMessages": json.dumps(messages),
+                    },
+                    files={
+                        "audio": ("full-call.wav", _test_wav_bytes(2), "audio/wav"),
+                        "patientAudio": ("patient-audio.wav", _test_wav_bytes(4, [(1.2, 2.3)]), "audio/wav"),
+                    },
+                )
+
+        call = response.json()["call"]
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(call["concussionSpeechReview"]["applicability"], "not_applicable")
+        self.assertEqual(call["concussionSpeechReview"]["riskContribution"], "Green")
+        self.assertIn("No patient-stated fall or near-fall", call["concussionSpeechReview"]["explanations"][0]["explanation"])
+        review_concussion.assert_not_called()
 
     def test_patient_speech_audio_endpoint_returns_404_when_missing(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -1319,6 +1440,68 @@ class CallWorkflowTests(unittest.TestCase):
         attached = main._attach_segment_timestamps(signals, segments)
 
         self.assertEqual(attached, [])
+
+    def test_readiness_endpoint_reports_status_without_secret_values(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            with (
+                patch.object(main, "CALL_STORAGE_ROOT", Path(temp_dir)),
+                patch.dict(
+                    main.os.environ,
+                    {
+                        "ELEVENLABS_API_KEY": "secret-eleven",
+                        "ELEVENLABS_AGENT_ID": "agent-123",
+                        "OPENAI_API_KEY": "secret-openai",
+                        "MERALION_API_KEY": "secret-meralion",
+                        "GOOGLE_TRANSLATE_API_KEY": "secret-google",
+                    },
+                ),
+            ):
+                client = TestClient(main.app)
+                response = client.get("/readiness")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn(payload["status"], {"ready", "degraded", "blocked"})
+        serialized = json.dumps(payload)
+        self.assertNotIn("secret-eleven", serialized)
+        self.assertNotIn("secret-openai", serialized)
+        self.assertTrue(payload["components"])
+
+    def test_readiness_reports_wavlm_degraded_when_local_cache_incomplete(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "models" / "hf_cache").mkdir(parents=True)
+
+            report = main.readiness_report(root, root / "storage" / "calls")
+
+        wavlm = next(component for component in report["components"] if component["name"] == "WavLM cache")
+        self.assertEqual(wavlm["status"], "degraded")
+        self.assertIn("incomplete", wavlm["detail"].lower())
+
+    def test_readiness_reports_wavlm_ready_when_required_snapshot_files_exist(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            snapshot = root / "models" / "hf_cache" / "hub" / "models--microsoft--wavlm-base" / "snapshots" / "demo"
+            snapshot.mkdir(parents=True)
+            (snapshot / "config.json").write_text("{}")
+            (snapshot / "preprocessor_config.json").write_text("{}")
+            (snapshot / "model.safetensors").write_text("weights")
+
+            report = main.readiness_report(root, root / "storage" / "calls")
+
+        wavlm = next(component for component in report["components"] if component["name"] == "WavLM cache")
+        self.assertEqual(wavlm["status"], "ready")
+
+    def test_cache_wavlm_script_can_be_imported_without_downloading(self) -> None:
+        script_path = Path("backend/scripts/cache_wavlm.py")
+        spec = importlib.util.spec_from_file_location("cache_wavlm_test", script_path)
+        self.assertIsNotNone(spec)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        self.assertEqual(module.MODEL_NAME, "microsoft/wavlm-base")
+        self.assertTrue(str(module.cache_root()).endswith("backend/models/hf_cache"))
 
     def test_update_volunteer_task_rejects_invalid_status(self) -> None:
         client = TestClient(main.app)
