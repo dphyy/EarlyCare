@@ -14,7 +14,6 @@ EarlyCare is decision support, not diagnosis. It helps care teams notice risk si
 | Full-call recording | Requests browser echo cancellation, noise suppression, and auto gain control, then records patient microphone audio and ElevenLabs agent audio into one replayable `full-call.wav`. |
 | Patient-only audio | Saves raw `patient-audio.wav` and derives `patient-speech.wav` by isolating voiced patient answers for saved-model speech review. |
 | Patient overview | Shows saved recordings, translated English transcript, original transcript, patient speech quality, model review cards, risk/safeguard/tone review, and follow-up recommendation. |
-| Demo runner | Opens a separate scripted frontend-only judging view from the top navigation, covering fall escalation, Parkinson/frailty watch, safeguard support, multilingual routine check-in, and concussion not-applicable behavior without overwriting real saved calls. |
 | Consultation memory | Extracts dated, evidence-backed patient facts from check-ins, such as falls, medication/meal concerns, symptoms, mood, mobility, sleep, help-seeking, and appointment mentions. |
 | Doctor Brief | Generates a printable one-page **EarlyCare Consultation Brief** for AIC/care coordinators to share before a clinic visit or when risk rises, without asking doctors to manage another dashboard. |
 | Transcription and translation | Uses MERaLiON first, ElevenLabs speech-to-text and Google Translate as fallback, and saved dialogue transcript only as the final demo fallback. |
@@ -51,7 +50,7 @@ EarlyCare is decision support, not diagnosis. It helps care teams notice risk si
 8. A separate OpenAI safeguard review classifies patient-stated distress as `None`, `Support`, `Urgent`, or `Emergency`, attaches exact patient evidence, and can raise the visible risk level.
 9. ElevenLabs data collection is queried for `user_emotional_state`; per-response emotion tags are attached to patient transcript segments when the returned JSON includes response indexes or can be mapped by order.
 10. The backend extracts consultation-memory items from patient speech only. Each item must be backed by exact patient evidence and a dated check-in.
-11. The backend scores derived `patient-speech.wav` with the saved Parkinson voice-feature model and, only after patient-stated fall or near-fall evidence, the saved concussion speech-abnormality model. Both model cards show lightweight explanation bullets instead of diagnosis language.
+11. The backend scores derived `patient-speech.wav` with the saved Parkinson voice-feature model and saved concussion speech-abnormality model when patient speech is available, then stores explicit review fields and warnings.
 12. The Patient overview shows a **Patient speech quality** panel for shared audio/model readiness and separate Parkinson/concussion cards for each model's interpretation.
 13. The Patient overview renders the English transcript above the original transcript and highlights risk, safeguard, and tone evidence inline.
 14. The Patient overview includes a printable **EarlyCare Consultation Brief** with patient details, reporting window, risk trend, grouped memory items, exact quotes, and a decision-support disclaimer.
@@ -126,23 +125,9 @@ The repo includes the runtime adapter and vendored inference code under
 `backend/app/concussion_speech_model/`, plus trained pilot artifacts under
 `backend/models/concussion_speech/`. Training datasets, embedding caches, and raw
 TORGO/VOICED files are intentionally not required for local website inference and
-should not be pushed. On a new machine, install `backend/requirements.txt`, then
-pre-cache the configured WavLM backbone locally so demos do not depend on a
-first-run network download:
-
-```bash
-backend/.venv/bin/python backend/scripts/cache_wavlm.py
-```
-
-The script stores Hugging Face files under `backend/models/hf_cache/`, which is
-ignored by git. Backend readiness marks WavLM as ready only when that local cache
-contains the expected config, feature-extractor or preprocessor config, and model
-weights for `microsoft/wavlm-base`.
-
-The concussion speech review is intentionally skipped when the patient does not
-state a fall or near-fall. In that case the saved call records
-`concussionSpeechReview.applicability = "not_applicable"` and the dashboard shows
-**Not applicable**, not an unavailable model.
+should not be pushed. On a new machine, install `backend/requirements.txt`; the
+first model run may download the configured WavLM backbone into the user's
+Hugging Face cache unless a local `HF_HOME` cache is provided.
 
 This is not concussion detection or diagnosis. The model returns research labels
 only. If the patient reports concussion-relevant symptoms and the speech model
@@ -201,15 +186,6 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Cache the WavLM backbone for deterministic offline demo readiness:
-
-```bash
-cd ..
-backend/.venv/bin/python backend/scripts/cache_wavlm.py
-```
-
-Do not commit `backend/models/hf_cache/`; it is a local model cache.
-
 Install training extras only when retraining or experimenting:
 
 ```bash
@@ -237,27 +213,14 @@ Open the Vite URL, usually `http://localhost:5173`.
 
 ## Demo Flow
 
-### Scripted Judge Demo
-
-1. Click **Demo runner** in the top navigation.
-2. The app opens a separate demo overview that shows only frontend-only demo records; **Patient overview** remains reserved for real saved backend calls and audio.
-3. Review all three patients:
-   - Mdm Tan shows fall/near-fall escalation, concussion speech review applicable, caregiver follow-up, consultation memory, and volunteer task context.
-   - Mr Raman shows Parkinson/frailty watch, slower speech-quality indicators, emotional-distress safeguard support, tone concern, and concussion **Not applicable** because he says there was no fall or near-fall.
-   - Encik Ahmad shows a routine Malay check-in with meals, water, medication, family support, low speech-marker probability, no safeguard, and concussion **Not applicable**.
-4. Click transcript highlights to scroll to the supporting patient sentence when demo audio is absent.
-5. Review or print the **EarlyCare Consultation Brief** as the doctor-facing handoff summary.
-
-### Live Call Demo
-
 1. Open **Agents call**.
 2. Choose a senior and click **Start call**.
-3. Confirm the recording notice and demo consent checkbox.
-4. Allow microphone permission.
-5. Speak with the agent in any comfortable language.
-6. Click **End & save**.
-7. Open **Patient overview**.
-8. Review the full-call recording, English transcript, original transcript, patient speech quality, model review cards, and inline risk/safeguard/tone highlights.
+3. Allow microphone permission.
+4. Speak with the agent in any comfortable language.
+5. Click **End & save**.
+6. Open **Patient overview**.
+7. Review the full-call recording, English transcript, original transcript, patient speech quality, model review cards, and inline risk/safeguard/tone highlights.
+8. Review or print the **EarlyCare Consultation Brief** as the doctor-facing handoff summary.
 9. Click a highlighted patient phrase to replay the patient answer from immediately after the previous agent question.
 
 ## Commands
@@ -268,7 +231,6 @@ Open the Vite URL, usually `http://localhost:5173`.
 | `npm run build --prefix frontend` | Type-check and build the frontend. |
 | `PYTHONPATH=backend backend/.venv/bin/python -m unittest discover backend/tests` | Run backend tests. |
 | `PYTHONPATH=backend backend/.venv/bin/python -m unittest backend.tests.test_speech_ml` | Run focused Parkinson speech-marker tests. |
-| `backend/.venv/bin/python backend/scripts/cache_wavlm.py` | Download `microsoft/wavlm-base` into the ignored local Hugging Face cache used by readiness and concussion inference. |
 | `npm run lint --prefix frontend` | Run frontend TypeScript checks. |
 | `backend/.venv/bin/python -m py_compile backend/app/*.py` | Compile-check backend modules. |
 | `uvicorn app.main:app --reload --port 8000` | Start the backend from the `backend/` folder. |
@@ -279,7 +241,6 @@ Open the Vite URL, usually `http://localhost:5173`.
 - `backend/` contains the FastAPI service and provider integrations.
 - `backend/models/parkinsons_speech/` contains the checked-in Parkinson speech-marker artifacts: model, schema, metrics, model card, and reference ranges.
 - `backend/models/concussion_speech/` contains the checked-in concussion speech-abnormality pilot artifacts needed for inference.
-- `backend/models/hf_cache/` is an ignored local Hugging Face cache created by `backend/scripts/cache_wavlm.py`.
 - `backend/app/concussion_speech_model/` contains the vendored speech-abnormality inference package.
 - `backend/tests/` contains backend workflow tests.
 - `backend/storage/` contains generated local call artifacts and is ignored.
@@ -294,8 +255,6 @@ EarlyCare does not diagnose Parkinson's disease, concussion, stroke, or any othe
 - Train and validate the Parkinson and concussion speech models on larger, more representative datasets before treating them as more than research signals.
 - Include Singapore-context speech data where licensing and governance allow, such as IMDA's [National Speech Corpus](https://www.imda.gov.sg/how-we-can-help/national-speech-corpus), so speech models and transcription checks are better calibrated to Singaporean accents, code-switching, local languages, and older-adult speech patterns.
 - Personalize each agent call to the individual's medical history, care plan, medication list, known risks, preferred language/dialect, caregiver arrangement, and previous consultation-memory items.
-- Replace heuristic speech-profile estimates with validated audio-derived timing and voice features.
-- Improve audio/transcript alignment with provider word-level timestamps when available.
 - Validate risk categories, safeguard thresholds, and Doctor Brief content with clinicians, AIC/community care teams, patients, and caregivers before real-world deployment.
 - Add persistent database/object storage for multi-user demos, including longitudinal reporting windows such as "since last clinic visit."
 - Add consent, retention, audit, role-based access control, and export governance before any real pilot.
@@ -315,19 +274,19 @@ The bundled `backend/models/concussion_speech` artifacts are the runtime output 
 
 - **TORGO Database**: acoustic and articulatory speech from speakers with dysarthria and matched controls. Used for `dysarthria_like` and `normal` training examples.
   - Site: [The TORGO Database: Acoustic and articulatory speech from speakers with dysarthria](https://www.cs.toronto.edu/~complingweb/data/TORGO/torgo.html)
-  - Suggested citation: Rudzicz, F., Namasivayam, A. K., & Wolff, T. (2012). The TORGO database of acoustic and articulatory speech from speakers with dysarthria. *Language Resources and Evaluation*, 46, 523-541.
+  - Rudzicz, F., Namasivayam, A. K., & Wolff, T. (2012). The TORGO database of acoustic and articulatory speech from speakers with dysarthria. *Language Resources and Evaluation*, 46, 523-541.
 
 - **VOICED Database v1.0.0**: healthy and pathological sustained-vowel voice samples from PhysioNet. Used for `dysphonia_like` and `normal` training examples.
   - Site: [VOICED Database v1.0.0](https://physionet.org/content/voiced/1.0.0/)
-  - Suggested citation: Cesari, U., De Pietro, G., Marciano, E., Niri, C., Sannino, G., & Verde, L. (2018). A new database of healthy and pathological voices. *Computers & Electrical Engineering*, 68, 310-321.
-  - PhysioNet citation: Goldberger, A. L., Amaral, L. A. N., Glass, L., Hausdorff, J. M., Ivanov, P. C., Mark, R. G., et al. (2000). PhysioBank, PhysioToolkit, and PhysioNet: Components of a new research resource for complex physiologic signals. *Circulation*, 101(23), e215-e220.
+  - Cesari, U., De Pietro, G., Marciano, E., Niri, C., Sannino, G., & Verde, L. (2018). A new database of healthy and pathological voices. *Computers & Electrical Engineering*, 68, 310-321.
+  - Goldberger, A. L., Amaral, L. A. N., Glass, L., Hausdorff, J. M., Ivanov, P. C., Mark, R. G., et al. (2000). PhysioBank, PhysioToolkit, and PhysioNet: Components of a new research resource for complex physiologic signals. *Circulation*, 101(23), e215-e220.
 
 #### Feature Backbone And Classifier
 
 - **WavLM Base**: frozen speech embedding backbone configured as `microsoft/wavlm-base` in `backend/models/concussion_speech/config.json`. Runtime audio is resampled to 16 kHz before embedding.
   - Model card: [microsoft/wavlm-base on Hugging Face](https://huggingface.co/microsoft/wavlm-base)
   - Paper: [WavLM: Large-Scale Self-Supervised Pre-Training for Full Stack Speech Processing](https://arxiv.org/abs/2110.13900)
-  - Suggested citation: Chen, S., Wang, C., Chen, Z., Wu, Y., Liu, S., Chen, Z., et al. (2022). WavLM: Large-Scale Self-Supervised Pre-Training for Full Stack Speech Processing. *IEEE Journal of Selected Topics in Signal Processing*.
+  - Chen, S., Wang, C., Chen, Z., Wu, Y., Liu, S., Chen, Z., et al. (2022). WavLM: Large-Scale Self-Supervised Pre-Training for Full Stack Speech Processing. *IEEE Journal of Selected Topics in Signal Processing*.
 
 - **Classifier**: scikit-learn logistic regression with class balancing and calibration, saved in `backend/models/concussion_speech/model.joblib`.
   - API reference: [sklearn.linear_model.LogisticRegression](https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LogisticRegression.html)
