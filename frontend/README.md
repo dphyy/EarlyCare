@@ -5,7 +5,7 @@ React + Vite interface for the EarlyCare hackathon prototype.
 The frontend provides two main experiences:
 
 - **Agents call**: an in-browser call simulation powered by ElevenLabs Agents.
-- **Patient overview**: a care-team view for recordings, transcripts, speech timing, conversational speech-marker readiness, inline AI risk/safeguard/tone highlights, and follow-up recommendations.
+- **Patient overview**: a care-team view for recordings, transcripts, patient speech quality, Parkinson and concussion model cards, inline AI risk/safeguard/tone highlights, and follow-up recommendations.
 
 ## Agents Call
 
@@ -32,8 +32,8 @@ The Patient overview:
 - shows translated English transcript first
 - shows original transcript below it
 - preserves `Agent:` and `Patient:` speaker labels
-- shows current speech timing and baseline context
-- shows derived patient-speech duration, speech coverage, and conversational speech-marker readiness
+- shows the **Patient speech quality** panel with patient-speech duration, speech coverage, response latency, speaking rate, Parkinson model readiness, and concussion review readiness
+- shows separate Parkinson and concussion cards for each model's interpretation
 - shows OpenAI risk review status and recommended action
 - shows OpenAI distress safeguard status and Singapore resource text when returned
 - shows ElevenLabs tone/emotion summary when `user_emotional_state` data collection is available
@@ -44,17 +44,15 @@ The Patient overview:
 
 Risk, safeguard, and tone signals are not rendered as separate evidence cards. The transcript itself is the review surface.
 
-## Speech Signal Display
+## Patient Speech Quality And Model Cards
 
-The frontend does not run the Parkinsonian speech-marker model. It displays backend fields from the saved call:
+The frontend does not run either speech model. It displays backend fields from the saved call:
 
-- `speechModelProbability`
-- `speechModelVersion`
-- `speechModelWarnings`
-- `speechModelFeaturesSummary`
+- `parkinsonsSpeechReview`
+- `concussionSpeechReview`
 - `patientSpeechAudioAvailable`
 
-The displayed speech-marker description says the backend scored patient-only pitch, jitter, and noise features. It is shown as a research screening signal, not a diagnosis. If the backend reports low confidence or unavailable, the UI shows that state instead of inventing a percentage.
+For older saved call metadata, the UI still falls back to legacy `speechModelProbability`, `speechModelVersion`, `speechModelWarnings`, and `speechModelFeaturesSummary`. The Patient speech quality panel answers whether the audio was usable enough for each model. The separate Parkinson and concussion cards show what each saved model returned as research-only review support, not diagnoses.
 
 ## Local Setup
 

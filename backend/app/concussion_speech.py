@@ -14,10 +14,6 @@ RESEARCH_WARNING = (
 )
 
 
-def _enabled() -> bool:
-    return os.getenv("EARLYCARE_CONCUSSION_SPEECH_MODEL_ENABLED", "").lower() in {"1", "true", "yes"}
-
-
 def _backend_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
@@ -66,8 +62,12 @@ def _quality_value(quality: dict[str, Any], *names: str) -> Any:
 
 
 def review_concussion_speech(audio_path: Path | None) -> ConcussionSpeechReview | None:
-    if audio_path is None or not _enabled():
-        return None
+    if audio_path is None:
+        return ConcussionSpeechReview(
+            qualityOk=False,
+            warning=RESEARCH_WARNING,
+            failureReason="Patient speech audio was not available for concussion speech review.",
+        )
     if not audio_path.exists():
         return ConcussionSpeechReview(
             qualityOk=False,

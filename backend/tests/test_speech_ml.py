@@ -10,11 +10,11 @@ import unittest
 
 import numpy as np
 
-from app.speech_ml.evaluation import group_folds
-from app.speech_ml.inference import predict_speech_marker
-from app.speech_ml.parkinsons_features import CONVERSATIONAL_PARKINSONS_FEATURE_NAMES, extract_conversational_parkinsons_features
-from app.speech_ml.preprocessing import preprocess_audio
-from app.speech_ml.tabular_training import select_best_candidate, subject_id_from_name, CandidateResult
+from app.parkinsons_speech_model.evaluation import group_folds
+from app.parkinsons_speech_model.inference import predict_speech_marker
+from app.parkinsons_speech_model.parkinsons_features import CONVERSATIONAL_PARKINSONS_FEATURE_NAMES, extract_conversational_parkinsons_features
+from app.parkinsons_speech_model.preprocessing import preprocess_audio
+from app.parkinsons_speech_model.tabular_training import select_best_candidate, subject_id_from_name, CandidateResult
 
 
 def write_test_wav(path: Path, sample_rate: int = 8_000, seconds: float = 1.0) -> None:
@@ -58,7 +58,7 @@ class SpeechMlTests(unittest.TestCase):
             test_groups = {groups[index] for index in test_indices}
             self.assertFalse(train_groups & test_groups)
 
-    def test_predict_speech_model_returns_warning_without_artifacts(self) -> None:
+    def test_predict_parkinsons_speech_model_returns_warning_without_artifacts(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             audio_path = root / "patient.wav"
@@ -101,7 +101,7 @@ class SpeechMlTests(unittest.TestCase):
         self.assertFalse(excluded & set(CONVERSATIONAL_PARKINSONS_FEATURE_NAMES))
 
     def test_legacy_feature_helpers_are_removed_from_runtime_extractor(self) -> None:
-        source = Path("backend/app/speech_ml/parkinsons_features.py").read_text()
+        source = Path("backend/app/parkinsons_speech_model/parkinsons_features.py").read_text()
         for legacy_name in ["_shimmer_from_audio", "_nonlinear_pitch_features", "_dfa", "_correlation_dimension"]:
             self.assertNotIn(legacy_name, source)
 
@@ -133,7 +133,7 @@ class SpeechMlTests(unittest.TestCase):
         self.assertEqual(winner.name, "auc")
 
     @unittest.skipUnless(importlib.util.find_spec("joblib"), "joblib is optional")
-    def test_predict_speech_model_uses_saved_tabular_artifacts(self) -> None:
+    def test_predict_parkinsons_speech_model_uses_saved_tabular_artifacts(self) -> None:
         import joblib  # type: ignore
 
         with TemporaryDirectory() as temp_dir:
@@ -153,7 +153,7 @@ class SpeechMlTests(unittest.TestCase):
         self.assertIsNotNone(result.features_summary)
 
     @unittest.skipUnless(importlib.util.find_spec("joblib"), "joblib is optional")
-    def test_predict_speech_model_blocks_out_of_training_range_features(self) -> None:
+    def test_predict_parkinsons_speech_model_blocks_out_of_training_range_features(self) -> None:
         import joblib  # type: ignore
 
         with TemporaryDirectory() as temp_dir:

@@ -8,15 +8,15 @@ from pathlib import Path
 
 import numpy as np
 
-from app.speech_ml import TARGET_SAMPLE_RATE
-from app.speech_ml.parkinsons_features import (
+from app.parkinsons_speech_model import TARGET_SAMPLE_RATE
+from app.parkinsons_speech_model.parkinsons_features import (
     CONVERSATIONAL_PARKINSONS_FEATURE_NAMES,
     extract_conversational_parkinsons_features,
     ordered_feature_vector,
     pitch_track,
     voiced_window_count,
 )
-from app.speech_ml.preprocessing import load_audio, preprocess_audio
+from app.parkinsons_speech_model.preprocessing import load_audio, preprocess_audio
 
 
 @dataclass

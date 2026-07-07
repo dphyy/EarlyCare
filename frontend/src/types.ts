@@ -131,6 +131,17 @@ export interface ConcussionSpeechReview {
   failureReason?: string | null;
 }
 
+export interface ParkinsonsSpeechReview {
+  modelVersion?: string | null;
+  probability?: number | null;
+  warnings: string[];
+  featuresSummary?: Record<string, number | string | null> | null;
+  qualityOk: boolean;
+  riskReason?: string | null;
+  warning: string;
+  failureReason?: string | null;
+}
+
 export interface CallRecord {
   id: string;
   seniorId: string;
@@ -156,6 +167,7 @@ export interface CallRecord {
   patientSpeechAudioUrl?: string | null;
   patientSpeechAudioAvailable?: boolean;
   agentAudioCaptured?: boolean;
+  parkinsonsSpeechReview?: ParkinsonsSpeechReview | null;
   speechModelVersion?: string | null;
   speechModelProbability?: number | null;
   speechModelWarnings?: string[];

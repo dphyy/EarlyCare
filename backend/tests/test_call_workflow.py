@@ -11,7 +11,7 @@ import numpy as np
 from fastapi.testclient import TestClient
 
 from app import main, providers
-from app.models import ProviderResult, TranscriptSegment, TranscriptionAttempt
+from app.models import ParkinsonsSpeechReview, ProviderResult, TranscriptSegment, TranscriptionAttempt
 
 
 def _test_wav_bytes(seconds: float = 4.0, speech_ranges: list[tuple[float, float]] | None = None, sample_rate: int = 16_000) -> bytes:
@@ -409,7 +409,17 @@ class CallWorkflowTests(unittest.TestCase):
                 patch.object(main, "CALL_STORAGE_ROOT", Path(temp_dir)),
                 patch.object(main, "transcribe_with_fallback", return_value=provider_result),
                 patch.object(main, "_openai_risk_review", return_value=main._manual_risk_review()),
-                patch.dict(main.os.environ, {"EARLYCARE_SPEECH_MODEL_ENABLED": "false"}),
+                patch.object(
+                    main,
+                    "_parkinsons_speech_review",
+                    return_value=ParkinsonsSpeechReview(
+                        modelVersion="test-parkinsons",
+                        probability=0.24,
+                        warnings=[],
+                        featuresSummary={"speechModelUsable": "true"},
+                        qualityOk=True,
+                    ),
+                ),
             ):
                 client = TestClient(main.app)
                 response = client.post(
@@ -440,6 +450,7 @@ class CallWorkflowTests(unittest.TestCase):
         self.assertTrue(call["patientSpeechAudioFilePath"].endswith("patient-speech.wav"))
         self.assertLess(patient_speech_duration, 2.0)
         self.assertGreater(patient_speech_duration, 0.5)
+        self.assertEqual(call["parkinsonsSpeechReview"]["probability"], 0.24)
         self.assertEqual(call["speechModelWarnings"], [])
         self.assertTrue(audio_response.content)
         self.assertTrue(patient_audio_response.content)
@@ -453,7 +464,7 @@ class CallWorkflowTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
 
-    def test_speech_model_receives_derived_patient_speech_audio(self) -> None:
+    def test_parkinsons_speech_model_receives_derived_patient_speech_audio_without_env_flag(self) -> None:
         messages = [
             {"role": "Agent", "text": "How are you?", "timestamp": "2026-07-04T10:00:00+08:00"},
             {"role": "Senior", "text": "I am okay.", "timestamp": "2026-07-04T10:00:02+08:00"},
@@ -470,14 +481,20 @@ class CallWorkflowTests(unittest.TestCase):
 
         def capture_speech_model_path(audio_path: Path | None):
             reviewed_paths.append(audio_path)
-            return "test-model", 0.42, [], {"speechModelUsable": "true"}
+            return ParkinsonsSpeechReview(
+                modelVersion="test-parkinsons",
+                probability=0.42,
+                warnings=[],
+                featuresSummary={"speechModelUsable": "true"},
+                qualityOk=True,
+            )
 
         with TemporaryDirectory() as temp_dir:
             with (
                 patch.object(main, "CALL_STORAGE_ROOT", Path(temp_dir)),
                 patch.object(main, "transcribe_with_fallback", return_value=provider_result),
                 patch.object(main, "_openai_risk_review", return_value=main._manual_risk_review()),
-                patch.object(main, "_speech_model_review", side_effect=capture_speech_model_path),
+                patch.object(main, "_parkinsons_speech_review", side_effect=capture_speech_model_path),
             ):
                 client = TestClient(main.app)
                 response = client.post(
@@ -497,6 +514,7 @@ class CallWorkflowTests(unittest.TestCase):
 
         call = response.json()["call"]
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(call["parkinsonsSpeechReview"]["probability"], 0.42)
         self.assertEqual(call["speechModelProbability"], 0.42)
         self.assertEqual(len(reviewed_paths), 1)
         self.assertIsNotNone(reviewed_paths[0])
@@ -560,7 +578,11 @@ class CallWorkflowTests(unittest.TestCase):
                         None,
                     ),
                 ),
-                patch.object(main, "_speech_model_review", return_value=(None, None, [], None)),
+                patch.object(
+                    main,
+                    "_parkinsons_speech_review",
+                    return_value=ParkinsonsSpeechReview(qualityOk=False, warnings=[], featuresSummary=None),
+                ),
                 patch.object(main, "review_concussion_speech", return_value=review),
             ):
                 client = TestClient(main.app)

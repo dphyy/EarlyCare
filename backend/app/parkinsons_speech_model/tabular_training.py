@@ -6,8 +6,8 @@ from typing import Any
 
 import numpy as np
 
-from app.speech_ml.evaluation import binary_metrics, group_folds, speaker_level_probabilities
-from app.speech_ml.parkinsons_features import CONVERSATIONAL_PARKINSONS_FEATURE_NAMES
+from app.parkinsons_speech_model.evaluation import binary_metrics, group_folds, speaker_level_probabilities
+from app.parkinsons_speech_model.parkinsons_features import CONVERSATIONAL_PARKINSONS_FEATURE_NAMES
 
 
 @dataclass

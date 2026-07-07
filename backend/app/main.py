@@ -27,6 +27,7 @@ from app.models import (
     EmotionConcernLevel,
     EmotionProviderResult,
     EmotionSegment,
+    ParkinsonsSpeechReview,
     ProviderResult,
     RiskAssessment,
     RiskSignal,
@@ -48,7 +49,7 @@ from app.providers import GoogleTranslateProvider, _safe_error_reason, clean_tra
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 CALL_STORAGE_ROOT = BACKEND_ROOT / "storage" / "calls"
-SPEECH_MODEL_ARTIFACT_ROOT = BACKEND_ROOT / "models" / "speech"
+PARKINSONS_SPEECH_MODEL_ARTIFACT_ROOT = BACKEND_ROOT / "models" / "parkinsons_speech"
 app = FastAPI(title="EarlyCare API", version="0.1.0")
 SUPPORTED_AUDIO_EXTENSIONS = {".mp3", ".ogg", ".wav", ".webm"}
 CONTENT_TYPE_AUDIO_EXTENSIONS = {
@@ -921,17 +922,40 @@ def _manual_risk_review(failure_reason: str | None = None) -> tuple[Symptoms, Ri
     return Symptoms(), _empty_assessment("Watch", reasons), [], "Manual review required.", True, failure_reason
 
 
-def _speech_model_review(audio_path: Path | None) -> tuple[str | None, float | None, list[str], dict[str, float | int | str | None] | None]:
-    if audio_path is None or os.getenv("EARLYCARE_SPEECH_MODEL_ENABLED", "").lower() not in {"1", "true", "yes"}:
-        return None, None, [], None
+def _parkinsons_speech_review(audio_path: Path | None) -> ParkinsonsSpeechReview:
+    if audio_path is None:
+        return ParkinsonsSpeechReview(
+            qualityOk=False,
+            failureReason="Patient speech audio was not available for Parkinson voice-feature review.",
+            warnings=["Parkinson voice-feature model unavailable: patient speech audio was not available."],
+        )
     try:
-        from app.speech_ml.inference import predict_speech_marker
+        from app.parkinsons_speech_model.inference import predict_speech_marker
 
-        result = predict_speech_marker(audio_path, SPEECH_MODEL_ARTIFACT_ROOT)
-        return result.model_version, result.probability, result.warnings, result.features_summary
+        result = predict_speech_marker(audio_path, PARKINSONS_SPEECH_MODEL_ARTIFACT_ROOT)
     except Exception as exc:
         detail = str(exc) or exc.__class__.__name__
-        return None, None, [f"Speech model review unavailable: {detail}"], None
+        return ParkinsonsSpeechReview(
+            qualityOk=False,
+            failureReason=f"Parkinson voice-feature model unavailable: {detail}",
+            warnings=[f"Parkinson voice-feature model unavailable: {detail}"],
+        )
+
+    failure_reason = None
+    if result.probability is None:
+        failure_reason = next((warning for warning in result.warnings if "unavailable" in warning.lower()), None)
+    risk_reason = None
+    if result.probability is not None:
+        risk_reason = f"Saved Parkinson voice-feature model returned {round(result.probability * 100)}% marker probability."
+    return ParkinsonsSpeechReview(
+        modelVersion=result.model_version,
+        probability=result.probability,
+        warnings=result.warnings,
+        featuresSummary=result.features_summary,
+        qualityOk=result.probability is not None,
+        riskReason=risk_reason,
+        failureReason=failure_reason,
+    )
 
 
 NEGATIVE_EMOTION_LABELS = {
@@ -1659,9 +1683,7 @@ async def save_call(
         patient_speech_url = f"/calls/{call_id}/patient-speech-audio"
     emotion_result = _elevenlabs_emotion_review(elevenLabsConversationId, translation.segments)
     assessment = _apply_emotion_modifier(assessment, emotion_result)
-    speech_model_version, speech_model_probability, speech_model_warnings, speech_model_features = _speech_model_review(
-        patient_speech_path
-    )
+    parkinsons_speech_review = _parkinsons_speech_review(patient_speech_path)
     concussion_speech_review = review_concussion_speech(patient_speech_path)
     previous_risk_level = assessment.riskLevel
     assessment = _apply_concussion_speech_modifier(assessment, symptoms, concussion_speech_review)
@@ -1670,11 +1692,18 @@ async def save_call(
             f"{recommended_action} Speech abnormality model also flagged a research-only review signal; "
             "compare the patient audio with the transcript and escalate to a clinician or emergency service if symptoms are acute."
         )
-    speech_model_warnings = [*speech_extraction_warnings, *speech_model_warnings]
+    speech_model_warnings = [*speech_extraction_warnings, *parkinsons_speech_review.warnings]
+    speech_model_features = parkinsons_speech_review.featuresSummary
     if speech_model_features is not None:
         speech_model_features = {**speech_model_features, **speech_extraction_summary}
     elif speech_extraction_summary:
         speech_model_features = speech_extraction_summary
+    parkinsons_speech_review = parkinsons_speech_review.model_copy(
+        update={
+            "warnings": speech_model_warnings,
+            "featuresSummary": speech_model_features,
+        }
+    )
 
     (call_dir / "transcript-original.json").write_text(json.dumps([message.model_dump() for message in messages], indent=2))
     (call_dir / "transcript-english.txt").write_text(english_transcript)
@@ -1725,8 +1754,9 @@ async def save_call(
         safeguardRecommendedAction=safeguard_recommended_action,
         safeguardResources=safeguard_resources,
         safeguardFailureReason=safeguard_failure_reason,
-        speechModelVersion=speech_model_version,
-        speechModelProbability=speech_model_probability,
+        parkinsonsSpeechReview=parkinsons_speech_review,
+        speechModelVersion=parkinsons_speech_review.modelVersion,
+        speechModelProbability=parkinsons_speech_review.probability,
         speechModelWarnings=speech_model_warnings,
         speechModelFeaturesSummary=speech_model_features,
         concussionSpeechReview=concussion_speech_review,

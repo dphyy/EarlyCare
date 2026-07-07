@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from app.speech_ml import TARGET_SAMPLE_RATE
+from app.parkinsons_speech_model import TARGET_SAMPLE_RATE
 
 
 @dataclass

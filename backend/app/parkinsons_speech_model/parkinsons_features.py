@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-from app.speech_ml.preprocessing import TARGET_SAMPLE_RATE, load_audio
+from app.parkinsons_speech_model.preprocessing import TARGET_SAMPLE_RATE, load_audio
 
 
 CONVERSATIONAL_PARKINSONS_FEATURE_NAMES = [

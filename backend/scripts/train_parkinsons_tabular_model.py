@@ -11,14 +11,14 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.speech_ml.parkinsons_features import CONVERSATIONAL_PARKINSONS_FEATURE_NAMES
-from app.speech_ml.tabular_training import candidate_estimators, evaluate_candidates, load_uci_dataframe, select_best_candidate, subject_id_from_name
+from app.parkinsons_speech_model.parkinsons_features import CONVERSATIONAL_PARKINSONS_FEATURE_NAMES
+from app.parkinsons_speech_model.tabular_training import candidate_estimators, evaluate_candidates, load_uci_dataframe, select_best_candidate, subject_id_from_name
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train a conversational-compatible Parkinson speech-marker model on transferable Kaggle/UCI voice features.")
     parser.add_argument("csv_path", type=Path, help="Local Kaggle/UCI CSV, for example parkinsons.data.")
-    parser.add_argument("--output-dir", type=Path, default=Path("backend/models/speech"))
+    parser.add_argument("--output-dir", type=Path, default=Path("backend/models/parkinsons_speech"))
     parser.add_argument("--splits", type=int, default=5)
     args = parser.parse_args()
 

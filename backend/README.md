@@ -1,13 +1,13 @@
 # EarlyCare Backend
 
-FastAPI service for EarlyCare call sessions, call artifact storage, transcription, translation, OpenAI-assisted patient-risk review, safeguard classification, ElevenLabs tone ingestion, and conversational speech-marker scoring.
+FastAPI service for EarlyCare call sessions, call artifact storage, transcription, translation, OpenAI-assisted patient-risk review, safeguard classification, ElevenLabs tone ingestion, Parkinson voice-feature scoring, and concussion speech-abnormality review.
 
 ## What It Does
 
 - Creates signed ElevenLabs Agents session URLs without exposing secrets to the frontend.
 - Saves full-call audio uploaded by the browser as `full-call.wav`.
 - Saves patient-only microphone audio as `patient-audio.wav` when the frontend provides it; the frontend requests browser echo cancellation, noise suppression, and auto gain control before recording.
-- Derives `patient-speech.wav` from voiced patient answer regions between agent turns and uses it for speech-marker scoring.
+- Derives `patient-speech.wav` from voiced patient answer regions between agent turns and uses it for saved-model speech review.
 - Stores cleaned live dialogue messages with `Agent:` and `Patient:` labels.
 - Removes bracketed delivery cues such as `[happy]`, `[concerned]`, and `[sighs]`.
 - Uses MERaLiON first for timestamped transcription and audio translation.
@@ -18,7 +18,7 @@ FastAPI service for EarlyCare call sessions, call artifact storage, transcriptio
 - Reads ElevenLabs `user_emotional_state` data collection results and attaches per-response tone evidence when available.
 - Attaches risk evidence to patient transcript segments and audio seek times.
 - Applies safeguard/tone modifiers to the visible call risk level while preserving the underlying reasons in `riskAssessment`.
-- Scores optional conversational speech-marker features from `patient-speech.wav` when enabled.
+- Scores saved Parkinson voice-feature and concussion speech-abnormality models from `patient-speech.wav` when patient speech is available.
 - Serves saved call metadata and audio to the Patient overview.
 
 ## Call Save Flow
@@ -34,10 +34,10 @@ When the frontend posts to `POST /calls`, the backend:
 7. Creates timestamped transcript segments from provider output or live message timing.
 8. Sends patient speech only to OpenAI for structured risk review.
 9. Sends patient speech only to a separate OpenAI safeguard classifier and lifts the visible risk level when the safeguard level is higher.
-10. Estimates speech profile metrics and speech signal quality for the latest call.
+10. Estimates speech profile metrics and patient speech quality for the latest call.
 11. Derives `patient-speech.wav` by finding agent-bounded answer windows, falling back to patient-segment or full-audio VAD when needed, and stitching voiced patient clips from `patient-audio.wav`.
 12. Queries ElevenLabs conversation data collection for `user_emotional_state` and maps tone evidence to patient segments when possible.
-13. Scores the optional conversational speech-marker model when `EARLYCARE_SPEECH_MODEL_ENABLED=true`.
+13. Scores the saved Parkinson voice-feature model and saved concussion speech-abnormality model when patient speech is available.
 14. Drops any risk or safeguard signal that cannot be validated against patient evidence.
 15. Saves `metadata.json`, `transcript-original.json`, `transcript-english.txt`, provider attempt history, and audio.
 16. Returns the saved call record to the frontend.
@@ -87,9 +87,9 @@ It returns a category, exact patient evidence, recommended action, and optional 
 
 Tone context comes from ElevenLabs conversation data collection, not OpenAI. The backend looks for the `user_emotional_state` result, accepts summary text or JSON, and maps per-response emotion entries to patient transcript segments by `responseIndex` or by order when counts match. Negative, high-confidence tone can lift a green assessment to `Watch`; it does not lower higher clinical or safeguard risk.
 
-## Optional Speech ML Research
+## Speech ML Research
 
-The backend includes a trained conversational-compatible Parkinsonian speech-marker model path. Runtime scoring runs when `EARLYCARE_SPEECH_MODEL_ENABLED=true`; optional ML imports are lazy so missing speech dependencies produce warnings instead of blocking normal call saving.
+The backend includes a saved conversational-compatible Parkinsonian speech-marker model path. Runtime scoring runs automatically when `patient-speech.wav` exists; missing audio, artifacts, or dependencies produce explicit review warnings instead of silent skips.
 
 The runtime model uses exactly these 10 features:
 
@@ -108,7 +108,7 @@ HNR
 
 The runtime extractor no longer computes shimmer or nonlinear UCI fields for model input. The excluded source fields are recorded in `model_card.json`.
 
-Install optional dependencies:
+Runtime inference dependencies are installed by default through `requirements.txt`. Install training extras only when retraining:
 
 ```bash
 pip install -r requirements-ml.txt
@@ -117,7 +117,7 @@ pip install -r requirements-ml.txt
 Retrain and evaluate tabular models:
 
 ```bash
-PYTHONPATH=. python scripts/train_parkinsons_tabular_model.py data/parkinsons.data --output-dir models/speech
+PYTHONPATH=. python scripts/train_parkinsons_tabular_model.py data/parkinsons.data --output-dir models/parkinsons_speech
 ```
 
 The bundled `data/parkinsons.data` uses the [Kaggle Parkinson's Disease Data Set](https://www.kaggle.com/datasets/vikasukani/parkinsons-disease-data-set), mirrored from the source [UCI Parkinsons dataset](https://archive.ics.uci.edu/dataset/174/parkinsons). The trainer compares logistic regression, random forest, gradient boosting, SVM, XGBoost, and LightGBM when installed, then saves `parkinsons_tabular_model.joblib`, `feature_schema.json`, `feature_reference_ranges.json`, `metrics.json`, and `model_card.json`. It uses grouped splits by subject ID from the `name` column when possible. The checked-in model is `earlycare-conversational-parkinsons-marker-random_forest-v0`.
@@ -126,8 +126,8 @@ Runtime inference scores derived `patient-speech.wav`, which contains stitched v
 
 ### Concussion Speech-Abnormality Review
 
-EarlyCare can also run the bundled speech-abnormality model after each saved call
-when `EARLYCARE_CONCUSSION_SPEECH_MODEL_ENABLED=true`.
+EarlyCare also runs the bundled speech-abnormality model after each saved call
+when derived patient speech is available.
 The backend scores the derived `patient-speech.wav`, saves the structured result
 as `concussionSpeechReview`, and displays it separately from the Parkinsonian
 speech-marker score.
@@ -135,15 +135,15 @@ speech-marker score.
 Default local configuration points to the checked-in runtime artifacts:
 
 ```text
-backend\models\concussion_speech
-backend\app\concussion_speech_model
+backend/models/concussion_speech
+backend/app/concussion_speech_model
 ```
 
 The checked-in artifacts are only the runtime files needed for inference:
 `model.joblib`, `config.json`, `metrics.json`, and the small vendored
 `speech_abnormality` inference package. Do not push TORGO, VOICED, embedding
-caches, rejected-audio reports, or raw recordings. A fresh machine still needs
-the optional ML dependencies from `requirements-ml.txt`; on first use,
+caches, rejected-audio reports, or raw recordings. A fresh machine needs
+the runtime dependencies from `requirements.txt`; on first use,
 Transformers may download the configured WavLM backbone into the user's Hugging
 Face cache unless `HF_HOME` points to an existing local cache.
 
@@ -151,8 +151,8 @@ For project-side inference, EarlyCare now contains the adapter, vendored
 inference package, and trained classifier artifacts. The model was trained from
 TORGO dysarthria/control examples and VOICED pathological/healthy voice examples,
 with frozen `microsoft/wavlm-base` embeddings and a calibrated class-balanced
-scikit-learn logistic regression classifier. See `../CITATIONS.md` for dataset,
-model, and classifier citations.
+scikit-learn logistic regression classifier. See the root README References
+section for dataset, model, and classifier citations.
 
 The output labels are research labels only: `normal`, `dysarthria_like`,
 `dysphonia_like`, or `low_audio_quality`. They are not diagnoses. If the patient
@@ -219,7 +219,6 @@ curl http://127.0.0.1:8000/health
 | `OPENAI_API_KEY` | AI risk review | Used for structured patient-risk extraction. |
 | `OPENAI_MODEL` | AI risk review | Defaults to `gpt-4o-mini`. |
 | `OPENAI_SAFEGUARD_MODEL` | Safeguard review | Optional override; falls back to `OPENAI_MODEL`. |
-| `EARLYCARE_SPEECH_MODEL_ENABLED` | Speech marker scoring | Example config is `true`; install optional ML dependencies for full scoring, otherwise calls still save with model warnings. |
 
 Never commit real `.env` files.
 
@@ -233,7 +232,7 @@ Never commit real `.env` files.
 | `GET /calls/{call_id}` | One saved call record. |
 | `GET /calls/{call_id}/audio` | Replayable saved full-call recording. |
 | `GET /calls/{call_id}/patient-audio` | Saved patient-only microphone recording for ML research. |
-| `GET /calls/{call_id}/patient-speech-audio` | Derived patient-turn-only audio used for speech-marker scoring. |
+| `GET /calls/{call_id}/patient-speech-audio` | Derived patient-turn-only audio used for saved Parkinson and concussion speech review. |
 | `POST /calls` | Save transcript messages and uploaded audio. |
 | `POST /elevenlabs/signed-url` | Create a signed Agents session URL. |
 | `GET /checkins` | Demo historical check-ins. |

@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.speech_ml.evaluation import binary_metrics, speaker_level_probabilities
+from app.parkinsons_speech_model.evaluation import binary_metrics, speaker_level_probabilities
 
 
 def main() -> None:

@@ -154,6 +154,17 @@ class EmotionProviderResult(BaseModel):
     failureReason: str | None = None
 
 
+class ParkinsonsSpeechReview(BaseModel):
+    modelVersion: str | None = None
+    probability: float | None = None
+    warnings: list[str] = []
+    featuresSummary: dict[str, float | int | str | None] | None = None
+    qualityOk: bool = False
+    riskReason: str | None = None
+    warning: str = "Research-only Parkinson voice-feature signal. This is not a Parkinson's diagnosis or medical device output."
+    failureReason: str | None = None
+
+
 class ConcussionSpeechReview(BaseModel):
     modelVersion: str | None = None
     predictedLabel: str | None = None
@@ -224,6 +235,7 @@ class CallRecord(BaseModel):
     safeguardRecommendedAction: str | None = None
     safeguardResources: list[CrisisResource] = []
     safeguardFailureReason: str | None = None
+    parkinsonsSpeechReview: ParkinsonsSpeechReview | None = None
     speechModelVersion: str | None = None
     speechModelProbability: float | None = None
     speechModelWarnings: list[str] = []

@@ -2,7 +2,7 @@
 
 **Preventive care and patient engagement for elderly people living alone.**
 
-EarlyCare is a hackathon prototype for routine wellbeing calls. A patient starts a simulated browser call, an ElevenLabs agent conducts the check-in, the app records the full conversation plus patient-only microphone audio, and the Patient overview shows the recording, original transcript, English transcript, patient-only AI risk highlights, distress safeguard status, tone context, and speech signal quality for caregiver review.
+EarlyCare is a hackathon prototype for routine wellbeing calls. A patient starts a simulated browser call, an ElevenLabs agent conducts the check-in, the app records the full conversation plus patient-only microphone audio, and the Patient overview shows the recording, original transcript, English transcript, patient-only AI risk highlights, distress safeguard status, tone context, and patient speech quality for caregiver review.
 
 EarlyCare is decision support, not diagnosis. It helps care teams notice risk signals such as falls, dizziness, sickness, confusion, weakness, poor intake, missed check-ins, or requests for help earlier.
 
@@ -12,14 +12,14 @@ EarlyCare is decision support, not diagnosis. It helps care teams notice risk si
 | --- | --- |
 | Agents call | Starts an ElevenLabs Agents-powered browser call from a transcript-free animated call screen. The patient can speak in the language they are comfortable with. |
 | Full-call recording | Requests browser echo cancellation, noise suppression, and auto gain control, then records patient microphone audio and ElevenLabs agent audio into one replayable `full-call.wav`. |
-| Patient-only audio | Saves raw `patient-audio.wav` and derives `patient-speech.wav` by isolating voiced patient answers between agent turns for speech-model scoring. |
-| Patient overview | Shows saved recordings, translated English transcript, original transcript, speech signal quality, risk/safeguard/tone review, and follow-up recommendation. |
+| Patient-only audio | Saves raw `patient-audio.wav` and derives `patient-speech.wav` by isolating voiced patient answers for saved-model speech review. |
+| Patient overview | Shows saved recordings, translated English transcript, original transcript, patient speech quality, model review cards, risk/safeguard/tone review, and follow-up recommendation. |
 | Transcription and translation | Uses MERaLiON first, ElevenLabs speech-to-text and Google Translate as fallback, and saved dialogue transcript only as the final demo fallback. |
 | Inline risk highlights | Uses OpenAI structured output to detect patient-only risk signals and highlights exact English evidence inline when AI review succeeds. |
 | Distress safeguard | Uses a separate OpenAI structured review for patient-stated distress, self-harm, abuse/neglect, unsafe environment, or emergency cues; safeguard levels can lift visible call risk. |
 | Tone context | Reads ElevenLabs `user_emotional_state` data collection results when available and highlights per-response emotion evidence in the transcript. |
 | Audio verification | Clicking a highlighted patient phrase seeks playback to immediately after the previous agent question, so caregivers can hear the patient answer in context. |
-| Speech signal quality | Shows derived patient-speech duration, speech coverage, response latency, speaking rate, and conversational speech-marker readiness against recent-call baselines. |
+| Patient speech quality | Shows derived patient-speech duration, speech coverage, response latency, speaking rate, Parkinson model readiness, and concussion review readiness. |
 
 ## Workflow
 
@@ -43,32 +43,33 @@ EarlyCare is decision support, not diagnosis. It helps care teams notice risk si
    - timestamped transcript segments
    - provider/fallback metadata and sanitized provider attempt reasons
    - speech profile metrics
-   - patient-only audio, derived patient-speech audio, and speech-model quality fields when configured
+   - patient-only audio, derived patient-speech audio, and saved-model quality fields
 7. OpenAI reviews patient speech only and returns structured risk signals when configured; otherwise the dashboard shows manual review status without inline AI highlights.
 8. A separate OpenAI safeguard review classifies patient-stated distress as `None`, `Support`, `Urgent`, or `Emergency`, attaches exact patient evidence, and can raise the visible risk level.
 9. ElevenLabs data collection is queried for `user_emotional_state`; per-response emotion tags are attached to patient transcript segments when the returned JSON includes response indexes or can be mapped by order.
-10. When enabled, the backend scores derived `patient-speech.wav` with the conversational-compatible 10-feature speech-marker model and stores model warnings/features on the call record.
-11. The Patient overview renders the English transcript above the original transcript and highlights risk, safeguard, and tone evidence inline.
-12. Clicking a highlight plays the saved audio from immediately after the previous agent prompt.
+10. The backend scores derived `patient-speech.wav` with the saved Parkinson voice-feature model and saved concussion speech-abnormality model when patient speech is available, then stores explicit review fields and warnings.
+11. The Patient overview shows a **Patient speech quality** panel for shared audio/model readiness and separate Parkinson/concussion cards for each model's interpretation.
+12. The Patient overview renders the English transcript above the original transcript and highlights risk, safeguard, and tone evidence inline.
+13. Clicking a highlight plays the saved audio from immediately after the previous agent prompt.
 
 ## Architecture
 
 | Layer | Stack | Role |
 | --- | --- | --- |
 | Frontend | React, Vite, TypeScript | Agents call UI, full-call recording, Patient overview, inline highlights, audio seeking. |
-| Backend | FastAPI, Python | Signed ElevenLabs sessions, call artifact storage, transcription, translation, OpenAI risk/safeguard review, tone ingestion, speech-marker scoring. |
+| Backend | FastAPI, Python | Signed ElevenLabs sessions, call artifact storage, transcription, translation, OpenAI risk/safeguard review, tone ingestion, Parkinson and concussion speech review. |
 | Voice agent | ElevenLabs Agents React SDK | Live browser voice check-in and live transcript events. |
 | Transcription | MERaLiON, ElevenLabs STT | Primary and fallback speech-to-text. |
 | Translation | MERaLiON, Google Translate | English transcript generation for caregiver review. |
 | AI review | OpenAI API | Structured patient-only risk extraction and separate distress safeguard classification. |
 | Emotion/tone | ElevenLabs data collection | Optional `user_emotional_state` summary and per-response tags. |
-| Speech model | Conversational-compatible tabular voice-feature model | Optional speech-marker score from patient-only pitch, jitter, and noise features. |
-| Concussion speech review | Vendored WavLM speech-abnormality inference path | Optional post-call `patient-speech.wav` review for `normal`, `dysarthria_like`, `dysphonia_like`, or `low_audio_quality` research labels. |
+| Parkinson speech marker | Saved conversational-compatible tabular voice-feature model | Post-call Parkinson marker probability from patient-only pitch, jitter, and noise features. |
+| Concussion speech review | Vendored WavLM speech-abnormality inference path | Post-call `patient-speech.wav` review for `normal`, `dysarthria_like`, `dysphonia_like`, or `low_audio_quality` research labels. |
 | Persistence | Local filesystem | Hackathon-friendly storage under `backend/storage/calls/`. |
 
-## Speech ML Research Path
+## Parkinson Speech Research Path
 
-EarlyCare includes a Parkinsonian speech-marker research path trained on the conversational-compatible subset of UCI/Kaggle tabular voice features. The repo includes `backend/data/parkinsons.data` and trained artifacts under `backend/models/speech/`; runtime ML imports are lazy so the core app can still save calls if optional speech dependencies are unavailable.
+EarlyCare includes a saved Parkinsonian speech-marker inference path trained on the conversational-compatible subset of UCI/Kaggle tabular voice features. The repo includes `backend/data/parkinsons.data` and trained artifacts under `backend/models/parkinsons_speech/`; new patient speech is passed through the saved model without retraining.
 
 The checked-in runtime schema is exactly:
 
@@ -90,7 +91,7 @@ The model intentionally excludes shimmer fields (`MDVP:Shimmer`, `MDVP:Shimmer(d
 Recommended training path:
 
 1. Use the bundled `backend/data/parkinsons.data`, downloaded from the [Kaggle Parkinson's Disease Data Set](https://www.kaggle.com/datasets/vikasukani/parkinsons-disease-data-set), or replace it with the source [UCI Parkinsons dataset](https://archive.ics.uci.edu/dataset/174/parkinsons). Cite the dataset when using it.
-2. Install optional ML dependencies:
+2. Install training extras:
 
 ```bash
 cd backend
@@ -101,53 +102,34 @@ pip install -r requirements-ml.txt
 3. Train and evaluate tabular models:
 
 ```bash
-PYTHONPATH=backend backend/.venv/bin/python backend/scripts/train_parkinsons_tabular_model.py backend/data/parkinsons.data --output-dir backend/models/speech
+PYTHONPATH=backend backend/.venv/bin/python backend/scripts/train_parkinsons_tabular_model.py backend/data/parkinsons.data --output-dir backend/models/parkinsons_speech
 ```
 
 The current saved winner is `earlycare-conversational-parkinsons-marker-random_forest-v0`, selected by grouped cross-validation ROC-AUC using only the 10 transferable pitch, jitter, and harmonic/noise fields. Runtime inference builds `patient-speech.wav` from voiced patient answer regions between agent turns, then scores manageable patient-speech chunks and aggregates the median probability. `feature_reference_ranges.json` stores the selected training ranges, and inference reports low confidence or unavailable when extracted patient speech is too short, silent, clipped, severely unstable, or outside those ranges.
 
-The speech-marker score is saved as `speechModelProbability` and displayed as a research screening signal. It does not diagnose Parkinson's disease and does not currently determine the call's main `riskLevel`; the visible risk level comes from AI risk review, safeguard review, and tone modifiers.
+The Parkinson marker score is saved as `parkinsonsSpeechReview.probability` and mirrored to legacy `speechModelProbability` for older dashboard compatibility. It does not diagnose Parkinson's disease and does not currently determine the call's main `riskLevel`; the visible risk level comes from AI risk review, safeguard review, tone modifiers, and concussion speech review when relevant.
 
 ## Concussion Speech Review
 
-When `EARLYCARE_CONCUSSION_SPEECH_MODEL_ENABLED=true`, the backend runs the
-bundled speech-abnormality model after a call is saved.
+The backend runs the bundled speech-abnormality model after a call is saved when
+derived patient speech is available.
 It scores the derived patient-only speech file, stores the result as
 `concussionSpeechReview`, and shows it in the Patient overview.
 
-The repo includes the runtime inference code under
-`backend/app/concussion_speech_model/` and the trained pilot artifacts under
+The repo includes the runtime adapter and vendored inference code under
+`backend/app/concussion_speech_model/`, plus trained pilot artifacts under
 `backend/models/concussion_speech/`. Training datasets, embedding caches, and raw
 TORGO/VOICED files are intentionally not required for local website inference and
-should not be pushed. On a new machine, install `backend/requirements-ml.txt`;
-the first model run may download the configured WavLM backbone into the user's
+should not be pushed. On a new machine, install `backend/requirements.txt`; the
+first model run may download the configured WavLM backbone into the user's
 Hugging Face cache unless a local `HF_HOME` cache is provided.
-
-For project-side inference, everything EarlyCare needs is now inside this repo:
-the adapter, the vendored inference package, and the trained classifier
-artifacts. External runtime dependencies are still installed through
-`backend/requirements-ml.txt`, and the WavLM backbone weights are loaded by
-Transformers from the user's Hugging Face cache or downloaded on first use.
-
-### Concussion Speech Model Provenance
-
-The bundled `backend/models/concussion_speech` artifacts come from the internal
-`pilot_full` speech-abnormality model. Training used:
-
-| Component | Use | Citation |
-| --- | --- | --- |
-| TORGO Database | Dysarthria-like and normal/control speech examples | [The TORGO Database: Acoustic and articulatory speech from speakers with dysarthria](https://www.cs.toronto.edu/~complingweb/data/TORGO/torgo.html) |
-| VOICED Database v1.0.0 | Dysphonia-like and normal/healthy voice examples | [VOICED Database v1.0.0 on PhysioNet](https://physionet.org/content/voiced/1.0.0/) |
-| WavLM Base | Frozen 16 kHz speech embedding backbone configured as `microsoft/wavlm-base` | [microsoft/wavlm-base](https://huggingface.co/microsoft/wavlm-base), [WavLM paper](https://arxiv.org/abs/2110.13900) |
-| scikit-learn LogisticRegression | Calibrated, class-balanced classifier saved in `model.joblib` | [sklearn.linear_model.LogisticRegression](https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LogisticRegression.html) |
-
-Full citation text is in [CITATIONS.md](CITATIONS.md).
 
 This is not concussion detection or diagnosis. The model returns research labels
 only. If the patient reports concussion-relevant symptoms and the speech model
 also flags abnormal speech, EarlyCare raises the call for human review. If the
 model flags speech without reported symptoms, it is treated as a watch-level
-audio review signal.
+audio review signal. Dataset, backbone, and classifier citations are listed in
+the References section.
 
 ## Setup
 
@@ -178,8 +160,6 @@ GOOGLE_TRANSLATE_URL=https://translation.googleapis.com/language/translate/v2
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
 OPENAI_SAFEGUARD_MODEL=
-EARLYCARE_SPEECH_MODEL_ENABLED=true
-EARLYCARE_CONCUSSION_SPEECH_MODEL_ENABLED=true
 EARLYCARE_CONCUSSION_SPEECH_DEVICE=cpu
 ```
 
@@ -201,7 +181,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Install optional speech-model dependencies when retraining or using runtime speech-marker scoring:
+Install training extras only when retraining or experimenting:
 
 ```bash
 pip install -r requirements-ml.txt
@@ -234,7 +214,7 @@ Open the Vite URL, usually `http://localhost:5173`.
 4. Speak with the agent in any comfortable language.
 5. Click **End & save**.
 6. Open **Patient overview**.
-7. Review the full-call recording, English transcript, original transcript, speech signal quality, and inline risk/safeguard/tone highlights.
+7. Review the full-call recording, English transcript, original transcript, patient speech quality, model review cards, and inline risk/safeguard/tone highlights.
 8. Click a highlighted patient phrase to replay the patient answer from immediately after the previous agent question.
 
 ## Commands
@@ -244,7 +224,7 @@ Open the Vite URL, usually `http://localhost:5173`.
 | `npm run dev --prefix frontend` | Start the frontend dev server. |
 | `npm run build --prefix frontend` | Type-check and build the frontend. |
 | `PYTHONPATH=backend backend/.venv/bin/python -m unittest discover backend/tests` | Run backend tests. |
-| `PYTHONPATH=backend backend/.venv/bin/python -m unittest backend.tests.test_speech_ml` | Run focused speech-marker tests. |
+| `PYTHONPATH=backend backend/.venv/bin/python -m unittest backend.tests.test_speech_ml` | Run focused Parkinson speech-marker tests. |
 | `npm run lint --prefix frontend` | Run frontend TypeScript checks. |
 | `backend/.venv/bin/python -m py_compile backend/app/*.py` | Compile-check backend modules. |
 | `uvicorn app.main:app --reload --port 8000` | Start the backend from the `backend/` folder. |
@@ -253,7 +233,7 @@ Open the Vite URL, usually `http://localhost:5173`.
 
 - `frontend/` contains the React + Vite interface.
 - `backend/` contains the FastAPI service and provider integrations.
-- `backend/models/speech/` contains the checked-in conversational speech-marker artifacts: model, schema, metrics, model card, and reference ranges.
+- `backend/models/parkinsons_speech/` contains the checked-in Parkinson speech-marker artifacts: model, schema, metrics, model card, and reference ranges.
 - `backend/models/concussion_speech/` contains the checked-in concussion speech-abnormality pilot artifacts needed for inference.
 - `backend/app/concussion_speech_model/` contains the vendored speech-abnormality inference package.
 - `backend/tests/` contains backend workflow tests.
@@ -272,3 +252,39 @@ EarlyCare does not diagnose Parkinson's disease, concussion, stroke, or any othe
 - Validate risk categories with clinicians and labelled datasets before real-world deployment.
 - Add persistent database/object storage for multi-user demos.
 - Add consent, retention, audit, and access-control controls before any real pilot.
+
+## References
+
+### Parkinson Speech-Marker Dataset
+
+- **Kaggle Parkinson's Disease Data Set**: bundled as `backend/data/parkinsons.data` for the saved Parkinson voice-feature model. Dataset page: [Kaggle Parkinson's Disease Data Set](https://www.kaggle.com/datasets/vikasukani/parkinsons-disease-data-set).
+- **UCI Parkinsons Dataset**: source dataset mirrored by the Kaggle copy. Dataset page: [UCI Parkinsons](https://archive.ics.uci.edu/dataset/174/parkinsons).
+
+### Concussion Speech-Abnormality Model
+
+The bundled `backend/models/concussion_speech` artifacts are the runtime output of the internal `pilot_full` speech-abnormality model. The model is a research-only speech classifier, not a concussion, dysarthria, or dysphonia diagnostic system.
+
+#### Training Datasets
+
+- **TORGO Database**: acoustic and articulatory speech from speakers with dysarthria and matched controls. Used for `dysarthria_like` and `normal` training examples.
+  - Site: [The TORGO Database: Acoustic and articulatory speech from speakers with dysarthria](https://www.cs.toronto.edu/~complingweb/data/TORGO/torgo.html)
+  - Suggested citation: Rudzicz, F., Namasivayam, A. K., & Wolff, T. (2012). The TORGO database of acoustic and articulatory speech from speakers with dysarthria. *Language Resources and Evaluation*, 46, 523-541.
+
+- **VOICED Database v1.0.0**: healthy and pathological sustained-vowel voice samples from PhysioNet. Used for `dysphonia_like` and `normal` training examples.
+  - Site: [VOICED Database v1.0.0](https://physionet.org/content/voiced/1.0.0/)
+  - Suggested citation: Cesari, U., De Pietro, G., Marciano, E., Niri, C., Sannino, G., & Verde, L. (2018). A new database of healthy and pathological voices. *Computers & Electrical Engineering*, 68, 310-321.
+  - PhysioNet citation: Goldberger, A. L., Amaral, L. A. N., Glass, L., Hausdorff, J. M., Ivanov, P. C., Mark, R. G., et al. (2000). PhysioBank, PhysioToolkit, and PhysioNet: Components of a new research resource for complex physiologic signals. *Circulation*, 101(23), e215-e220.
+
+#### Feature Backbone And Classifier
+
+- **WavLM Base**: frozen speech embedding backbone configured as `microsoft/wavlm-base` in `backend/models/concussion_speech/config.json`. Runtime audio is resampled to 16 kHz before embedding.
+  - Model card: [microsoft/wavlm-base on Hugging Face](https://huggingface.co/microsoft/wavlm-base)
+  - Paper: [WavLM: Large-Scale Self-Supervised Pre-Training for Full Stack Speech Processing](https://arxiv.org/abs/2110.13900)
+  - Suggested citation: Chen, S., Wang, C., Chen, Z., Wu, Y., Liu, S., Chen, Z., et al. (2022). WavLM: Large-Scale Self-Supervised Pre-Training for Full Stack Speech Processing. *IEEE Journal of Selected Topics in Signal Processing*.
+
+- **Classifier**: scikit-learn logistic regression with class balancing and calibration, saved in `backend/models/concussion_speech/model.joblib`.
+  - API reference: [sklearn.linear_model.LogisticRegression](https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LogisticRegression.html)
+
+#### Runtime Labels
+
+The checked-in model returns these research labels only: `normal`, `dysarthria_like`, `dysphonia_like`, and `low_audio_quality`. The labels are dataset-derived research categories. They are not medical diagnoses and must not be presented as concussion detection.

@@ -571,8 +571,24 @@ function formatPercent(value: number | undefined | null): string {
   return `${Math.round(value * 100)}%`;
 }
 
+function parkinsonsFeaturesSummary(call: CallRecord | null): Record<string, number | string | null> | null | undefined {
+  return call?.parkinsonsSpeechReview?.featuresSummary ?? call?.speechModelFeaturesSummary;
+}
+
+function parkinsonsWarnings(call: CallRecord | null): string[] {
+  return call?.parkinsonsSpeechReview?.warnings ?? call?.speechModelWarnings ?? [];
+}
+
+function parkinsonsProbability(call: CallRecord | null): number | null | undefined {
+  return call?.parkinsonsSpeechReview?.probability ?? call?.speechModelProbability;
+}
+
+function parkinsonsModelVersion(call: CallRecord): string | null | undefined {
+  return call.parkinsonsSpeechReview?.modelVersion ?? call.speechModelVersion;
+}
+
 function modelFeatureNumber(call: CallRecord | null, key: string): number | null {
-  const value = call?.speechModelFeaturesSummary?.[key];
+  const value = parkinsonsFeaturesSummary(call)?.[key];
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
@@ -638,23 +654,47 @@ function averageSpeechCoverage(calls: CallRecord[]): number | null {
 
 function modelReadiness(call: CallRecord | null): { value: string; note: string } {
   if (!call) return { value: "No call", note: "Complete a call first" };
-  const summary = call.speechModelFeaturesSummary;
-  const warnings = call.speechModelWarnings ?? [];
+  const summary = parkinsonsFeaturesSummary(call);
+  const warnings = parkinsonsWarnings(call);
   const warningText = warnings.join(" ").toLowerCase();
   const usable = summary?.speechModelUsable;
   if (warningText.includes("low confidence")) {
     return { value: "Low confidence", note: warnings.find((warning) => warning.toLowerCase().includes("low confidence")) ?? "Review audio quality" };
   }
-  if (call.speechModelProbability !== null && call.speechModelProbability !== undefined && usable !== "false") {
-    return { value: "Usable", note: `${Math.round(call.speechModelProbability * 100)}% marker score` };
+  const probability = parkinsonsProbability(call);
+  if (probability !== null && probability !== undefined && usable !== "false") {
+    return { value: "Usable", note: `${Math.round(probability * 100)}% Parkinson marker probability` };
   }
   if (usable === "false" || warningText.includes("unavailable")) {
     return { value: "Unavailable", note: warnings.find((warning) => warning.toLowerCase().includes("unavailable")) ?? "Not enough patient speech" };
   }
   if (call.patientSpeechAudioAvailable) {
-    return { value: "Ready", note: "Ready when enabled" };
+    return { value: "Ready", note: "Saved model will run after call save" };
   }
   return { value: "Missing", note: "Not enough patient speech" };
+}
+
+function concussionReviewReadiness(call: CallRecord | null): { value: string; note: string } {
+  if (!call?.concussionSpeechReview) return { value: "Not run", note: "No concussion speech review result" };
+  const review = call.concussionSpeechReview;
+  const abnormalProbability = Math.max(
+    review.probabilities?.dysarthria_like ?? 0,
+    review.probabilities?.dysphonia_like ?? 0
+  );
+  const probabilityNote =
+    abnormalProbability > 0
+      ? `${Math.round(abnormalProbability * 100)}% abnormal-class probability`
+      : typeof review.probabilities?.normal === "number"
+        ? `${Math.round(review.probabilities.normal * 100)}% normal probability`
+        : null;
+
+  if (review.failureReason) {
+    return { value: "Unavailable", note: review.failureReason };
+  }
+  if (!review.qualityOk) {
+    return { value: "Low audio quality", note: review.qualityReason || probabilityNote || "Patient speech did not pass quality checks" };
+  }
+  return { value: "Usable", note: probabilityNote || review.riskReason || "Patient speech passed concussion review quality checks" };
 }
 
 function SpeechTimingPanel({ senior, call, calls }: { senior: Senior; call: CallRecord | null; calls: CallRecord[] }) {
@@ -668,6 +708,7 @@ function SpeechTimingPanel({ senior, call, calls }: { senior: Senior; call: Call
   const baselinePatientSpeech = averageModelFeature(priorCalls, "patientSpeechDurationSeconds");
   const baselineSpeechCoverage = averageSpeechCoverage(priorCalls);
   const readiness = modelReadiness(call);
+  const concussionReadiness = concussionReviewReadiness(call);
   const rows = [
     { label: "Patient speech", baseline: baselinePatientSpeech ? formatSeconds(baselinePatientSpeech) : "No baseline", current: formatSeconds(patientSpeechSeconds) },
     {
@@ -677,13 +718,14 @@ function SpeechTimingPanel({ senior, call, calls }: { senior: Senior; call: Call
     },
     { label: "Response latency", baseline: `${Math.round(baseline.responseLatencyMs)} ms`, current: formatMetric(current?.responseLatencyMs, " ms") },
     { label: "Speaking rate", baseline: `${Math.round(baseline.speechRate)} wpm`, current: formatMetric(current?.speechRate, " wpm") },
-    { label: "Model readiness", baseline: readiness.note, current: readiness.value }
+    { label: "Parkinson model", baseline: readiness.note, current: readiness.value },
+    { label: "Concussion review", baseline: concussionReadiness.note, current: concussionReadiness.value }
   ];
 
   return (
     <section className="speech-timing-panel">
       <div className="panel-heading compact-heading">
-        <h3>Speech signal quality</h3>
+        <h3>Patient speech quality</h3>
         <span>{baselineState.source}</span>
       </div>
       <div className="speech-metric-grid">
@@ -695,7 +737,7 @@ function SpeechTimingPanel({ senior, call, calls }: { senior: Senior; call: Call
           </div>
         ))}
       </div>
-      {!call?.speechModelFeaturesSummary && !call?.patientSpeechAudioAvailable ? (
+      {!parkinsonsFeaturesSummary(call) && !call?.patientSpeechAudioAvailable ? (
         <p className="metric-note">
           Not enough patient speech yet. Keep patient-only recording enabled and let the agent ask short turn-by-turn questions so patient answers can be isolated cleanly.
         </p>
@@ -704,26 +746,34 @@ function SpeechTimingPanel({ senior, call, calls }: { senior: Senior; call: Call
   );
 }
 
-function speechMarkerTitle(call: CallRecord): string {
-  if (call.speechModelProbability !== null && call.speechModelProbability !== undefined) {
-    return `Speech marker watch: ${Math.round(call.speechModelProbability * 100)}%`;
+function parkinsonsSpeechTitle(call: CallRecord): string {
+  const probability = parkinsonsProbability(call);
+  if (probability !== null && probability !== undefined) {
+    return `Parkinson marker probability: ${Math.round(probability * 100)}%`;
   }
-  const warnings = (call.speechModelWarnings ?? []).join(" ").toLowerCase();
-  if (warnings.includes("low confidence")) return "Speech marker low confidence";
-  if (warnings.includes("unavailable")) return "Speech marker unavailable";
-  return call.patientAudioAvailable ? "Speech marker model ready" : "Speech marker unavailable";
+  const review = call.parkinsonsSpeechReview;
+  const warnings = parkinsonsWarnings(call).join(" ").toLowerCase();
+  if (review?.failureReason) return "Parkinson model unavailable";
+  if (warnings.includes("low confidence")) return "Parkinson model low confidence";
+  if (warnings.includes("unavailable")) return "Parkinson model unavailable";
+  return call.patientAudioAvailable ? "Parkinson model ready" : "Parkinson model unavailable";
 }
 
-function speechMarkerDescription(call: CallRecord): string {
-  if (call.speechModelProbability !== null && call.speechModelProbability !== undefined) {
-    return `${call.speechModelVersion ?? "conversational speech marker model"} scored patient-only pitch, jitter, and noise features. This is a research screening signal, not a diagnosis.`;
+function parkinsonsSpeechDescription(call: CallRecord): string {
+  const probability = parkinsonsProbability(call);
+  if (probability !== null && probability !== undefined) {
+    return `${parkinsonsModelVersion(call) ?? "saved Parkinson voice-feature model"} scored patient-only pitch, jitter, and noise features. This is saved-model inference, not a diagnosis.`;
   }
-  if (call.speechModelWarnings?.length) {
-    return call.speechModelWarnings.join(" ");
+  if (call.parkinsonsSpeechReview?.failureReason) {
+    return call.parkinsonsSpeechReview.failureReason;
+  }
+  const warnings = parkinsonsWarnings(call);
+  if (warnings.length) {
+    return warnings.join(" ");
   }
   return call.patientAudioAvailable
-    ? "Patient-only audio is saved. Enable backend speech scoring to populate the high-risk speech marker."
-    : "Patient-only audio is not available for speech-marker scoring.";
+    ? "Patient-only audio is saved; the saved Parkinson model scores derived patient speech after call save."
+    : "Patient-only audio is not available for Parkinson voice-feature scoring.";
 }
 
 function concussionSpeechTitle(call: CallRecord): string {
@@ -739,7 +789,7 @@ function concussionSpeechTitle(call: CallRecord): string {
 
 function concussionSpeechDescription(call: CallRecord): string {
   const review = call.concussionSpeechReview;
-  if (!review) return "Enable concussion speech review to score derived patient speech after each call.";
+  if (!review) return "Concussion speech-abnormality review has not returned a result for this call.";
   if (review.failureReason) return review.failureReason;
   if (!review.qualityOk) return review.qualityReason || "Patient speech audio did not pass quality checks.";
   if (review.riskReason) return `${review.riskReason} Research-only; not a diagnosis.`;
@@ -1223,9 +1273,9 @@ function OfficerDashboard({
                 <div className="snapshot-card">
                   <Activity size={22} />
                   <div>
-                    <span>Speech signal</span>
-                    <strong>{speechMarkerTitle(latestSignal)}</strong>
-                    <small>{speechMarkerDescription(latestSignal)}</small>
+                    <span>Parkinson speech marker</span>
+                    <strong>{parkinsonsSpeechTitle(latestSignal)}</strong>
+                    <small>{parkinsonsSpeechDescription(latestSignal)}</small>
                   </div>
                 </div>
                 <div className="snapshot-card">
