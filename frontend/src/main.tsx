@@ -9,13 +9,17 @@ import {
   CalendarClock,
   CheckCircle2,
   FileText,
-  Headphones,
   HeartPulse,
   Languages,
+  MicOff,
+  MoreHorizontal,
   PhoneCall,
   Printer,
   ShieldCheck,
-  UserRoundCheck
+  UserRoundCheck,
+  Video,
+  Volume2,
+  Grid3X3
 } from "lucide-react";
 import { createElevenLabsSession, fetchCalls, fetchSeniors, fetchSessions, fetchVolunteerTasks, getCallAudioUrl, saveCall } from "./api";
 import { demoCalls } from "./data";
@@ -122,6 +126,23 @@ function cleanTranscriptText(text: string): string {
     .replace(/\s*\[[^\]\r\n]{1,40}\]\s*/g, " ")
     .replace(/[ \t]+/g, " ")
     .trim();
+}
+
+function canonicalTranscriptText(text: string): string {
+  return cleanTranscriptText(text)
+    .replace(/\r\n/g, "\n")
+    .replace(/^\s*Senior\s*:/gim, "Patient:")
+    .replace(/^\s*(Agent|Patient)\s*:\s*/gim, "$1: ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function hasSeparateEnglishTranscript(call: CallRecord): boolean {
+  return Boolean(
+    cleanTranscriptText(call.englishTranscript) &&
+      canonicalTranscriptText(call.englishTranscript) !== canonicalTranscriptText(call.originalTranscript)
+  );
 }
 
 function writeAscii(view: DataView, offset: number, text: string) {
@@ -235,6 +256,13 @@ function base64ToArrayBuffer(base64Audio: string): ArrayBuffer {
 function sampleRateFromFormat(format: AgentAudioFormat): number {
   const rate = Number(format.split("_")[1]);
   return Number.isFinite(rate) ? rate : 16000;
+}
+
+function formatCallDuration(seconds: number): string {
+  const safeSeconds = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainder = safeSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
 }
 
 function decodeMuLawSample(value: number): number {
@@ -377,6 +405,8 @@ function previousAgentReplyEnd(segments: TranscriptSegment[], patientSegmentInde
 }
 
 function getEnglishTranscriptSegments(call: CallRecord): TranscriptSegment[] {
+  if (!hasSeparateEnglishTranscript(call)) return [];
+
   const segments = call.transcriptSegments ?? [];
   const joinedSegmentEnglish = segments.map((segment) => cleanTranscriptText(segment.englishText || segment.text)).join("\n").trim();
   const hasLiveRoles = segments.some((segment) => segment.role === "Agent" || segment.role === "Patient" || segment.speaker === "Agent" || segment.speaker === "Patient");
@@ -426,6 +456,7 @@ function getEnglishTranscriptSegments(call: CallRecord): TranscriptSegment[] {
 
 function buildTranscriptText(call: CallRecord, language: "original" | "english"): string {
   if (language === "english") {
+    if (!hasSeparateEnglishTranscript(call)) return "";
     return getEnglishTranscriptSegments(call).map(displaySegmentText).filter(Boolean).join("\n") || call.englishTranscript;
   }
   return call.originalTranscript.replace(/\bSenior:/g, "Patient:");
@@ -1073,12 +1104,12 @@ function AgentsCall({
 }) {
   const selectedSenior = seniors.find((senior) => senior.id === selectedSeniorId) ?? seniors[0];
   const [callState, setCallState] = useState<CallState>("Ready");
-  const [callMessage, setCallMessage] = useState("Ready to simulate a phone call through the website.");
+  const [callMessage, setCallMessage] = useState("Ready to start a live phone call.");
   const [debugMessage, setDebugMessage] = useState("");
   const [audioCleanupWarning, setAudioCleanupWarning] = useState("");
-  const [consentAcknowledged, setConsentAcknowledged] = useState(false);
   const [recordingNoticeShownAt, setRecordingNoticeShownAt] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState<string | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const recorderRef = useRef<WavRecorder | null>(null);
   const patientRecorderRef = useRef<WavRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -1110,7 +1141,7 @@ function AgentsCall({
       const reason = JSON.stringify(details);
       setDebugMessage(reason);
       setCallState((current) => (current === "In call" || current === "Connecting" ? "Failed" : current));
-      setCallMessage(`Agents session ended. ${reason}`);
+      setCallMessage(`Live call ended. ${reason}`);
     },
     onError: (message, context) => {
       setCallState("Failed");
@@ -1161,19 +1192,35 @@ function AgentsCall({
     }
   });
 
-  const startCall = async () => {
-    if (!consentAcknowledged) {
-      setCallMessage("Confirm recording notice before starting the call.");
+  useEffect(() => {
+    if (!startedAt) {
+      setElapsedSeconds(0);
       return;
     }
+
+    const updateElapsed = () => {
+      const startedTime = new Date(startedAt).getTime();
+      if (Number.isFinite(startedTime)) {
+        setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedTime) / 1000)));
+      }
+    };
+
+    updateElapsed();
+    if (!["Connecting", "In call", "Saving", "Analysing"].includes(callState)) return;
+    const intervalId = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [callState, startedAt]);
+
+  const startCall = async () => {
     setCallState("Connecting");
-    setCallMessage("Connecting to Agents...");
+    setCallMessage("Connecting live call...");
     setDebugMessage("");
     setAudioCleanupWarning("");
     transcriptRef.current = [];
     elevenLabsConversationIdRef.current = null;
     const callStartedAt = new Date().toISOString();
     setStartedAt(callStartedAt);
+    setRecordingNoticeShownAt(callStartedAt);
 
     try {
       const preparedMic = await requestCleanMicrophoneStream();
@@ -1215,7 +1262,7 @@ function AgentsCall({
         };
         transcriptRef.current = [fallbackLine];
         setCallState("Failed");
-        setCallMessage("Agents unavailable. Transcript/audio can still be saved if needed.");
+        setCallMessage("Live call unavailable. Transcript/audio can still be saved if needed.");
         return;
       }
 
@@ -1259,7 +1306,7 @@ function AgentsCall({
     formData.append("startedAt", startedAt ?? new Date().toISOString());
     formData.append("completedAt", new Date().toISOString());
     formData.append("transcriptMessages", JSON.stringify(transcriptRef.current));
-    formData.append("consentCaptured", String(consentAcknowledged));
+    formData.append("consentCaptured", "true");
     formData.append("consentVersion", "earlycare-demo-v1");
     formData.append("recordingNoticeShownAt", recordingNoticeShownAt ?? new Date().toISOString());
     formData.append("retentionPolicy", "local-demo-delete-after-hackathon");
@@ -1279,7 +1326,7 @@ function AgentsCall({
     if (saved.ok) {
       onSavedCall(saved.call);
       setCallState("Complete");
-      setCallMessage("Call saved. Patient overview now shows original and English transcripts.");
+      setCallMessage("Call saved. Patient overview now shows the saved transcript.");
     } else {
       setCallState("Failed");
       setCallMessage(`Call ended, but saving to backend failed: ${saved.message}`);
@@ -1289,12 +1336,13 @@ function AgentsCall({
   const busy = callState === "Connecting" || callState === "Saving" || callState === "Analysing";
   const canEndAndSave = callState === "In call" || callState === "Failed";
   const callVisualState = conversation.isSpeaking ? "speaking" : conversation.isListening ? "listening" : callState.toLowerCase().replace(/\s+/g, "-");
+  const callDuration = callState === "Ready" ? "00:00" : formatCallDuration(elapsedSeconds);
 
   return (
     <main className="call-only-grid">
       <section className="panel call-panel">
         <div className="panel-heading">
-          <h2>Agents Website Call</h2>
+          <h2>Live Call</h2>
           <span>Simulated phone call</span>
         </div>
 
@@ -1307,46 +1355,53 @@ function AgentsCall({
         </div>
 
         <div className="phone-shell">
-          <div className="phone-top">
-            <div>
-              <strong>{selectedSenior.name}</strong>
-              <small>
-                {selectedSenior.age} · {selectedSenior.addressZone} · {selectedSenior.preferredLanguage}
-              </small>
+          <div className={`phone-device ${callVisualState}`} aria-label="Live phone call">
+            <div className="phone-statusbar">
+              <span>9:41</span>
+              <span className="phone-island" />
+              <span>5G</span>
             </div>
-            <span className="live-dot">{callState}</span>
-          </div>
 
-          <div className={`voice-visual ${callVisualState}`} aria-label="Live call voice visual">
-            <div className="voice-orb">
-              <span />
-              <span />
-              <span />
+            <div className="phone-caller">
+              <span>{callDuration}</span>
+              <strong>Safety Officer</strong>
+              <em>{callState}</em>
             </div>
-            <button
-              aria-label={canEndAndSave ? "End and save call" : "Start call"}
-              className="call-orb-button"
-              disabled={busy || (!canEndAndSave && !consentAcknowledged)}
-              onClick={() => void (canEndAndSave ? endAndSaveCall() : startCall())}
-              type="button"
-            >
-              <PhoneCall size={28} />
-            </button>
+
+            <div className="phone-control-grid">
+              <button type="button" disabled>
+                <Volume2 size={24} />
+                <span>Speaker</span>
+              </button>
+              <button type="button" disabled>
+                <Video size={24} />
+                <span>Video</span>
+              </button>
+              <button type="button" disabled>
+                <MicOff size={24} />
+                <span>Mute</span>
+              </button>
+              <button type="button" disabled>
+                <MoreHorizontal size={24} />
+                <span>More</span>
+              </button>
+              <button
+                aria-label={canEndAndSave ? "End and save call" : "Start call"}
+                className={`phone-call-button ${canEndAndSave ? "ending" : "starting"}`}
+                disabled={busy}
+                onClick={() => void (canEndAndSave ? endAndSaveCall() : startCall())}
+                type="button"
+              >
+                <PhoneCall size={30} />
+              </button>
+              <button type="button" disabled>
+                <Grid3X3 size={24} />
+                <span>Keypad</span>
+              </button>
+            </div>
           </div>
 
           <div className="answer-box">
-            <label className="consent-row">
-              <input
-                checked={consentAcknowledged}
-                disabled={busy || callState === "In call"}
-                onChange={(event) => {
-                  setConsentAcknowledged(event.target.checked);
-                  setRecordingNoticeShownAt(event.target.checked ? new Date().toISOString() : null);
-                }}
-                type="checkbox"
-              />
-              Recording notice and demo consent captured
-            </label>
             <p>{callMessage}</p>
             {debugMessage ? <small>Debug: {debugMessage}</small> : null}
             {audioCleanupWarning ? <small>{audioCleanupWarning}</small> : null}
@@ -1405,7 +1460,7 @@ function OfficerDashboard({
   };
 
   return (
-    <main className="dashboard-grid">
+    <main className={`dashboard-grid ${demoMode ? "demo-dashboard" : ""}`}>
       <section className="panel roster-panel">
         <div className="panel-heading">
           <h2>Living-Alone Roster</h2>
@@ -1541,6 +1596,7 @@ function OfficerDashboard({
             <div className="call-record-list">
               {selectedCalls.map((call) => {
                 const audioUrl = getCallAudioUrl(call);
+                const showEnglishTranscript = hasSeparateEnglishTranscript(call);
                 return (
                   <article className="call-record" id={`call-record-${call.id}`} key={call.id}>
                     <div className="call-record-header">
@@ -1578,14 +1634,16 @@ function OfficerDashboard({
                     </div>
 
                     <div className="transcript-stack">
-                      <div>
-                        <h4>English transcript</h4>
-                        <HighlightedEnglishTranscript
-                          call={call}
-                          highlightedSignalId={highlightedSignalId}
-                          onSelectHighlight={(highlight) => playTranscriptHighlight(call, highlight)}
-                        />
-                      </div>
+                      {showEnglishTranscript ? (
+                        <div>
+                          <h4>English transcript</h4>
+                          <HighlightedEnglishTranscript
+                            call={call}
+                            highlightedSignalId={highlightedSignalId}
+                            onSelectHighlight={(highlight) => playTranscriptHighlight(call, highlight)}
+                          />
+                        </div>
+                      ) : null}
                       <div>
                         <h4>Original transcript</h4>
                         <pre>{buildTranscriptText(call, "original")}</pre>
@@ -1596,7 +1654,7 @@ function OfficerDashboard({
               })}
             </div>
           ) : (
-            <p className="empty-state">No saved Agents calls for this senior yet.</p>
+            <p className="empty-state">No saved live calls for this senior yet.</p>
           )}
         </section>
 
@@ -1668,8 +1726,8 @@ function App() {
         </div>
         <nav>
           <button className={view === "call" ? "active" : ""} onClick={() => setView("call")}>
-            <Headphones size={18} />
-            Agents call
+            <PhoneCall size={18} />
+            Live Call
           </button>
           <button className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}>
             <Activity size={18} />
@@ -1682,18 +1740,20 @@ function App() {
         </nav>
       </header>
 
-      <section className="hero-band">
-        <div>
-          <span className="eyebrow">Preventive care + patient engagement</span>
-          <h1>Regular check-ins that turn silence and speech change into earlier volunteer action.</h1>
-        </div>
-        <div className="hero-stats">
-          <StatCard label="Open tasks" value={`${openTasks}`} icon={<Bell size={20} />} />
-          <StatCard label="Urgent" value={`${urgentTasks}`} icon={<AlertTriangle size={20} />} />
-          <StatCard label="Safety stance" value="No diagnosis" icon={<ShieldCheck size={20} />} />
-          <StatCard label="Saved calls" value={`${visibleCalls.length}`} icon={<CheckCircle2 size={20} />} />
-        </div>
-      </section>
+      {view === "call" ? null : (
+        <section className="hero-band">
+          <div>
+            <span className="eyebrow">Preventive care + patient engagement</span>
+            <h1>Regular check-ins that turn silence and speech change into earlier volunteer action.</h1>
+          </div>
+          <div className="hero-stats">
+            <StatCard label="Open tasks" value={`${openTasks}`} icon={<Bell size={20} />} />
+            <StatCard label="Urgent" value={`${urgentTasks}`} icon={<AlertTriangle size={20} />} />
+            <StatCard label="Safety stance" value="No diagnosis" icon={<ShieldCheck size={20} />} />
+            <StatCard label="Saved calls" value={`${visibleCalls.length}`} icon={<CheckCircle2 size={20} />} />
+          </div>
+        </section>
+      )}
 
       {view === "call" ? (
         <ConversationProvider>

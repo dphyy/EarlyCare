@@ -228,7 +228,7 @@ class CallWorkflowTests(unittest.TestCase):
         call = response.json()["call"]
         transcribe.assert_called_once()
         self.assertEqual(call["originalTranscript"], "Agent: Live agent text\nPatient: Live senior text")
-        self.assertEqual(call["englishTranscript"], "Agent: Live agent text\nPatient: Live senior text")
+        self.assertEqual(call["englishTranscript"], "")
         self.assertEqual(call["elevenLabsConversationId"], "conv-123")
         self.assertEqual(call["transcriptMessages"][0]["text"], "Live agent text")
         self.assertEqual(call["translationProvider"], "meralion-audio-translation")
@@ -286,8 +286,9 @@ class CallWorkflowTests(unittest.TestCase):
 
         call = response.json()["call"]
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Agent: This is your routine well-being check-in.", call["englishTranscript"])
-        self.assertIn("Patient: Yes.", call["englishTranscript"])
+        self.assertEqual(call["englishTranscript"], "")
+        self.assertIn("Agent: This is your routine well-being check-in.", call["originalTranscript"])
+        self.assertIn("Patient: Yes.", call["originalTranscript"])
         self.assertEqual(call["transcriptSegments"][0]["role"], "Agent")
         self.assertEqual(call["transcriptSegments"][1]["role"], "Patient")
         self.assertNotEqual(call["transcriptSegments"][0]["speaker"], "SPEAKER_00")
@@ -338,7 +339,7 @@ class CallWorkflowTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         call = response.json()["call"]
         self.assertEqual(call["originalTranscript"], "Agent: Did you fall?\nPatient: I fell in the bathroom.")
-        self.assertEqual(call["englishTranscript"], "Agent: Did you fall?\nPatient: I fell in the bathroom.")
+        self.assertEqual(call["englishTranscript"], "")
         self.assertEqual([segment["role"] for segment in call["transcriptSegments"]], ["Agent", "Patient"])
         self.assertEqual([segment["speaker"] for segment in call["transcriptSegments"]], ["Agent", "Patient"])
         self.assertTrue(any("MERaLiON speaker labels ignored" in warning for warning in call["transcriptAlignmentWarnings"]))
@@ -387,14 +388,15 @@ class CallWorkflowTests(unittest.TestCase):
         call = response.json()["call"]
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            call["englishTranscript"],
+            call["originalTranscript"],
             "Agent: Hello, this is EarlyCare. This is your routine well-being check-in.\n"
             "Patient: Yes.\n"
             "Agent: How are you feeling today?\n"
             "Patient: I am feeling okay.",
         )
+        self.assertEqual(call["englishTranscript"], "")
         combined_segments = "\n".join(segment["englishText"] for segment in call["transcriptSegments"])
-        self.assertNotIn("Agent: Agent:", call["englishTranscript"])
+        self.assertNotIn("Agent: Agent:", call["originalTranscript"])
         self.assertNotIn("Agent: Patient:", combined_segments)
         self.assertEqual(call["transcriptSegments"][0]["role"], "Agent")
         self.assertEqual(call["transcriptSegments"][1]["role"], "Patient")

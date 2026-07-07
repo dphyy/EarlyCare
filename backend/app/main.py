@@ -367,6 +367,22 @@ def _split_sentences(text: str) -> list[str]:
     return [part.strip() for part in re.split(r"(?<=[.!?。？！])\s+", cleaned) if part.strip()]
 
 
+def _canonical_transcript_for_comparison(text: str) -> str:
+    normalized = _clean_transcript_text(text).replace("\r\n", "\n")
+    normalized = re.sub(r"(?mi)^\s*Senior\s*:", "Patient:", normalized)
+    normalized = re.sub(r"(?mi)^\s*(Agent|Patient)\s*:\s*", r"\1: ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip().casefold()
+
+
+def _public_english_transcript(original_transcript: str, english_transcript: str) -> str:
+    if not english_transcript.strip():
+        return ""
+    if _canonical_transcript_for_comparison(original_transcript) == _canonical_transcript_for_comparison(english_transcript):
+        return ""
+    return english_transcript
+
+
 def _provider_text_units(text: str) -> list[str]:
     role_labeled = [
         _strip_speaker_labels(match.group(2))
@@ -2156,8 +2172,9 @@ async def save_call(
         }
     )
 
+    display_english_transcript = _public_english_transcript(original_transcript, english_transcript)
     (call_dir / "transcript-original.json").write_text(json.dumps([message.model_dump() for message in messages], indent=2))
-    (call_dir / "transcript-english.txt").write_text(english_transcript)
+    (call_dir / "transcript-english.txt").write_text(display_english_transcript)
 
     call = CallRecord(
         id=call_id,
@@ -2168,7 +2185,7 @@ async def save_call(
         status="Complete" if status not in {"Failed", "Saved"} else status,  # type: ignore[arg-type]
         riskLevel=assessment.riskLevel,
         originalTranscript=original_transcript,
-        englishTranscript=english_transcript,
+        englishTranscript=display_english_transcript,
         transcriptMessages=messages,
         elevenLabsConversationId=elevenLabsConversationId,
         translationProvider=translation.provider,
