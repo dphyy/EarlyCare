@@ -1,0 +1,65 @@
+services:
+  - type: web
+    name: earlycare
+    runtime: docker
+    branch: main
+    plan: starter
+    region: singapore
+    healthCheckPath: /health
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    disk:
+      name: earlycare-data
+      mountPath: /var/data/earlycare
+      sizeGB: 1
+    envVars:
+      - key: EARLYCARE_STORAGE_ROOT
+        value: /var/data/earlycare
+      - key: EARLYCARE_FRONTEND_DIST
+        value: /app/frontend/dist
+      - key: EARLYCARE_OPERATOR_USERNAME
+        value: operator
+      - key: EARLYCARE_OPERATOR_PASSWORD
+        sync: false
+      - key: EARLYCARE_AUTH_SECRET
+        sync: false
+      - key: EARLYCARE_SESSION_TTL_SECONDS
+        value: "43200"
+      - key: EARLYCARE_MAX_CALL_UPLOAD_MB
+        value: "30"
+      - key: EARLYCARE_RATE_LIMIT_API_PER_MINUTE
+        value: "240"
+      - key: EARLYCARE_RATE_LIMIT_LOGIN_PER_MINUTE
+        value: "8"
+      - key: EARLYCARE_RATE_LIMIT_ELEVENLABS_PER_MINUTE
+        value: "6"
+      - key: EARLYCARE_RATE_LIMIT_CALL_SAVE_PER_MINUTE
+        value: "4"
+      - key: EARLYCARE_RATE_LIMIT_CHECKIN_AUDIO_PER_MINUTE
+        value: "10"
+      - key: EARLYCARE_RATE_LIMIT_ML_PER_MINUTE
+        value: "12"
+      - key: MERALION_API_KEY
+        sync: false
+      - key: MERALION_ASR_URL
+        value: http://meralion.org:8010/audio/transcription
+      - key: MERALION_TRANSLATION_URL
+        value: http://meralion.org:8010/audio/translation
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: OPENAI_SAFEGUARD_MODEL
+        sync: false
+      - key: GOOGLE_TRANSLATE_API_KEY
+        sync: false
+      - key: GOOGLE_TRANSLATE_URL
+        value: https://translation.googleapis.com/language/translate/v2
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: ELEVENLABS_AGENT_ID
+        sync: false
+      - key: ELEVENLABS_STT_MODEL
+        value: scribe_v2
+      - key: EARLYCARE_CONCUSSION_SPEECH_DEVICE
+        value: cpu
