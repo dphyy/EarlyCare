@@ -8,6 +8,7 @@ import re
 import sqlite3
 import time
 import wave
+from collections import deque
 from pathlib import Path
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -63,6 +64,7 @@ app = FastAPI(title="EarlyCare API", version="0.1.0")
 AUTH_COOKIE_NAME = "earlycare_session"
 AUTH_PROTECTED_PREFIXES = ("/seniors", "/checkins", "/calls", "/elevenlabs", "/ml", "/volunteer-tasks")
 AUTH_PUBLIC_PATHS = {"/health", "/readiness", "/auth/login", "/auth/logout", "/auth/me"}
+RATE_LIMIT_BUCKETS: dict[str, deque[float]] = {}
 SUPPORTED_AUDIO_EXTENSIONS = {".mp3", ".ogg", ".wav", ".webm"}
 CONTENT_TYPE_AUDIO_EXTENSIONS = {
     "audio/mpeg": ".mp3",
@@ -230,9 +232,96 @@ def _cookie_secure(request: Request) -> bool:
     return request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "").split(",")[0].strip() == "https"
 
 
+def _rate_limit_enabled() -> bool:
+    return os.getenv("EARLYCARE_RATE_LIMIT_DISABLED", "").strip().lower() not in {"1", "true", "yes"}
+
+
+def _env_int(name: str, fallback: int, minimum: int = 1) -> int:
+    try:
+        return max(minimum, int(os.getenv(name, str(fallback))))
+    except ValueError:
+        return fallback
+
+
+def _client_ip(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _rate_limit_identity(request: Request) -> str:
+    username = _request_operator(request)
+    return f"user:{username}" if username else f"ip:{_client_ip(request)}"
+
+
+def _rate_limit_rule(request: Request) -> tuple[str, int, int] | None:
+    path = request.url.path
+    method = request.method.upper()
+    if method == "POST" and path == "/auth/login":
+        return "auth-login", _env_int("EARLYCARE_RATE_LIMIT_LOGIN_PER_MINUTE", 8), 60
+    if method == "POST" and path == "/elevenlabs/signed-url":
+        return "elevenlabs-signed-url", _env_int("EARLYCARE_RATE_LIMIT_ELEVENLABS_PER_MINUTE", 6), 60
+    if method == "POST" and path == "/calls":
+        return "save-call", _env_int("EARLYCARE_RATE_LIMIT_CALL_SAVE_PER_MINUTE", 4), 60
+    if method == "POST" and path.startswith("/checkins/"):
+        return "checkin-audio", _env_int("EARLYCARE_RATE_LIMIT_CHECKIN_AUDIO_PER_MINUTE", 10), 60
+    if method == "POST" and path == "/ml/speech-deviation":
+        return "speech-ml", _env_int("EARLYCARE_RATE_LIMIT_ML_PER_MINUTE", 12), 60
+    if _is_protected_api_path(path):
+        return "api", _env_int("EARLYCARE_RATE_LIMIT_API_PER_MINUTE", 240), 60
+    return None
+
+
+def _rate_limit_retry_after(identity: str, bucket_name: str, limit: int, window_seconds: int) -> int | None:
+    now = time.monotonic()
+    bucket_key = f"{identity}:{bucket_name}"
+    bucket = RATE_LIMIT_BUCKETS.setdefault(bucket_key, deque())
+    while bucket and now - bucket[0] >= window_seconds:
+        bucket.popleft()
+    if len(bucket) >= limit:
+        return max(1, int(window_seconds - (now - bucket[0])))
+    bucket.append(now)
+    return None
+
+
+def _upload_too_large(request: Request) -> JSONResponse | None:
+    if request.method.upper() != "POST" or request.url.path != "/calls":
+        return None
+    content_length = request.headers.get("content-length")
+    if not content_length:
+        return None
+    max_bytes = _env_int("EARLYCARE_MAX_CALL_UPLOAD_MB", 30) * 1024 * 1024
+    try:
+        if int(content_length) > max_bytes:
+            return JSONResponse({"detail": "Call upload is too large"}, status_code=413)
+    except ValueError:
+        return None
+    return None
+
+
 @app.middleware("http")
 async def operator_auth_middleware(request: Request, call_next):
-    if request.method == "OPTIONS" or not _auth_enabled() or _is_public_path(request.url.path):
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
+    upload_response = _upload_too_large(request)
+    if upload_response is not None:
+        return upload_response
+
+    if _rate_limit_enabled():
+        rule = _rate_limit_rule(request)
+        if rule is not None:
+            bucket_name, limit, window_seconds = rule
+            retry_after = _rate_limit_retry_after(_rate_limit_identity(request), bucket_name, limit, window_seconds)
+            if retry_after is not None:
+                return JSONResponse(
+                    {"detail": "Rate limit exceeded"},
+                    status_code=429,
+                    headers={"Retry-After": str(retry_after)},
+                )
+
+    if not _auth_enabled() or _is_public_path(request.url.path):
         return await call_next(request)
     if _is_protected_api_path(request.url.path) and _request_operator(request) is None:
         return JSONResponse({"detail": "Authentication required"}, status_code=401)

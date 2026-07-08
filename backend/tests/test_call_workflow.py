@@ -59,6 +59,9 @@ def _longest_silent_run_seconds(samples: np.ndarray, sample_rate: int, threshold
 
 
 class CallWorkflowTests(unittest.TestCase):
+    def setUp(self) -> None:
+        main.RATE_LIMIT_BUCKETS.clear()
+
     def test_clean_transcript_text_removes_bracket_cues(self) -> None:
         self.assertEqual(providers.clean_transcript_text("Agent: [happy] hello [concerned] there"), "Agent: hello there")
 
@@ -1729,6 +1732,48 @@ class CallWorkflowTests(unittest.TestCase):
         self.assertEqual(allowed.status_code, 200)
         self.assertEqual(logout.status_code, 200)
         self.assertEqual(blocked_again.status_code, 401)
+
+    def test_login_rate_limit_returns_retry_after(self) -> None:
+        main.RATE_LIMIT_BUCKETS.clear()
+        with patch.dict(
+            main.os.environ,
+            {
+                "EARLYCARE_AUTH_DISABLED": "false",
+                "EARLYCARE_OPERATOR_USERNAME": "ops",
+                "EARLYCARE_OPERATOR_PASSWORD": "demo-password",
+                "EARLYCARE_AUTH_SECRET": "test-secret",
+                "EARLYCARE_RATE_LIMIT_LOGIN_PER_MINUTE": "2",
+            },
+        ):
+            client = TestClient(main.app)
+            first = client.post("/auth/login", json={"username": "ops", "password": "wrong"})
+            second = client.post("/auth/login", json={"username": "ops", "password": "wrong"})
+            third = client.post("/auth/login", json={"username": "ops", "password": "wrong"})
+        main.RATE_LIMIT_BUCKETS.clear()
+
+        self.assertEqual(first.status_code, 401)
+        self.assertEqual(second.status_code, 401)
+        self.assertEqual(third.status_code, 429)
+        self.assertIn("retry-after", {key.lower(): value for key, value in third.headers.items()})
+
+    def test_call_upload_size_limit_rejects_large_request(self) -> None:
+        main.RATE_LIMIT_BUCKETS.clear()
+        with patch.dict(main.os.environ, {"EARLYCARE_MAX_CALL_UPLOAD_MB": "1"}):
+            client = TestClient(main.app)
+            response = client.post(
+                "/calls",
+                data={
+                    "seniorId": "s-001",
+                    "status": "Complete",
+                    "startedAt": "2026-07-04T10:00:00+08:00",
+                    "completedAt": "2026-07-04T10:01:00+08:00",
+                    "transcriptMessages": "[]",
+                },
+                files={"audio": ("full-call.wav", b"0" * (1024 * 1024 + 1), "audio/wav")},
+            )
+        main.RATE_LIMIT_BUCKETS.clear()
+
+        self.assertEqual(response.status_code, 413)
 
     def test_save_call_is_recoverable_from_sqlite_index(self) -> None:
         messages = [
