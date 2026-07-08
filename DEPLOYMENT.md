@@ -84,6 +84,38 @@ render services create \
 
 Use a durable registry such as GHCR for repeatable deploys. A short-lived public registry is acceptable only for same-day demos because later redeploys need the image to remain pullable.
 
+## Durable Storage Switch
+
+After payment information is added to the Render workspace, move the service from demo storage to persistent storage:
+
+```bash
+render services update <service-id> --plan starter --confirm -o json
+```
+
+Then attach a 1 GB disk through the Render Dashboard, or through the Render API:
+
+```bash
+curl -X POST https://api.render.com/v1/disks \
+  -H "Authorization: Bearer $RENDER_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "earlycare-data",
+    "sizeGB": 1,
+    "mountPath": "/var/data/earlycare",
+    "serviceId": "<service-id>"
+  }'
+```
+
+Finally update the service env var and redeploy:
+
+```bash
+render services update <service-id> \
+  --env-var EARLYCARE_STORAGE_ROOT=/var/data/earlycare \
+  --confirm \
+  -o json
+render deploys create <service-id> --wait --confirm -o text
+```
+
 ## Post-Deploy Smoke Test
 
 ```bash
