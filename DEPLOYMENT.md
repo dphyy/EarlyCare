@@ -9,11 +9,11 @@ EarlyCare is deployed as one Render web service. FastAPI serves the API and the 
 - Runtime: Docker
 - App command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT --app-dir /app/backend`
 - Frontend: Vite build copied into `/app/frontend/dist`
-- Persistent data: Render disk mounted at `/var/data/earlycare`
-- SQLite: `/var/data/earlycare/earlycare.sqlite3`
-- Audio/transcripts: `/var/data/earlycare/calls`
+- Demo data: `/tmp/earlycare` on Render free instances
+- SQLite: `/tmp/earlycare/earlycare.sqlite3`
+- Audio/transcripts: `/tmp/earlycare/calls`
 
-Persistent disks require a paid Render web service. If billing is not available, remove the `disk` block from `render.yaml` and use the same image with ephemeral storage for the demo.
+Persistent disks require a paid Render web service. The checked-in `render.yaml` uses free ephemeral storage so the hackathon demo can go live without payment info. For durable storage, switch the plan to `starter`, set `EARLYCARE_STORAGE_ROOT=/var/data/earlycare`, and add a disk mounted at `/var/data/earlycare`.
 
 ## Required Render Environment Variables
 

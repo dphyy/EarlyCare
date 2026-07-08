@@ -2,19 +2,16 @@ services:
   - type: web
     name: earlycare
     runtime: docker
+    repo: https://github.com/dphyy/EarlyCare
     branch: main
-    plan: starter
+    plan: free
     region: singapore
     healthCheckPath: /health
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    disk:
-      name: earlycare-data
-      mountPath: /var/data/earlycare
-      sizeGB: 1
     envVars:
       - key: EARLYCARE_STORAGE_ROOT
-        value: /var/data/earlycare
+        value: /tmp/earlycare
       - key: EARLYCARE_FRONTEND_DIST
         value: /app/frontend/dist
       - key: EARLYCARE_OPERATOR_USERNAME
