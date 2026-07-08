@@ -2,7 +2,7 @@
 
 **Preventive care and patient engagement for elderly people living alone.**
 
-EarlyCare is a hackathon prototype for routine wellbeing calls operated as an AIC/community care-coordinator monitoring layer. A patient starts a simulated browser call, an ElevenLabs agent conducts the check-in, the app records the full conversation plus patient-only microphone audio, and the Care Desk shows the recording, original transcript, English transcript, patient-only AI risk highlights, distress safeguard status, tone context, patient speech quality, and a printable Doctor Brief for point-of-care handoff.
+EarlyCare is a hackathon prototype for routine wellbeing calls operated as an AIC/community care-coordinator monitoring layer. A patient starts a simulated browser call, an ElevenLabs agent conducts the check-in, the app records the full conversation plus patient-only microphone audio, and the Care Desk shows the recording, original transcript, English transcript, patient-only AI risk highlights, distress safeguard status, tone context, patient speech quality, and a printable Doctor Brief for seamless handoff.
 
 EarlyCare is decision support, not diagnosis. It helps care teams notice risk signals such as falls, dizziness, sickness, confusion, weakness, poor intake, missed check-ins, or requests for help earlier.
 
