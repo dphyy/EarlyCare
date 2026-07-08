@@ -1,3 +1,6 @@
+import base64
+import hashlib
+import hmac
 import os
 import json
 import mimetypes
@@ -11,9 +14,9 @@ from uuid import uuid4
 
 import httpx
 import numpy as np
-from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -57,6 +60,9 @@ CALL_STORAGE_ROOT = Path(os.getenv("EARLYCARE_CALL_STORAGE_ROOT", STORAGE_ROOT /
 PARKINSONS_SPEECH_MODEL_ARTIFACT_ROOT = BACKEND_ROOT / "models" / "parkinsons_speech"
 FRONTEND_DIST_ROOT = Path(os.getenv("EARLYCARE_FRONTEND_DIST", BACKEND_ROOT.parent / "frontend" / "dist"))
 app = FastAPI(title="EarlyCare API", version="0.1.0")
+AUTH_COOKIE_NAME = "earlycare_session"
+AUTH_PROTECTED_PREFIXES = ("/seniors", "/checkins", "/calls", "/elevenlabs", "/ml", "/volunteer-tasks")
+AUTH_PUBLIC_PATHS = {"/health", "/readiness", "/auth/login", "/auth/logout", "/auth/me"}
 SUPPORTED_AUDIO_EXTENSIONS = {".mp3", ".ogg", ".wav", ".webm"}
 CONTENT_TYPE_AUDIO_EXTENSIONS = {
     "audio/mpeg": ".mp3",
@@ -124,6 +130,113 @@ class ElevenLabsSessionResponse(BaseModel):
     signedUrl: str | None = None
     agentId: str | None = None
     message: str
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class AuthStatus(BaseModel):
+    authEnabled: bool
+    authenticated: bool
+    username: str | None = None
+    message: str | None = None
+
+
+def _operator_username() -> str:
+    return os.getenv("EARLYCARE_OPERATOR_USERNAME", "operator")
+
+
+def _operator_password() -> str | None:
+    return os.getenv("EARLYCARE_OPERATOR_PASSWORD")
+
+
+def _auth_secret() -> str | None:
+    return os.getenv("EARLYCARE_AUTH_SECRET")
+
+
+def _auth_enabled() -> bool:
+    disabled = os.getenv("EARLYCARE_AUTH_DISABLED", "").strip().lower() in {"1", "true", "yes"}
+    return not disabled and bool(_operator_password() and _auth_secret())
+
+
+def _session_ttl_seconds() -> int:
+    raw_value = os.getenv("EARLYCARE_SESSION_TTL_SECONDS", "43200")
+    try:
+        return max(300, int(raw_value))
+    except ValueError:
+        return 43200
+
+
+def _base64url_encode(payload: bytes) -> str:
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _base64url_decode(payload: str) -> bytes:
+    padding = "=" * (-len(payload) % 4)
+    return base64.urlsafe_b64decode(payload + padding)
+
+
+def _sign_session_payload(payload: str) -> str:
+    secret = _auth_secret()
+    if not secret:
+        raise RuntimeError("Auth secret is not configured")
+    digest = hmac.new(secret.encode("utf-8"), payload.encode("ascii"), hashlib.sha256).digest()
+    return _base64url_encode(digest)
+
+
+def _create_session_token(username: str) -> str:
+    now = int(time.time())
+    payload = _base64url_encode(
+        json.dumps({"sub": username, "iat": now, "exp": now + _session_ttl_seconds()}, separators=(",", ":")).encode("utf-8")
+    )
+    signature = _sign_session_payload(payload)
+    return f"{payload}.{signature}"
+
+
+def _verify_session_token(token: str | None) -> str | None:
+    if not token or "." not in token or not _auth_enabled():
+        return None
+    payload, signature = token.rsplit(".", 1)
+    expected_signature = _sign_session_payload(payload)
+    if not hmac.compare_digest(signature, expected_signature):
+        return None
+    try:
+        data = json.loads(_base64url_decode(payload))
+    except (ValueError, json.JSONDecodeError):
+        return None
+    if int(data.get("exp", 0)) < int(time.time()):
+        return None
+    username = data.get("sub")
+    if username != _operator_username():
+        return None
+    return username
+
+
+def _request_operator(request: Request) -> str | None:
+    return _verify_session_token(request.cookies.get(AUTH_COOKIE_NAME))
+
+
+def _is_protected_api_path(path: str) -> bool:
+    return any(path == prefix or path.startswith(f"{prefix}/") for prefix in AUTH_PROTECTED_PREFIXES)
+
+
+def _is_public_path(path: str) -> bool:
+    return path in AUTH_PUBLIC_PATHS or path.startswith("/assets/")
+
+
+def _cookie_secure(request: Request) -> bool:
+    return request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "").split(",")[0].strip() == "https"
+
+
+@app.middleware("http")
+async def operator_auth_middleware(request: Request, call_next):
+    if request.method == "OPTIONS" or not _auth_enabled() or _is_public_path(request.url.path):
+        return await call_next(request)
+    if _is_protected_api_path(request.url.path) and _request_operator(request) is None:
+        return JSONResponse({"detail": "Authentication required"}, status_code=401)
+    return await call_next(request)
 
 
 def _parse_iso(timestamp: str | None) -> datetime | None:
@@ -2146,6 +2259,43 @@ def _openai_risk_review(english_transcript: str, segments: list[TranscriptSegmen
 
 def _load_call_record(path: Path) -> CallRecord:
     return CallRecord.model_validate_json(path.read_text())
+
+
+@app.get("/auth/me", response_model=AuthStatus)
+def auth_me(request: Request) -> AuthStatus:
+    if not _auth_enabled():
+        return AuthStatus(authEnabled=False, authenticated=True, username="demo-operator")
+    username = _request_operator(request)
+    return AuthStatus(authEnabled=True, authenticated=username is not None, username=username)
+
+
+@app.post("/auth/login", response_model=AuthStatus)
+def auth_login(payload: LoginRequest, request: Request, response: Response) -> AuthStatus:
+    if not _auth_enabled():
+        return AuthStatus(authEnabled=False, authenticated=True, username="demo-operator")
+
+    expected_username = _operator_username()
+    expected_password = _operator_password() or ""
+    if not hmac.compare_digest(payload.username, expected_username) or not hmac.compare_digest(payload.password, expected_password):
+        raise HTTPException(status_code=401, detail="Invalid operator credentials")
+
+    token = _create_session_token(expected_username)
+    response.set_cookie(
+        AUTH_COOKIE_NAME,
+        token,
+        httponly=True,
+        secure=_cookie_secure(request),
+        samesite="lax",
+        max_age=_session_ttl_seconds(),
+        path="/",
+    )
+    return AuthStatus(authEnabled=True, authenticated=True, username=expected_username)
+
+
+@app.post("/auth/logout", response_model=AuthStatus)
+def auth_logout(response: Response) -> AuthStatus:
+    response.delete_cookie(AUTH_COOKIE_NAME, path="/")
+    return AuthStatus(authEnabled=_auth_enabled(), authenticated=False)
 
 
 @app.get("/health")

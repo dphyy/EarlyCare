@@ -67,6 +67,13 @@ export type SaveCallResult =
   | { ok: true; call: CallRecord }
   | { ok: false; message: string; status?: number };
 
+export interface AuthStatus {
+  authEnabled: boolean;
+  authenticated: boolean;
+  username?: string | null;
+  message?: string | null;
+}
+
 async function responseErrorMessage(response: Response): Promise<string> {
   try {
     const payload = await response.json();
@@ -86,6 +93,38 @@ async function responseErrorMessage(response: Response): Promise<string> {
     // Fall through to the status text below.
   }
   return response.statusText || `Request failed: ${response.status}`;
+}
+
+export async function fetchAuthStatus(): Promise<AuthStatus> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/me`, { credentials: "include" });
+    if (!response.ok) {
+      return { authEnabled: true, authenticated: false };
+    }
+    return (await response.json()) as AuthStatus;
+  } catch {
+    return { authEnabled: false, authenticated: true, username: "demo-operator" };
+  }
+}
+
+export async function loginOperator(username: string, password: string): Promise<AuthStatus> {
+  const response = await fetch(`${API_BASE_URL}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ username, password })
+  });
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response));
+  }
+  return (await response.json()) as AuthStatus;
+}
+
+export async function logoutOperator(): Promise<void> {
+  await fetch(`${API_BASE_URL}/auth/logout`, {
+    method: "POST",
+    credentials: "include"
+  });
 }
 
 export async function createElevenLabsSession(payload: ElevenLabsSessionRequest): Promise<ElevenLabsSessionResponse> {

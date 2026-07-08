@@ -1703,6 +1703,33 @@ class CallWorkflowTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
 
+    def test_operator_auth_blocks_api_until_login(self) -> None:
+        with patch.dict(
+            main.os.environ,
+            {
+                "EARLYCARE_AUTH_DISABLED": "false",
+                "EARLYCARE_OPERATOR_USERNAME": "ops",
+                "EARLYCARE_OPERATOR_PASSWORD": "demo-password",
+                "EARLYCARE_AUTH_SECRET": "test-secret",
+            },
+        ):
+            client = TestClient(main.app)
+
+            blocked = client.get("/seniors")
+            bad_login = client.post("/auth/login", json={"username": "ops", "password": "wrong"})
+            good_login = client.post("/auth/login", json={"username": "ops", "password": "demo-password"})
+            allowed = client.get("/seniors")
+            logout = client.post("/auth/logout")
+            blocked_again = client.get("/seniors")
+
+        self.assertEqual(blocked.status_code, 401)
+        self.assertEqual(bad_login.status_code, 401)
+        self.assertEqual(good_login.status_code, 200)
+        self.assertTrue(good_login.json()["authenticated"])
+        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(logout.status_code, 200)
+        self.assertEqual(blocked_again.status_code, 401)
+
     def test_save_call_is_recoverable_from_sqlite_index(self) -> None:
         messages = [
             {"role": "Agent", "text": "How are you?", "timestamp": "2026-07-04T10:00:00+08:00"},

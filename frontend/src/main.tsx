@@ -11,6 +11,8 @@ import {
   FileText,
   HeartPulse,
   Languages,
+  LockKeyhole,
+  LogOut,
   MicOff,
   MoreHorizontal,
   PhoneCall,
@@ -21,8 +23,9 @@ import {
   Volume2,
   Grid3X3
 } from "lucide-react";
-import { createElevenLabsSession, fetchCalls, fetchSeniors, fetchSessions, fetchVolunteerTasks, getCallAudioUrl, saveCall } from "./api";
+import { createElevenLabsSession, fetchAuthStatus, fetchCalls, fetchSeniors, fetchSessions, fetchVolunteerTasks, getCallAudioUrl, loginOperator, logoutOperator, saveCall } from "./api";
 import { demoCalls, demoVolunteerTasks } from "./data";
+import type { AuthStatus } from "./api";
 import type {
   CallRecord,
   CheckInSession,
@@ -1885,26 +1888,128 @@ function OfficerDashboard({
   );
 }
 
+function OperatorLogin({ onAuthenticated }: { onAuthenticated: (status: AuthStatus) => Promise<void> }) {
+  const [username, setUsername] = useState("operator");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submitLogin = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const status = await loginOperator(username.trim(), password);
+      await onAuthenticated(status);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Unable to sign in.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <main className="login-shell">
+      <section className="login-card">
+        <div className="brand login-brand">
+          <div className="brand-mark">
+            <HeartPulse size={28} />
+          </div>
+          <div>
+            <strong>EarlyCare</strong>
+            <span>Care operations sign-in</span>
+          </div>
+        </div>
+        <div className="login-heading">
+          <LockKeyhole size={28} />
+          <div>
+            <span className="eyebrow">Operator Access</span>
+            <h1>Sign in to Care Desk</h1>
+          </div>
+        </div>
+        <form className="login-form" onSubmit={submitLogin}>
+          <label>
+            <span>Username</span>
+            <input autoComplete="username" onChange={(event) => setUsername(event.target.value)} required value={username} />
+          </label>
+          <label>
+            <span>Password</span>
+            <input autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} required type="password" value={password} />
+          </label>
+          {error ? <p className="login-error">{error}</p> : null}
+          <button className="primary-action" disabled={busy} type="submit">
+            <LockKeyhole size={18} />
+            {busy ? "Signing in..." : "Sign in"}
+          </button>
+        </form>
+      </section>
+    </main>
+  );
+}
+
 function App() {
   const [view, setView] = useState<AppView>("call");
+  const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null);
+  const [appLoading, setAppLoading] = useState(true);
   const [loadedSeniors, setLoadedSeniors] = useState<Senior[]>([]);
   const [loadedSessions, setLoadedSessions] = useState<CheckInSession[]>([]);
   const [loadedTasks, setLoadedTasks] = useState<VolunteerTask[]>([]);
   const [loadedCalls, setLoadedCalls] = useState<CallRecord[]>([]);
   const [selectedSeniorId, setSelectedSeniorId] = useState("s-001");
 
+  const loadAppData = async () => {
+    const [nextSeniors, nextSessions, nextTasks, nextCalls] = await Promise.all([fetchSeniors(), fetchSessions(), fetchVolunteerTasks(), fetchCalls()]);
+    setLoadedSeniors(nextSeniors);
+    setLoadedSessions(nextSessions);
+    setLoadedTasks(nextTasks);
+    setLoadedCalls(nextCalls);
+    setSelectedSeniorId(nextSeniors[0]?.id ?? "s-001");
+  };
+
   useEffect(() => {
-    void Promise.all([fetchSeniors(), fetchSessions(), fetchVolunteerTasks(), fetchCalls()]).then(([nextSeniors, nextSessions, nextTasks, nextCalls]) => {
-      setLoadedSeniors(nextSeniors);
-      setLoadedSessions(nextSessions);
-      setLoadedTasks(nextTasks);
-      setLoadedCalls(nextCalls);
-      setSelectedSeniorId(nextSeniors[0]?.id ?? "s-001");
-    });
+    let active = true;
+    void fetchAuthStatus()
+      .then(async (status) => {
+        if (!active) return;
+        setAuthStatus(status);
+        if (status.authenticated) {
+          await loadAppData();
+        }
+      })
+      .finally(() => {
+        if (active) setAppLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
-  if (!loadedSeniors.length) {
+  const finishLogin = async (status: AuthStatus) => {
+    setAppLoading(true);
+    setAuthStatus(status);
+    await loadAppData();
+    setAppLoading(false);
+  };
+
+  const signOut = async () => {
+    await logoutOperator();
+    setAuthStatus((current) => ({ authEnabled: current?.authEnabled ?? true, authenticated: false }));
+    setLoadedSeniors([]);
+    setLoadedSessions([]);
+    setLoadedTasks([]);
+    setLoadedCalls([]);
+  };
+
+  if (appLoading || !authStatus) {
     return <div className="loading">Loading EarlyCare...</div>;
+  }
+
+  if (authStatus.authEnabled && !authStatus.authenticated) {
+    return <OperatorLogin onAuthenticated={finishLogin} />;
+  }
+
+  if (!loadedSeniors.length) {
+    return <div className="loading">Loading Care Desk...</div>;
   }
 
   const visibleCalls = view === "demo" ? demoCalls : loadedCalls;
@@ -1928,20 +2033,28 @@ function App() {
             <span>Living-alone elderly check-ins</span>
           </div>
         </div>
-        <nav>
-          <button className={view === "call" ? "active" : ""} onClick={() => setView("call")}>
-            <PhoneCall size={18} />
-            Live Call
-          </button>
-          <button className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}>
-            <Activity size={18} />
-            Care Desk
-          </button>
-          <button className={view === "demo" ? "active" : ""} onClick={runDemo}>
-            <FileText size={18} />
-            Demo
-          </button>
-        </nav>
+        <div className="topbar-actions">
+          <nav>
+            <button className={view === "call" ? "active" : ""} onClick={() => setView("call")}>
+              <PhoneCall size={18} />
+              Live Call
+            </button>
+            <button className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}>
+              <Activity size={18} />
+              Care Desk
+            </button>
+            <button className={view === "demo" ? "active" : ""} onClick={runDemo}>
+              <FileText size={18} />
+              Demo
+            </button>
+          </nav>
+          {authStatus.authEnabled ? (
+            <button className="secondary-action topbar-logout" onClick={() => void signOut()} type="button">
+              <LogOut size={18} />
+              Sign out
+            </button>
+          ) : null}
+        </div>
       </header>
 
       {view === "call" ? null : (

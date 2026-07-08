@@ -84,6 +84,18 @@ nav {
   gap: 8px;
 }
 
+.topbar-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.topbar-logout {
+  min-height: 42px;
+}
+
 nav button,
 .scenario-tabs button,
 .primary-action,
@@ -115,6 +127,91 @@ nav button.active,
 .secondary-action {
   background: #f8faf5;
   color: #16453f;
+}
+
+.login-shell {
+  align-items: center;
+  background:
+    radial-gradient(circle at 20% 10%, rgba(47, 111, 176, 0.14), transparent 26%),
+    radial-gradient(circle at 86% 18%, rgba(37, 114, 107, 0.14), transparent 28%),
+    #f3f5ef;
+  display: grid;
+  min-height: 100vh;
+  padding: 24px;
+  place-items: center;
+}
+
+.login-card {
+  background: #ffffff;
+  border: 1px solid #dfe5d8;
+  border-radius: 8px;
+  box-shadow: 0 24px 60px rgba(36, 48, 41, 0.12);
+  display: grid;
+  gap: 24px;
+  max-width: 440px;
+  padding: 28px;
+  width: min(100%, 440px);
+}
+
+.login-brand {
+  border-bottom: 1px solid #e6ecdf;
+  padding-bottom: 18px;
+}
+
+.login-heading {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+}
+
+.login-heading svg {
+  color: #16453f;
+  flex: 0 0 auto;
+}
+
+.login-heading h1 {
+  font-size: 28px;
+}
+
+.login-form {
+  display: grid;
+  gap: 14px;
+}
+
+.login-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.login-form label span {
+  color: #425047;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.login-form input {
+  border: 1px solid #cfd8c8;
+  border-radius: 8px;
+  color: #17201a;
+  font: inherit;
+  min-height: 44px;
+  padding: 10px 12px;
+}
+
+.login-form .primary-action {
+  justify-content: center;
+  min-height: 46px;
+}
+
+.login-error {
+  background: #ffe8e2;
+  border: 1px solid #f2b8ae;
+  border-radius: 8px;
+  color: #9c2619;
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0;
+  padding: 10px 12px;
 }
 
 .demo-state {
