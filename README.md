@@ -182,7 +182,7 @@ Never commit real `.env` files.
 
 ```bash
 cd frontend
-npm install
+pnpm install
 ```
 
 ### 3. Install Backend
@@ -224,7 +224,7 @@ Start the frontend:
 
 ```bash
 cd frontend
-npm run dev
+pnpm dev
 ```
 
 Open the Vite URL, usually `http://localhost:5173`.
@@ -256,12 +256,12 @@ Open the Vite URL, usually `http://localhost:5173`.
 
 | Command | Description |
 | --- | --- |
-| `npm run dev --prefix frontend` | Start the frontend dev server. |
-| `npm run build --prefix frontend` | Type-check and build the frontend. |
+| `pnpm --dir frontend dev` | Start the frontend dev server. |
+| `pnpm --dir frontend build` | Type-check and build the frontend. |
 | `PYTHONPATH=backend backend/.venv/bin/python -m unittest discover backend/tests` | Run backend tests. |
 | `PYTHONPATH=backend backend/.venv/bin/python -m unittest backend.tests.test_speech_ml` | Run focused Parkinson speech-marker tests. |
 | `backend/.venv/bin/python backend/scripts/cache_wavlm.py` | Download `microsoft/wavlm-base` into the ignored local Hugging Face cache used by readiness and concussion inference. |
-| `npm run lint --prefix frontend` | Run frontend TypeScript checks. |
+| `pnpm --dir frontend lint` | Run frontend TypeScript checks. |
 | `backend/.venv/bin/python -m py_compile backend/app/*.py` | Compile-check backend modules. |
 | `uvicorn app.main:app --reload --port 8000` | Start the backend from the `backend/` folder. |
 

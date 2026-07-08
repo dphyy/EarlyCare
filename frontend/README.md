@@ -88,13 +88,13 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 Install dependencies:
 
 ```bash
-npm install
+pnpm install
 ```
 
 Start the dev server:
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
 The app usually runs at `http://localhost:5173`.
@@ -103,9 +103,9 @@ The app usually runs at `http://localhost:5173`.
 
 | Command | Description |
 | --- | --- |
-| `npm run dev` | Start the Vite dev server. |
-| `npm run lint` | Run TypeScript checks without emitting files. |
-| `npm run build` | Type-check and build the production frontend. |
+| `pnpm dev` | Start the Vite dev server. |
+| `pnpm lint` | Run TypeScript checks without emitting files. |
+| `pnpm build` | Type-check and build the production frontend. |
 
 ## Main Files
 
