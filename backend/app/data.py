@@ -105,25 +105,4 @@ CHECKINS = [
 ]
 
 
-VOLUNTEER_TASKS = [
-    VolunteerTask(
-        id="t-001",
-        seniorId="s-001",
-        priority="Urgent",
-        reason="Post-fall danger signs",
-        recommendedAction="Call caregiver and coordinate urgent medical assessment.",
-        assignedTo="SGO-style volunteer team A",
-        status="Open",
-        createdAt="2026-07-04T09:05:00+08:00",
-    ),
-    VolunteerTask(
-        id="t-002",
-        seniorId="s-002",
-        priority="Today",
-        reason="Gradual speech drift over recent check-ins",
-        recommendedAction="Schedule in-person wellbeing visit and ask caregiver about changes.",
-        assignedTo="Community volunteer team B",
-        status="In progress",
-        createdAt="2026-07-04T10:15:00+08:00",
-    ),
-]
+VOLUNTEER_TASKS: list[VolunteerTask] = []

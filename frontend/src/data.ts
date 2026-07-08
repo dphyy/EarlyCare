@@ -234,26 +234,26 @@ export const sessions: CheckInSession[] = [
   }
 ];
 
-export const volunteerTasks: VolunteerTask[] = [
+export const demoVolunteerTasks: VolunteerTask[] = [
   {
-    id: "t-001",
+    id: "demo-task-tan-follow-up",
     seniorId: "s-001",
     priority: "Urgent",
-    reason: "Post-fall danger signs",
-    recommendedAction: "Call caregiver and coordinate urgent medical assessment.",
-    assignedTo: "SGO-style volunteer team A",
+    reason: "Near fall with dizziness and weakness",
+    recommendedAction: "Call daughter Mei Ling and arrange same-day volunteer or caregiver check-in for the kitchen near-fall, dizziness, weakness, and help request.",
+    assignedTo: "Community volunteer follow-up team",
     status: "Open",
-    createdAt: "2026-07-04T09:05:00+08:00"
+    createdAt: "2026-07-07T09:07:00+08:00"
   },
   {
-    id: "t-002",
+    id: "demo-task-raman-support",
     seniorId: "s-002",
     priority: "Today",
-    reason: "Gradual speech drift over recent check-ins",
-    recommendedAction: "Schedule in-person wellbeing visit and ask caregiver about changes.",
-    assignedTo: "Community volunteer team B",
-    status: "In progress",
-    createdAt: "2026-07-04T10:15:00+08:00"
+    reason: "Medication, mobility, and loneliness support",
+    recommendedAction: "Ask nephew Arjun to call today; schedule volunteer check-in for late tablets, slower walking, stiff hands, and emotional support.",
+    assignedTo: "Community volunteer follow-up team",
+    status: "Open",
+    createdAt: "2026-07-07T09:39:00+08:00"
   }
 ];
 

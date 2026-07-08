@@ -1,4 +1,4 @@
-import { seniors, sessions, volunteerTasks } from "./data";
+import { seniors, sessions } from "./data";
 import type { CallRecord, CheckInSession, ConsultationMemoryItem, ReadinessReport, Senior, VolunteerTask } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string | undefined;
@@ -24,7 +24,7 @@ export function fetchSessions(): Promise<CheckInSession[]> {
 }
 
 export function fetchVolunteerTasks(): Promise<VolunteerTask[]> {
-  return getJson<VolunteerTask[]>("/volunteer-tasks", volunteerTasks);
+  return getJson<VolunteerTask[]>("/volunteer-tasks", []);
 }
 
 export function fetchCalls(): Promise<CallRecord[]> {

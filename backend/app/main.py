@@ -1239,6 +1239,57 @@ def _upsert_volunteer_task_for_call(task: VolunteerTask | None) -> None:
     VOLUNTEER_TASKS.insert(0, task)
 
 
+def _volunteer_task_from_record(record: CallRecord) -> VolunteerTask | None:
+    if record.riskLevel == "Green" and record.safeguardLevel == "None":
+        return None
+
+    if record.riskLevel in {"Red", "Amber"} or record.safeguardLevel in {"Emergency", "Urgent"}:
+        priority = "Urgent"
+    elif record.riskLevel == "Watch" or record.safeguardLevel == "Support":
+        priority = "Today"
+    else:
+        priority = "Routine"
+
+    if record.safeguardLevel != "None":
+        reason = f"Safeguard {record.safeguardLevel.lower()} concern"
+        if record.safeguardCategory:
+            reason = f"{reason}: {record.safeguardCategory.replace('_', ' ')}"
+    elif record.riskSignals:
+        reason = record.riskSignals[0].label
+    elif record.riskAssessment.reasons:
+        reason = record.riskAssessment.reasons[0]
+    else:
+        reason = f"{record.riskLevel} follow-up"
+
+    return VolunteerTask(
+        id=f"task-{record.id}",
+        seniorId=record.seniorId,
+        priority=priority,
+        reason=reason[:120],
+        recommendedAction=record.recommendedAction,
+        assignedTo="Community volunteer follow-up team",
+        status="Open",
+        createdAt=record.completedAt,
+    )
+
+
+def _generated_volunteer_tasks() -> list[VolunteerTask]:
+    tasks_by_id: dict[str, VolunteerTask] = {}
+    if CALL_STORAGE_ROOT.exists():
+        for path in CALL_STORAGE_ROOT.glob("*/metadata.json"):
+            try:
+                record = _load_call_record(path)
+            except Exception:
+                continue
+            task = _volunteer_task_from_record(record)
+            if task is not None:
+                tasks_by_id[task.id] = task
+    for task in VOLUNTEER_TASKS:
+        existing = tasks_by_id.get(task.id)
+        tasks_by_id[task.id] = task if existing is None else existing.model_copy(update={"status": task.status})
+    return sorted(tasks_by_id.values(), key=lambda task: task.createdAt, reverse=True)
+
+
 FALL_OR_NEAR_FALL_RE = re.compile(
     r"\b("
     r"fall|falls|fallen|falling|fell|"
@@ -2366,7 +2417,7 @@ def speech_deviation(request: SpeechDeviationRequest) -> dict[str, object]:
 
 @app.get("/volunteer-tasks", response_model=list[VolunteerTask])
 def get_volunteer_tasks() -> list[VolunteerTask]:
-    return VOLUNTEER_TASKS
+    return _generated_volunteer_tasks()
 
 
 @app.patch("/volunteer-tasks/{task_id}", response_model=VolunteerTask)
@@ -2378,4 +2429,9 @@ def update_volunteer_task(task_id: str, status: str | None = None, payload: Volu
         if task.id == task_id:
             task.status = next_status  # type: ignore[assignment]
             return task
+    for task in _generated_volunteer_tasks():
+        if task.id == task_id:
+            updated = task.model_copy(update={"status": next_status})
+            _upsert_volunteer_task_for_call(updated)
+            return updated
     raise HTTPException(status_code=404, detail="Volunteer task not found")

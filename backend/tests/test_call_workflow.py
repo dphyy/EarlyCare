@@ -748,6 +748,50 @@ class CallWorkflowTests(unittest.TestCase):
             self.assertEqual(main.VOLUNTEER_TASKS[0].priority, "Urgent")
             self.assertEqual(main.VOLUNTEER_TASKS[0].reason, "Updated reason")
 
+    def test_get_volunteer_tasks_derives_from_saved_calls(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            call_dir = root / "call-risk"
+            call_dir.mkdir()
+            call = main.CallRecord(
+                id="call-risk",
+                seniorId="s-001",
+                seniorName="Mdm Tan Bee Hoon",
+                startedAt="2026-07-04T10:00:00+08:00",
+                completedAt="2026-07-04T10:04:00+08:00",
+                status="Complete",
+                riskLevel="Amber",
+                originalTranscript="Patient: I almost fell.",
+                englishTranscript="Patient: I almost fell.",
+                transcriptMessages=[],
+                translationProvider="test",
+                translationFallbackUsed=True,
+                audioAvailable=False,
+                riskSignals=[
+                    main.RiskSignal(
+                        id="risk-fall",
+                        label="Near fall",
+                        severity="Amber",
+                        quotedText="I almost fell.",
+                        reason="Fall risk cue.",
+                    )
+                ],
+                riskAssessment=main._empty_assessment("Amber", ["Patient reported near fall."]),
+                recommendedAction="Arrange same-day volunteer check-in.",
+            )
+            (call_dir / "metadata.json").write_text(call.model_dump_json())
+
+            with patch.object(main, "CALL_STORAGE_ROOT", root), patch.object(main, "VOLUNTEER_TASKS", []):
+                client = TestClient(main.app)
+                response = client.get("/volunteer-tasks")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["id"], "task-call-risk")
+        self.assertEqual(payload[0]["priority"], "Urgent")
+        self.assertEqual(payload[0]["reason"], "Near fall")
+
     def test_save_call_stores_concussion_speech_review(self) -> None:
         messages = [
             {"role": "Agent", "text": "Any fall, headache, or dizziness?", "timestamp": "2026-07-04T10:00:00+08:00"},
@@ -1661,13 +1705,22 @@ class CallWorkflowTests(unittest.TestCase):
 
     def test_update_volunteer_task_accepts_body_status(self) -> None:
         client = TestClient(main.app)
-        original_status = main.VOLUNTEER_TASKS[0].status
+        task = main.VolunteerTask(
+            id="task-test",
+            seniorId="s-001",
+            priority="Today",
+            reason="Check-in",
+            recommendedAction="Call caregiver.",
+            assignedTo="Community volunteer follow-up team",
+            status="Open",
+            createdAt="2026-07-04T10:00:00+08:00",
+        )
 
-        response = client.patch("/volunteer-tasks/t-001", json={"status": "Closed"})
+        with patch.object(main, "VOLUNTEER_TASKS", [task]):
+            response = client.patch("/volunteer-tasks/task-test", json={"status": "Closed"})
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "Closed")
-        main.VOLUNTEER_TASKS[0].status = original_status
 
 
 if __name__ == "__main__":

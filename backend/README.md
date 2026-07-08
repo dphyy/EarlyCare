@@ -12,15 +12,17 @@ FastAPI service for EarlyCare call sessions, call artifact storage, transcriptio
 - Removes bracketed delivery cues such as `[happy]`, `[concerned]`, and `[sighs]`.
 - Uses MERaLiON first for timestamped transcription and audio translation.
 - Falls back to ElevenLabs speech-to-text, Google Translate, and finally the saved dialogue transcript.
-- Saves sanitized provider attempt diagnostics so fallback reasons are visible in `metadata.json` and the dashboard.
+- Saves sanitized provider attempt diagnostics so fallback reasons are visible in `metadata.json` and the Care Desk.
 - Uses OpenAI structured output to detect patient-only risk signals.
 - Uses a separate OpenAI safeguard classifier for patient-stated distress, self-harm, abuse/neglect, unsafe environment, and emergency cues.
 - Extracts dated consultation-memory items from patient-only speech for AIC monitoring and doctor handoff briefs.
 - Reads ElevenLabs `user_emotional_state` data collection results and attaches per-response tone evidence when available.
 - Attaches risk evidence to patient transcript segments and audio seek times.
 - Applies safeguard/tone modifiers to the visible call risk level while preserving the underlying reasons in `riskAssessment`.
-- Scores saved Parkinson voice-feature and concussion speech-abnormality models from `patient-speech.wav` when patient speech is available.
-- Serves saved call metadata and audio to the Patient overview.
+- Scores the saved Parkinson voice-feature model from `patient-speech.wav`, and runs concussion speech review only after patient-stated fall or near-fall evidence.
+- Adds concise model explanation items for Parkinson and concussion review outputs.
+- Generates volunteer tasks from saved non-green or safeguard call records.
+- Serves saved call metadata and audio to the Care Desk.
 
 ## Call Save Flow
 
@@ -38,7 +40,7 @@ When the frontend posts to `POST /calls`, the backend:
 10. Estimates speech profile metrics and patient speech quality for the latest call.
 11. Derives `patient-speech.wav` by finding agent-bounded answer windows, falling back to patient-segment or full-audio VAD when needed, and stitching voiced patient clips from `patient-audio.wav`.
 12. Queries ElevenLabs conversation data collection for `user_emotional_state` and maps tone evidence to patient segments when possible.
-13. Scores the saved Parkinson voice-feature model and saved concussion speech-abnormality model when patient speech is available.
+13. Scores the saved Parkinson voice-feature model and, only when fall or near-fall evidence exists, the saved concussion speech-abnormality model.
 14. Extracts consultation-memory items for falls, medication, meals/fluids, symptoms, pain, sleep, mobility, mood/safety, help-seeking, appointments, and other medical context.
 15. Drops any risk, safeguard, or consultation-memory item that cannot be validated against patient evidence.
 16. Saves `metadata.json`, `transcript-original.json`, `transcript-english.txt`, provider attempt history, consultation memory, and audio.
@@ -144,8 +146,9 @@ Runtime inference scores derived `patient-speech.wav`, which contains stitched v
 
 ### Concussion Speech-Abnormality Review
 
-EarlyCare also runs the bundled speech-abnormality model after each saved call
-when derived patient speech is available.
+EarlyCare runs the bundled speech-abnormality model after each saved call only
+when derived patient speech is available and the patient stated a fall or
+near-fall.
 The backend scores the derived `patient-speech.wav`, saves the structured result
 as `concussionSpeechReview`, and displays it separately from the Parkinsonian
 speech-marker score.
@@ -160,10 +163,17 @@ backend/app/concussion_speech_model
 The checked-in artifacts are only the runtime files needed for inference:
 `model.joblib`, `config.json`, `metrics.json`, and the small vendored
 `speech_abnormality` inference package. Do not push TORGO, VOICED, embedding
-caches, rejected-audio reports, or raw recordings. A fresh machine needs
-the runtime dependencies from `requirements.txt`; on first use,
-Transformers may download the configured WavLM backbone into the user's Hugging
-Face cache unless `HF_HOME` points to an existing local cache.
+caches, rejected-audio reports, raw recordings, or `backend/models/hf_cache/`.
+A fresh machine needs the runtime dependencies from `requirements.txt`, then:
+
+```bash
+backend/.venv/bin/python backend/scripts/cache_wavlm.py
+```
+
+The cache script downloads `microsoft/wavlm-base` into the ignored local
+`backend/models/hf_cache/` directory. Readiness reports WavLM as ready only when
+that cache contains the expected config, preprocessor/feature-extractor config,
+and model weights.
 
 For project-side inference, EarlyCare now contains the adapter, vendored
 inference package, and trained classifier artifacts. The model was trained from
@@ -173,11 +183,9 @@ scikit-learn logistic regression classifier. See the root README References
 section for dataset, model, and classifier citations.
 
 The output labels are research labels only: `normal`, `dysarthria_like`,
-`dysphonia_like`, or `low_audio_quality`. They are not diagnoses. If the patient
-also reports concussion-relevant symptoms such as fall, head impact, headache,
-dizziness, vomiting, confusion, slurred speech, or weakness, an abnormal speech
-result can raise the visible call risk for human review. Without patient-reported
-symptoms, an abnormal speech result raises at most a watch-level review signal.
+`dysphonia_like`, or `low_audio_quality`. They are not diagnoses. If no
+patient-stated fall or near-fall exists, the review is saved as
+`not_applicable` instead of unavailable.
 
 The bundled artifacts come from the `pilot_full` model. The normal-augmented
 model reduces normal false positives but missed too many external
@@ -186,7 +194,7 @@ default.
 
 ## Audio Seeking
 
-For Patient overview verification, risk-signal timestamps are tied to patient segments. The frontend starts playback from immediately after the previous agent question/statement so the caregiver hears the full patient answer in context.
+For Care Desk verification, risk-signal timestamps are tied to patient segments. The frontend starts playback from immediately after the previous agent question/statement so the caregiver hears the full patient answer in context.
 
 The backend stores estimated segment timing for new calls. When precise provider word timestamps are unavailable, it estimates:
 
@@ -254,11 +262,12 @@ Never commit real `.env` files.
 | `GET /calls/{call_id}/patient-speech-audio` | Derived patient-turn-only audio used for saved Parkinson and concussion speech review. |
 | `POST /calls` | Save transcript messages and uploaded audio. |
 | `POST /elevenlabs/signed-url` | Create a signed Agents session URL. |
+| `GET /readiness` | Dependency and local artifact readiness check without exposing secrets. |
 | `GET /checkins` | Demo historical check-ins. |
 | `POST /checkins/start` | Start a demo check-in record. |
 | `POST /checkins/{checkin_id}/audio` | Legacy/demo transcription endpoint. |
 | `POST /checkins/{checkin_id}/complete` | Complete a demo check-in record. |
-| `GET /volunteer-tasks` | Demo volunteer task list. |
+| `GET /volunteer-tasks` | Volunteer tasks generated from saved call metadata, newest first. |
 
 ## Storage
 

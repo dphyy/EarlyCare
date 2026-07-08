@@ -2,7 +2,7 @@
 
 **Preventive care and patient engagement for elderly people living alone.**
 
-EarlyCare is a hackathon prototype for routine wellbeing calls operated as an AIC/community care-coordinator monitoring layer. A patient starts a simulated browser call, an ElevenLabs agent conducts the check-in, the app records the full conversation plus patient-only microphone audio, and the Patient overview shows the recording, original transcript, English transcript, patient-only AI risk highlights, distress safeguard status, tone context, patient speech quality, and a printable Doctor Brief for point-of-care handoff.
+EarlyCare is a hackathon prototype for routine wellbeing calls operated as an AIC/community care-coordinator monitoring layer. A patient starts a simulated browser call, an ElevenLabs agent conducts the check-in, the app records the full conversation plus patient-only microphone audio, and the Care Desk shows the recording, original transcript, English transcript, patient-only AI risk highlights, distress safeguard status, tone context, patient speech quality, and a printable Doctor Brief for point-of-care handoff.
 
 EarlyCare is decision support, not diagnosis. It helps care teams notice risk signals such as falls, dizziness, sickness, confusion, weakness, poor intake, missed check-ins, or requests for help earlier.
 
@@ -13,7 +13,7 @@ EarlyCare is decision support, not diagnosis. It helps care teams notice risk si
 | Agents call | Starts an ElevenLabs Agents-powered browser call from a transcript-free animated call screen. The patient can speak in the language they are comfortable with. |
 | Full-call recording | Requests browser echo cancellation, noise suppression, and auto gain control, then records patient microphone audio and ElevenLabs agent audio into one replayable `full-call.wav`. |
 | Patient-only audio | Saves raw `patient-audio.wav` and derives `patient-speech.wav` by isolating voiced patient answers for saved-model speech review. |
-| Patient overview | Shows saved recordings, translated English transcript, original transcript, patient speech quality, explainable model review cards, risk/safeguard/tone review, and follow-up recommendation. |
+| Care Desk | Shows saved recordings, translated English transcript, original transcript, patient speech quality, explainable model review cards, risk/safeguard/tone review, and follow-up recommendation. |
 | Consultation memory | Extracts dated, evidence-backed patient facts from check-ins, such as falls, medication/meal concerns, symptoms, mood, mobility, sleep, help-seeking, and appointment mentions. |
 | Doctor Brief | Generates a printable one-page **EarlyCare Consultation Brief** for AIC/care coordinators to share before a clinic visit or when risk rises, without asking doctors to manage another dashboard. |
 | Transcription and translation | Uses MERaLiON first, ElevenLabs speech-to-text and Google Translate as fallback, and saved dialogue transcript only as the final demo fallback. |
@@ -23,7 +23,7 @@ EarlyCare is decision support, not diagnosis. It helps care teams notice risk si
 | Audio verification | Clicking a highlighted patient phrase seeks playback to immediately after the previous agent question, so caregivers can hear the patient answer in context. |
 | Patient speech quality | Shows derived patient-speech duration, speech coverage, response latency, speaking rate, Parkinson model readiness, and concussion review readiness. |
 | Model explainability | Shows concise explanation bullets above Parkinson and concussion speech outputs, using top voice-feature signals for Parkinson and probability/audio-quality context for concussion without claiming diagnosis or WavLM feature attribution. |
-| Demo runner | Opens a separate scripted demo view from the top navigation so judges can review curated demo cases without overwriting real saved calls or audio. |
+| Demo | Opens a separate scripted demo view from the top navigation so judges can review curated demo cases and tailored demo volunteer tasks without overwriting real saved calls, audio, or Care Desk tasks. |
 
 ## Workflow
 
@@ -48,23 +48,23 @@ EarlyCare is decision support, not diagnosis. It helps care teams notice risk si
    - provider/fallback metadata and sanitized provider attempt reasons
    - speech profile metrics
    - patient-only audio, derived patient-speech audio, and saved-model quality fields
-7. OpenAI reviews patient speech only and returns structured risk signals when configured; otherwise the dashboard shows manual review status without inline AI highlights.
+7. OpenAI reviews patient speech only and returns structured risk signals when configured; otherwise the Care Desk shows manual review status without inline AI highlights.
 8. A separate OpenAI safeguard review classifies patient-stated distress as `None`, `Support`, `Urgent`, or `Emergency`, attaches exact patient evidence, and can raise the visible risk level.
 9. ElevenLabs data collection is queried for `user_emotional_state`; per-response emotion tags are attached to patient transcript segments when the returned JSON includes response indexes or can be mapped by order.
 10. The backend extracts consultation-memory items from patient speech only. Each item must be backed by exact patient evidence and a dated check-in.
 11. The backend scores derived `patient-speech.wav` with the saved Parkinson voice-feature model and, only after patient-stated fall or near-fall evidence, the saved concussion speech-abnormality model.
 12. Parkinson explanations are generated from the top pitch, jitter, and harmonic/noise feature groups against `feature_reference_ranges.json`.
 13. Concussion explanations summarize applicability, predicted label/probability gap, abnormal-class probability, and audio quality metrics without claiming WavLM feature attribution.
-14. The Patient overview shows a **Patient speech quality** panel for shared audio/model readiness and separate Parkinson/concussion cards for each model's interpretation.
-15. The Patient overview renders the English transcript above the original transcript and highlights risk, safeguard, and tone evidence inline.
-16. The Patient overview includes a printable **EarlyCare Consultation Brief** with patient details, reporting window, risk trend, grouped memory items, exact quotes, and a decision-support disclaimer.
+14. The Care Desk shows a **Patient speech quality** panel for shared audio/model readiness and separate Parkinson/concussion cards for each model's interpretation.
+15. The Care Desk renders the English transcript above the original transcript and highlights risk, safeguard, and tone evidence inline.
+16. The Care Desk includes a printable **EarlyCare Consultation Brief** with patient details, reporting window, risk trend, grouped memory items, exact quotes, and a decision-support disclaimer.
 17. Clicking a highlight plays the saved audio from immediately after the previous agent prompt.
 
 ## Architecture
 
 | Layer | Stack | Role |
 | --- | --- | --- |
-| Frontend | React, Vite, TypeScript | Agents call UI, full-call recording, AIC Patient overview, printable Doctor Brief, inline highlights, audio seeking. |
+| Frontend | React, Vite, TypeScript | Agents call UI, full-call recording, AIC Care Desk, printable Doctor Brief, inline highlights, audio seeking. |
 | Backend | FastAPI, Python | Signed ElevenLabs sessions, call artifact storage, transcription, translation, OpenAI risk/safeguard review, consultation-memory extraction, tone ingestion, Parkinson and concussion speech review. |
 | Voice agent | ElevenLabs Agents React SDK | Live browser voice check-in and live transcript events. |
 | Transcription | MERaLiON, ElevenLabs STT | Primary and fallback speech-to-text. |
@@ -123,29 +123,18 @@ The Parkinson marker score is saved as `parkinsonsSpeechReview.probability` and 
 The backend runs the bundled speech-abnormality model after a call is saved when
 derived patient speech is available and the patient stated a fall or near-fall.
 It scores the derived patient-only speech file, stores the result as
-`concussionSpeechReview`, and shows it in the Patient overview.
+`concussionSpeechReview`, and shows it in the Care Desk.
 
 The repo includes the runtime adapter and vendored inference code under
 `backend/app/concussion_speech_model/`, plus trained pilot artifacts under
 `backend/models/concussion_speech/`. Training datasets, embedding caches, and raw
 TORGO/VOICED files are intentionally not required for local website inference and
-should not be pushed. On a new machine, install `backend/requirements.txt`, then
-pre-cache the configured WavLM backbone locally so demos do not depend on a
-first-run network download:
-
-```bash
-backend/.venv/bin/python backend/scripts/cache_wavlm.py
-```
-
-The script stores Hugging Face files under `backend/models/hf_cache/`, which is
-ignored by git. Backend readiness marks WavLM as ready only when that local cache
-contains the expected config, feature-extractor or preprocessor config, and model
-weights for `microsoft/wavlm-base`. Concussion inference prefers this local cache
-when present.
+should not be pushed. Cache the configured WavLM backbone locally during setup so
+demos do not depend on a first-run network download.
 
 If the patient does not state a fall or near-fall, EarlyCare intentionally skips
 the concussion speech review and records
-`concussionSpeechReview.applicability = "not_applicable"`. The dashboard shows
+`concussionSpeechReview.applicability = "not_applicable"`. The Care Desk shows
 **Not applicable**, not an unavailable model.
 
 This is not concussion detection or diagnosis. The model returns research labels
@@ -244,8 +233,8 @@ Open the Vite URL, usually `http://localhost:5173`.
 
 ### Scripted Judge Demo
 
-1. Click **Demo runner** in the top navigation.
-2. Review the scripted frontend-only demo cases. This view is separate from **Patient overview**, so real saved calls and audio remain untouched.
+1. Click **Demo** in the top navigation.
+2. Review the scripted frontend-only demo cases and tailored demo volunteer tasks. This view is separate from **Care Desk**, so real saved calls, audio, and live tasks remain untouched.
 3. Check the fall escalation case, Parkinson/frailty watch case, safeguard support case, multilingual routine case, and concussion **Not applicable** cases.
 4. Review the model explanation bullets above the Parkinson and concussion outputs.
 5. Click transcript highlights to scroll to supporting patient evidence when demo audio is absent.
@@ -258,7 +247,7 @@ Open the Vite URL, usually `http://localhost:5173`.
 4. Allow microphone permission.
 5. Speak with the agent in any comfortable language.
 6. Click **End & save**.
-7. Open **Patient overview**.
+7. Open **Care Desk**.
 8. Review the full-call recording, English transcript, original transcript, patient speech quality, model review cards, and inline risk/safeguard/tone highlights.
 9. Review or print the **EarlyCare Consultation Brief** as the doctor-facing handoff summary.
 10. Click a highlighted patient phrase to replay the patient answer from immediately after the previous agent question.

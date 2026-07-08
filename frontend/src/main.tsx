@@ -22,7 +22,7 @@ import {
   Grid3X3
 } from "lucide-react";
 import { createElevenLabsSession, fetchCalls, fetchSeniors, fetchSessions, fetchVolunteerTasks, getCallAudioUrl, saveCall } from "./api";
-import { demoCalls } from "./data";
+import { demoCalls, demoVolunteerTasks } from "./data";
 import type {
   CallRecord,
   CheckInSession,
@@ -1484,7 +1484,7 @@ function AgentsCall({
     if (saved.ok) {
       onSavedCall(saved.call);
       setCallState("Complete");
-      setCallMessage("Call saved. Patient overview now shows the saved transcript.");
+      setCallMessage("Call saved. Care Desk now shows the saved transcript.");
     } else {
       setCallState("Failed");
       setCallMessage(`Call ended, but saving to backend failed: ${saved.message}`);
@@ -1624,7 +1624,7 @@ function OfficerDashboard({
       {demoMode && demoScenarioCalls.length ? (
         <section className="demo-scenario-strip" aria-label="Demo scenarios">
           <div>
-            <span className="eyebrow">Demo runner</span>
+            <span className="eyebrow">Demo</span>
             <h2>Scenario Cases</h2>
           </div>
           <div className="demo-scenario-list">
@@ -1680,7 +1680,7 @@ function OfficerDashboard({
       <section className="panel detail-panel">
         <div className="profile-header">
           <div>
-            <span className="eyebrow">Patient overview</span>
+            <span className="eyebrow">Care Desk</span>
             <h2>{selectedSenior.name}</h2>
             <p>
               Lives alone in {selectedSenior.addressZone}. Check-in every {selectedSenior.checkInFrequencyDays} days.
@@ -1907,9 +1907,10 @@ function App() {
     return <div className="loading">Loading EarlyCare...</div>;
   }
 
-  const urgentTasks = loadedTasks.filter((task) => task.priority === "Urgent").length;
-  const openTasks = loadedTasks.filter((task) => task.status !== "Closed").length;
   const visibleCalls = view === "demo" ? demoCalls : loadedCalls;
+  const visibleTasks = view === "demo" ? demoVolunteerTasks : loadedTasks;
+  const urgentTasks = visibleTasks.filter((task) => task.priority === "Urgent").length;
+  const openTasks = visibleTasks.filter((task) => task.status !== "Closed").length;
   const runDemo = () => {
     setSelectedSeniorId("s-001");
     setView("demo");
@@ -1934,11 +1935,11 @@ function App() {
           </button>
           <button className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}>
             <Activity size={18} />
-            Patient overview
+            Care Desk
           </button>
           <button className={view === "demo" ? "active" : ""} onClick={runDemo}>
             <FileText size={18} />
-            Demo runner
+            Demo
           </button>
         </nav>
       </header>
@@ -1974,7 +1975,7 @@ function App() {
         <OfficerDashboard
           seniors={loadedSeniors}
           sessions={loadedSessions}
-          tasks={loadedTasks}
+          tasks={visibleTasks}
           calls={visibleCalls}
           selectedSeniorId={selectedSeniorId}
           setSelectedSeniorId={setSelectedSeniorId}
