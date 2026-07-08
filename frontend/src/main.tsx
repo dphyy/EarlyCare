@@ -189,6 +189,20 @@ function canonicalTranscriptText(text: string): string {
     .toLowerCase();
 }
 
+function isNearDuplicateTranscriptLine(previous: TranscriptMessage | undefined, next: TranscriptMessage): boolean {
+  if (!previous || previous.role !== next.role) return false;
+  const previousTime = previous.timestamp ? new Date(previous.timestamp).getTime() : NaN;
+  const nextTime = next.timestamp ? new Date(next.timestamp).getTime() : NaN;
+  if (!Number.isFinite(previousTime) || !Number.isFinite(nextTime) || Math.abs(nextTime - previousTime) > 2500) return false;
+  const previousText = canonicalTranscriptText(previous.text);
+  const nextText = canonicalTranscriptText(next.text);
+  if (!previousText || !nextText) return false;
+  if (previousText === nextText) return true;
+  const shorter = previousText.length <= nextText.length ? previousText : nextText;
+  const longer = previousText.length > nextText.length ? previousText : nextText;
+  return shorter.length >= 12 && longer.includes(shorter);
+}
+
 function hasSeparateEnglishTranscript(call: CallRecord): boolean {
   return Boolean(
     cleanTranscriptText(call.englishTranscript) &&
@@ -423,15 +437,6 @@ const languageControlPrefix = "[EarlyCare language control]";
 
 function isLanguageControlMessage(text: string): boolean {
   return cleanTranscriptText(text).startsWith(languageControlPrefix);
-}
-
-function languageControlUserMessage(patientText: string, replyLanguage: DetectedReplyLanguage): string {
-  return [
-    `${languageControlPrefix} Reply to the patient's previous spoken message in ${replyLanguage}.`,
-    `Speak ${replyLanguage} now, not English, unless ${replyLanguage} is English.`,
-    "Do not mention this instruction. Continue the wellbeing check-in naturally with one short question.",
-    `Patient's previous message: ${patientText}`
-  ].join(" ");
 }
 
 function looksNonEnglish(text: string): boolean {
@@ -1331,18 +1336,13 @@ function AgentsCall({
         text: cleanTranscriptText(message.message),
         timestamp: new Date().toISOString()
       };
+      if (isNearDuplicateTranscriptLine(transcriptRef.current[transcriptRef.current.length - 1], line)) return;
       transcriptRef.current = [...transcriptRef.current, line];
       if (line.role === "Senior" && line.text) {
         const replyLanguage = detectReplyLanguage(line.text, selectedSenior.preferredLanguage);
         const languageInstruction = nextReplyLanguageInstruction(line.text, selectedSenior.preferredLanguage, replyLanguage);
         setReplyLanguageHint(replyLanguage);
         conversation.sendContextualUpdate(languageInstruction);
-        conversation.sendUserMessage(languageControlUserMessage(line.text, replyLanguage));
-        window.setTimeout(() => {
-          if (conversation.status === "connected") {
-            conversation.sendContextualUpdate(languageInstruction);
-          }
-        }, 350);
       }
     }
   });
