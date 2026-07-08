@@ -11,7 +11,7 @@ import numpy as np
 
 from fastapi.testclient import TestClient
 
-from app import main, providers
+from app import main, providers, readiness
 from app.models import ParkinsonsSpeechReview, ProviderResult, TranscriptSegment, TranscriptionAttempt
 
 
@@ -1668,7 +1668,29 @@ class CallWorkflowTests(unittest.TestCase):
         self.assertTrue(payload["components"])
         component_names = {component["name"] for component in payload["components"]}
         self.assertIn("Operator auth", component_names)
+        self.assertIn("Storage persistence", component_names)
         self.assertIn("SQLite metadata store", component_names)
+
+    def test_readiness_reports_temporary_storage_as_degraded(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            report = main.readiness_report(Path(temp_dir), Path(temp_dir) / "calls")
+
+        persistence = next(component for component in report["components"] if component["name"] == "Storage persistence")
+        self.assertEqual(persistence["status"], "degraded")
+        self.assertIn("temporary storage", persistence["detail"].lower())
+
+    def test_readiness_reports_mounted_storage_as_ready(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            storage_root = Path(temp_dir) / "storage"
+            with (
+                patch.dict(main.os.environ, {"EARLYCARE_STORAGE_ROOT": str(storage_root)}),
+                patch.object(readiness, "_is_under_path", return_value=False),
+                patch.object(readiness.Path, "is_mount", return_value=True),
+            ):
+                report = main.readiness_report(Path(temp_dir), storage_root / "calls")
+
+        persistence = next(component for component in report["components"] if component["name"] == "Storage persistence")
+        self.assertEqual(persistence["status"], "ready")
 
     def test_readiness_reports_wavlm_degraded_when_local_cache_incomplete(self) -> None:
         with TemporaryDirectory() as temp_dir:

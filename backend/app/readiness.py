@@ -36,6 +36,39 @@ def _storage_component(storage_root: Path) -> dict[str, str]:
         return _component("Local call storage", "blocked", f"Not writable: {exc.__class__.__name__}.")
 
 
+def _is_under_path(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _storage_persistence_component(call_storage_root: Path) -> dict[str, str]:
+    storage_root = call_storage_root.parent if call_storage_root.name == "calls" else call_storage_root
+    configured_storage_root = os.getenv("EARLYCARE_STORAGE_ROOT")
+    temp_roots = [Path(tempfile.gettempdir()), Path("/tmp"), Path("/var/tmp")]
+    if any(_is_under_path(storage_root, temp_root) for temp_root in temp_roots):
+        return _component(
+            "Storage persistence",
+            "degraded",
+            f"Using temporary storage at {storage_root}; saved SQLite/audio data can disappear on redeploy or restart.",
+        )
+    if not configured_storage_root:
+        return _component(
+            "Storage persistence",
+            "degraded",
+            "EARLYCARE_STORAGE_ROOT is not configured; set it to the mounted Render disk path for production.",
+        )
+    if storage_root.is_mount():
+        return _component("Storage persistence", "ready", f"{storage_root} is mounted as a filesystem.")
+    return _component(
+        "Storage persistence",
+        "degraded",
+        f"{storage_root} is configured, but this process cannot verify that it is a mounted persistent disk.",
+    )
+
+
 def _sqlite_component(call_storage_root: Path) -> dict[str, str]:
     default_root = call_storage_root.parent if call_storage_root.name == "calls" else call_storage_root
     database_path = Path(os.getenv("EARLYCARE_DB_PATH", default_root / "earlycare.sqlite3"))
@@ -113,6 +146,7 @@ def readiness_report(backend_root: Path, call_storage_root: Path) -> dict[str, o
         _env_component("MERaLiON transcription", ["MERALION_API_KEY"]),
         _env_component("Google Translate fallback", ["GOOGLE_TRANSLATE_API_KEY"]),
         _auth_component(),
+        _storage_persistence_component(call_storage_root),
         _storage_component(call_storage_root),
         _sqlite_component(call_storage_root),
         _artifact_component(
