@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import tempfile
 from pathlib import Path
 from typing import Literal
@@ -33,6 +34,29 @@ def _storage_component(storage_root: Path) -> dict[str, str]:
         return _component("Local call storage", "ready", "Writable.")
     except Exception as exc:
         return _component("Local call storage", "blocked", f"Not writable: {exc.__class__.__name__}.")
+
+
+def _sqlite_component(call_storage_root: Path) -> dict[str, str]:
+    default_root = call_storage_root.parent if call_storage_root.name == "calls" else call_storage_root
+    database_path = Path(os.getenv("EARLYCARE_DB_PATH", default_root / "earlycare.sqlite3"))
+    try:
+        database_path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(database_path) as connection:
+            connection.execute("CREATE TABLE IF NOT EXISTS readiness_probe (id INTEGER PRIMARY KEY, checked_at TEXT NOT NULL)")
+            connection.execute("INSERT INTO readiness_probe (checked_at) VALUES (datetime('now'))")
+            connection.execute("DELETE FROM readiness_probe WHERE id NOT IN (SELECT MAX(id) FROM readiness_probe)")
+        return _component("SQLite metadata store", "ready", "Writable.")
+    except Exception as exc:
+        return _component("SQLite metadata store", "blocked", f"Not writable: {exc.__class__.__name__}.")
+
+
+def _auth_component() -> dict[str, str]:
+    if os.getenv("EARLYCARE_AUTH_DISABLED", "").strip().lower() in {"1", "true", "yes"}:
+        return _component("Operator auth", "degraded", "Disabled by EARLYCARE_AUTH_DISABLED.")
+    missing = [env_name for env_name in ["EARLYCARE_OPERATOR_PASSWORD", "EARLYCARE_AUTH_SECRET"] if not os.getenv(env_name)]
+    if missing:
+        return _component("Operator auth", "degraded", f"Missing {', '.join(missing)}.")
+    return _component("Operator auth", "ready", "Configured.")
 
 
 def _artifact_component(name: str, root: Path, required_files: list[str]) -> dict[str, str]:
@@ -88,7 +112,9 @@ def readiness_report(backend_root: Path, call_storage_root: Path) -> dict[str, o
         _env_component("OpenAI structured review", ["OPENAI_API_KEY"]),
         _env_component("MERaLiON transcription", ["MERALION_API_KEY"]),
         _env_component("Google Translate fallback", ["GOOGLE_TRANSLATE_API_KEY"]),
+        _auth_component(),
         _storage_component(call_storage_root),
+        _sqlite_component(call_storage_root),
         _artifact_component(
             "Parkinson speech marker",
             backend_root / "models" / "parkinsons_speech",

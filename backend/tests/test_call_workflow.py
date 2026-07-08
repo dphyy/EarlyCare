@@ -1649,6 +1649,8 @@ class CallWorkflowTests(unittest.TestCase):
                         "OPENAI_API_KEY": "secret-openai",
                         "MERALION_API_KEY": "secret-meralion",
                         "GOOGLE_TRANSLATE_API_KEY": "secret-google",
+                        "EARLYCARE_OPERATOR_PASSWORD": "secret-password",
+                        "EARLYCARE_AUTH_SECRET": "secret-auth",
                     },
                 ),
             ):
@@ -1661,7 +1663,12 @@ class CallWorkflowTests(unittest.TestCase):
         serialized = json.dumps(payload)
         self.assertNotIn("secret-eleven", serialized)
         self.assertNotIn("secret-openai", serialized)
+        self.assertNotIn("secret-password", serialized)
+        self.assertNotIn("secret-auth", serialized)
         self.assertTrue(payload["components"])
+        component_names = {component["name"] for component in payload["components"]}
+        self.assertIn("Operator auth", component_names)
+        self.assertIn("SQLite metadata store", component_names)
 
     def test_readiness_reports_wavlm_degraded_when_local_cache_incomplete(self) -> None:
         with TemporaryDirectory() as temp_dir:
