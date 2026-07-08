@@ -173,6 +173,76 @@ nav button.active,
   font-size: 28px;
 }
 
+.demo-credentials {
+  background: #f8faf5;
+  border: 1px solid #d8dfd0;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.demo-credentials-header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.demo-credentials-header span {
+  color: #667065;
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.demo-credentials-header strong {
+  color: #17201a;
+  display: block;
+  font-size: 14px;
+}
+
+.demo-credentials textarea {
+  background: #ffffff;
+  border: 1px solid #cfd8c8;
+  border-radius: 8px;
+  color: #17201a;
+  font: inherit;
+  min-height: 74px;
+  padding: 10px 12px;
+  resize: none;
+  width: 100%;
+}
+
+.demo-credentials p {
+  color: #9c2619;
+  font-size: 12px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.icon-text-action {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #cfd8c8;
+  border-radius: 8px;
+  color: #16453f;
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 6px;
+  min-height: 36px;
+  padding: 8px 10px;
+}
+
+.fill-demo-action {
+  justify-content: center;
+  min-height: 40px;
+}
+
 .login-form {
   display: grid;
   gap: 14px;

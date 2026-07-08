@@ -8,6 +8,7 @@ import {
   Brain,
   CalendarClock,
   CheckCircle2,
+  Copy,
   FileText,
   HeartPulse,
   Languages,
@@ -46,6 +47,9 @@ const riskOrder: Record<RiskLevel, number> = { Green: 0, Watch: 1, Amber: 2, Red
 type AppView = "call" | "dashboard" | "demo";
 type CallState = "Ready" | "Connecting" | "In call" | "Saving" | "Analysing" | "Complete" | "Failed";
 type AgentAudioFormat = "pcm_8000" | "pcm_16000" | "pcm_22050" | "pcm_24000" | "pcm_44100" | "pcm_48000" | "ulaw_8000";
+const demoOperatorUsername = "operator";
+const demoOperatorPassword = "earlycare-demo";
+const demoOperatorCredentials = `Username: ${demoOperatorUsername}\nPassword: ${demoOperatorPassword}`;
 const singaporeCrisisResources: CrisisResource[] = [
   {
     name: "Emergency medical services",
@@ -1911,10 +1915,11 @@ function OfficerDashboard({
 }
 
 function OperatorLogin({ onAuthenticated }: { onAuthenticated: (status: AuthStatus) => Promise<void> }) {
-  const [username, setUsername] = useState("operator");
+  const [username, setUsername] = useState(demoOperatorUsername);
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
 
   const submitLogin = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1927,6 +1932,21 @@ function OperatorLogin({ onAuthenticated }: { onAuthenticated: (status: AuthStat
       setError(nextError instanceof Error ? nextError.message : "Unable to sign in.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const fillDemoCredentials = () => {
+    setUsername(demoOperatorUsername);
+    setPassword(demoOperatorPassword);
+    setError(null);
+  };
+
+  const copyDemoCredentials = async () => {
+    try {
+      await navigator.clipboard.writeText(demoOperatorCredentials);
+      setCopyState("copied");
+    } catch {
+      setCopyState("failed");
     }
   };
 
@@ -1948,6 +1968,24 @@ function OperatorLogin({ onAuthenticated }: { onAuthenticated: (status: AuthStat
             <span className="eyebrow">Operator Access</span>
             <h1>Sign in to Care Desk</h1>
           </div>
+        </div>
+        <div className="demo-credentials" aria-label="Demo operator credentials">
+          <div className="demo-credentials-header">
+            <div>
+              <span>Judges demo login</span>
+              <strong>Copy or fill these credentials</strong>
+            </div>
+            <button className="icon-text-action" onClick={copyDemoCredentials} type="button">
+              <Copy size={16} />
+              {copyState === "copied" ? "Copied" : "Copy"}
+            </button>
+          </div>
+          <textarea aria-label="Demo login credentials" readOnly value={demoOperatorCredentials} />
+          <button className="secondary-action fill-demo-action" onClick={fillDemoCredentials} type="button">
+            <UserRoundCheck size={16} />
+            Fill login fields
+          </button>
+          {copyState === "failed" ? <p>Copy blocked by the browser. Select the text box instead.</p> : null}
         </div>
         <form className="login-form" onSubmit={submitLogin}>
           <label>
