@@ -60,10 +60,29 @@ render login
 render blueprints validate render.yaml --confirm -o text
 render services -o text
 render deploys create <service-id> --commit <commit-sha> --wait -o text
-render logs <service-id> -o text
+render logs --resources <service-id> -o text
 ```
 
 Blueprint validation and service operations require a logged-in Render CLI session.
+
+If Render cannot access the GitHub repo through its GitHub integration, deploy a prebuilt image instead:
+
+```bash
+docker buildx build --platform linux/amd64 -t <registry>/earlycare:<tag> --push .
+render services create \
+  --name earlycare \
+  --type web_service \
+  --image <registry>/earlycare:<tag> \
+  --plan free \
+  --region oregon \
+  --health-check-path /health \
+  --env-var EARLYCARE_STORAGE_ROOT=/tmp/earlycare \
+  --env-var EARLYCARE_FRONTEND_DIST=/app/frontend/dist \
+  --confirm \
+  -o json
+```
+
+Use a durable registry such as GHCR for repeatable deploys. A short-lived public registry is acceptable only for same-day demos because later redeploys need the image to remain pullable.
 
 ## Post-Deploy Smoke Test
 
