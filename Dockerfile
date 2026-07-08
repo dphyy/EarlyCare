@@ -23,8 +23,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential ffmpeg libsndfile1 curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY backend/requirements.txt ./backend/requirements.txt
-RUN pip install --no-cache-dir -r backend/requirements.txt
+COPY backend/requirements-deploy.txt ./backend/requirements-deploy.txt
+RUN pip install --no-cache-dir -r backend/requirements-deploy.txt
 
 COPY backend ./backend
 COPY --from=frontend /app/frontend/dist ./frontend/dist

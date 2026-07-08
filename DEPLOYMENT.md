@@ -9,11 +9,14 @@ EarlyCare is deployed as one Render web service. FastAPI serves the API and the 
 - Runtime: Docker
 - App command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT --app-dir /app/backend`
 - Frontend: Vite build copied into `/app/frontend/dist`
+- Python deps: `backend/requirements-deploy.txt` for a lean demo image
 - Demo data: `/tmp/earlycare` on Render free instances
 - SQLite: `/tmp/earlycare/earlycare.sqlite3`
 - Audio/transcripts: `/tmp/earlycare/calls`
 
 Persistent disks require a paid Render web service. The checked-in `render.yaml` uses free ephemeral storage so the hackathon demo can go live without payment info. For durable storage, switch the plan to `starter`, set `EARLYCARE_STORAGE_ROOT=/var/data/earlycare`, and add a disk mounted at `/var/data/earlycare`.
+
+The deploy image intentionally excludes WavLM/Torch/Transformers to avoid multi-GB CUDA wheels on the free Render path. The app still runs, and concussion speech review reports unavailable/degraded when those optional model dependencies are absent.
 
 ## Required Render Environment Variables
 
