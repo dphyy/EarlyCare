@@ -2,6 +2,7 @@ import os
 import json
 import mimetypes
 import re
+import sqlite3
 import time
 import wave
 from pathlib import Path
@@ -51,7 +52,8 @@ from app.readiness import readiness_report
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
-CALL_STORAGE_ROOT = BACKEND_ROOT / "storage" / "calls"
+STORAGE_ROOT = Path(os.getenv("EARLYCARE_STORAGE_ROOT", BACKEND_ROOT / "storage"))
+CALL_STORAGE_ROOT = Path(os.getenv("EARLYCARE_CALL_STORAGE_ROOT", STORAGE_ROOT / "calls"))
 PARKINSONS_SPEECH_MODEL_ARTIFACT_ROOT = BACKEND_ROOT / "models" / "parkinsons_speech"
 FRONTEND_DIST_ROOT = Path(os.getenv("EARLYCARE_FRONTEND_DIST", BACKEND_ROOT.parent / "frontend" / "dist"))
 app = FastAPI(title="EarlyCare API", version="0.1.0")
@@ -148,6 +150,144 @@ def _now_iso() -> str:
 
 def _call_metadata_path(call_id: str) -> Path:
     return CALL_STORAGE_ROOT / call_id / "metadata.json"
+
+
+def _database_path() -> Path:
+    default_root = CALL_STORAGE_ROOT.parent if CALL_STORAGE_ROOT.name == "calls" else CALL_STORAGE_ROOT
+    return Path(os.getenv("EARLYCARE_DB_PATH", default_root / "earlycare.sqlite3"))
+
+
+def _connect_database() -> sqlite3.Connection:
+    path = _database_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def _ensure_database() -> None:
+    with _connect_database() as connection:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS calls (
+                id TEXT PRIMARY KEY,
+                senior_id TEXT NOT NULL,
+                completed_at TEXT NOT NULL,
+                risk_level TEXT NOT NULL,
+                metadata_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS volunteer_task_status (
+                task_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+
+
+def _upsert_call_index(call: CallRecord) -> None:
+    _ensure_database()
+    with _connect_database() as connection:
+        connection.execute(
+            """
+            INSERT INTO calls (id, senior_id, completed_at, risk_level, metadata_json, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                senior_id=excluded.senior_id,
+                completed_at=excluded.completed_at,
+                risk_level=excluded.risk_level,
+                metadata_json=excluded.metadata_json,
+                updated_at=excluded.updated_at
+            """,
+            (call.id, call.seniorId, call.completedAt, call.riskLevel, call.model_dump_json(indent=2), _now_iso()),
+        )
+
+
+def _persist_call_record(call: CallRecord) -> None:
+    _call_metadata_path(call.id).write_text(call.model_dump_json(indent=2))
+    _upsert_call_index(call)
+
+
+def _load_indexed_call_records() -> list[CallRecord]:
+    try:
+        _ensure_database()
+        with _connect_database() as connection:
+            rows = connection.execute("SELECT metadata_json FROM calls ORDER BY completed_at DESC").fetchall()
+    except sqlite3.Error:
+        return []
+
+    records: list[CallRecord] = []
+    for row in rows:
+        try:
+            records.append(CallRecord.model_validate_json(row["metadata_json"]))
+        except Exception:
+            continue
+    return records
+
+
+def _load_indexed_call_record(call_id: str) -> CallRecord | None:
+    try:
+        _ensure_database()
+        with _connect_database() as connection:
+            row = connection.execute("SELECT metadata_json FROM calls WHERE id = ?", (call_id,)).fetchone()
+    except sqlite3.Error:
+        return None
+    if row is None:
+        return None
+    try:
+        return CallRecord.model_validate_json(row["metadata_json"])
+    except Exception:
+        return None
+
+
+def _load_call_records_from_files() -> list[CallRecord]:
+    if not CALL_STORAGE_ROOT.exists():
+        return []
+    records: list[CallRecord] = []
+    for path in CALL_STORAGE_ROOT.glob("*/metadata.json"):
+        try:
+            records.append(_load_call_record(path))
+        except Exception:
+            continue
+    return records
+
+
+def _load_all_call_records() -> list[CallRecord]:
+    records_by_id = {record.id: record for record in _load_indexed_call_records()}
+    for record in _load_call_records_from_files():
+        records_by_id[record.id] = record
+        _upsert_call_index(record)
+    return sorted(records_by_id.values(), key=lambda record: record.completedAt, reverse=True)
+
+
+def _persist_volunteer_task_status(task: VolunteerTask) -> None:
+    _ensure_database()
+    with _connect_database() as connection:
+        connection.execute(
+            """
+            INSERT INTO volunteer_task_status (task_id, status, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(task_id) DO UPDATE SET
+                status=excluded.status,
+                updated_at=excluded.updated_at
+            """,
+            (task.id, task.status, _now_iso()),
+        )
+
+
+def _load_volunteer_task_statuses() -> dict[str, str]:
+    try:
+        _ensure_database()
+        with _connect_database() as connection:
+            rows = connection.execute("SELECT task_id, status FROM volunteer_task_status").fetchall()
+    except sqlite3.Error:
+        return {}
+    return {row["task_id"]: row["status"] for row in rows}
 
 
 def _audio_upload_extension(audio: UploadFile) -> str:
@@ -1236,8 +1376,10 @@ def _upsert_volunteer_task_for_call(task: VolunteerTask | None) -> None:
     for index, existing in enumerate(VOLUNTEER_TASKS):
         if existing.id == task.id:
             VOLUNTEER_TASKS[index] = task
+            _persist_volunteer_task_status(task)
             return
     VOLUNTEER_TASKS.insert(0, task)
+    _persist_volunteer_task_status(task)
 
 
 def _volunteer_task_from_record(record: CallRecord) -> VolunteerTask | None:
@@ -1276,15 +1418,14 @@ def _volunteer_task_from_record(record: CallRecord) -> VolunteerTask | None:
 
 def _generated_volunteer_tasks() -> list[VolunteerTask]:
     tasks_by_id: dict[str, VolunteerTask] = {}
-    if CALL_STORAGE_ROOT.exists():
-        for path in CALL_STORAGE_ROOT.glob("*/metadata.json"):
-            try:
-                record = _load_call_record(path)
-            except Exception:
-                continue
-            task = _volunteer_task_from_record(record)
-            if task is not None:
-                tasks_by_id[task.id] = task
+    for record in _load_all_call_records():
+        task = _volunteer_task_from_record(record)
+        if task is not None:
+            tasks_by_id[task.id] = task
+    persisted_statuses = _load_volunteer_task_statuses()
+    for task_id, status in persisted_statuses.items():
+        if task_id in tasks_by_id:
+            tasks_by_id[task_id] = tasks_by_id[task_id].model_copy(update={"status": status})
     for task in VOLUNTEER_TASKS:
         existing = tasks_by_id.get(task.id)
         tasks_by_id[task.id] = task if existing is None else existing.model_copy(update={"status": task.status})
@@ -2009,7 +2150,12 @@ def _load_call_record(path: Path) -> CallRecord:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "product": "EarlyCare"}
+    return {
+        "status": "ok",
+        "product": "EarlyCare",
+        "storageRoot": str(CALL_STORAGE_ROOT.parent),
+        "database": str(_database_path()),
+    }
 
 
 @app.get("/readiness")
@@ -2037,28 +2183,25 @@ def get_checkins() -> list[CheckInSession]:
 
 @app.get("/calls", response_model=list[CallRecord])
 def get_calls() -> list[CallRecord]:
-    if not CALL_STORAGE_ROOT.exists():
-        return []
-    records = [_load_call_record(path) for path in CALL_STORAGE_ROOT.glob("*/metadata.json")]
-    return sorted(records, key=lambda record: record.completedAt, reverse=True)
+    return _load_all_call_records()
 
 
 @app.get("/calls/{call_id}", response_model=CallRecord)
 def get_call(call_id: str) -> CallRecord:
     path = _call_metadata_path(call_id)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="Call not found")
-    return _load_call_record(path)
+    if path.exists():
+        return _load_call_record(path)
+    record = _load_indexed_call_record(call_id)
+    if record is not None:
+        return record
+    raise HTTPException(status_code=404, detail="Call not found")
 
 
 @app.get("/seniors/{senior_id}/consultation-memory", response_model=list[ConsultationMemoryItem])
 def get_consultation_memory(senior_id: str) -> list[ConsultationMemoryItem]:
     get_senior(senior_id)
-    if not CALL_STORAGE_ROOT.exists():
-        return []
     items: list[ConsultationMemoryItem] = []
-    for path in CALL_STORAGE_ROOT.glob("*/metadata.json"):
-        record = _load_call_record(path)
+    for record in _load_all_call_records():
         if record.seniorId == senior_id:
             items.extend(record.consultationMemory)
     return sorted(items, key=lambda item: item.recordedAt, reverse=True)
@@ -2394,7 +2537,7 @@ async def save_call(
             completed_at_value,
         )
     )
-    _call_metadata_path(call_id).write_text(call.model_dump_json(indent=2))
+    _persist_call_record(call)
     return SavedCallResponse(call=call)
 
 
@@ -2429,6 +2572,7 @@ def update_volunteer_task(task_id: str, status: str | None = None, payload: Volu
     for task in VOLUNTEER_TASKS:
         if task.id == task_id:
             task.status = next_status  # type: ignore[assignment]
+            _persist_volunteer_task_status(task)
             return task
     for task in _generated_volunteer_tasks():
         if task.id == task_id:

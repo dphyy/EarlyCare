@@ -1703,6 +1703,92 @@ class CallWorkflowTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
 
+    def test_save_call_is_recoverable_from_sqlite_index(self) -> None:
+        messages = [
+            {"role": "Agent", "text": "How are you?", "timestamp": "2026-07-04T10:00:00+08:00"},
+            {"role": "Senior", "text": "I am okay.", "timestamp": "2026-07-04T10:00:04+08:00"},
+        ]
+        provider_result = ProviderResult(
+            provider="fallback",
+            language="English",
+            transcript="Agent: How are you?\nPatient: I am okay.",
+            translation="Agent: How are you?\nPatient: I am okay.",
+            confidence=0.5,
+            fallbackUsed=True,
+        )
+
+        with TemporaryDirectory() as temp_dir:
+            storage_root = Path(temp_dir) / "calls"
+            with (
+                patch.object(main, "CALL_STORAGE_ROOT", storage_root),
+                patch.object(main, "transcribe_with_fallback", return_value=provider_result),
+                patch.object(main, "_openai_risk_review", return_value=main._manual_risk_review()),
+                patch.object(main, "_parkinsons_speech_review", return_value=ParkinsonsSpeechReview(qualityOk=False, warnings=[], featuresSummary=None)),
+            ):
+                client = TestClient(main.app)
+                save_response = client.post(
+                    "/calls",
+                    data={
+                        "seniorId": "s-001",
+                        "status": "Complete",
+                        "startedAt": "2026-07-04T10:00:00+08:00",
+                        "completedAt": "2026-07-04T10:01:00+08:00",
+                        "transcriptMessages": json.dumps(messages),
+                    },
+                )
+                self.assertEqual(save_response.status_code, 200)
+                call_id = save_response.json()["call"]["id"]
+                (storage_root / call_id / "metadata.json").unlink()
+
+                list_response = client.get("/calls")
+
+            self.assertTrue((Path(temp_dir) / "earlycare.sqlite3").exists())
+
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_response.json()[0]["id"], call_id)
+
+    def test_volunteer_task_status_persists_in_sqlite(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "calls"
+            call_dir = root / "call-risk"
+            call_dir.mkdir(parents=True)
+            call = main.CallRecord(
+                id="call-risk",
+                seniorId="s-001",
+                seniorName="Mdm Tan Bee Hoon",
+                startedAt="2026-07-04T10:00:00+08:00",
+                completedAt="2026-07-04T10:04:00+08:00",
+                status="Complete",
+                riskLevel="Amber",
+                originalTranscript="Patient: I almost fell.",
+                englishTranscript="Patient: I almost fell.",
+                transcriptMessages=[],
+                translationProvider="test",
+                translationFallbackUsed=True,
+                audioAvailable=False,
+                riskSignals=[
+                    main.RiskSignal(
+                        id="risk-fall",
+                        label="Near fall",
+                        severity="Amber",
+                        quotedText="I almost fell.",
+                        reason="Fall risk cue.",
+                    )
+                ],
+                riskAssessment=main._empty_assessment("Amber", ["Patient reported near fall."]),
+                recommendedAction="Arrange same-day volunteer check-in.",
+            )
+            (call_dir / "metadata.json").write_text(call.model_dump_json())
+
+            with patch.object(main, "CALL_STORAGE_ROOT", root), patch.object(main, "VOLUNTEER_TASKS", []):
+                client = TestClient(main.app)
+                patch_response = client.patch("/volunteer-tasks/task-call-risk", json={"status": "Closed"})
+                list_response = client.get("/volunteer-tasks")
+
+        self.assertEqual(patch_response.status_code, 200)
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_response.json()[0]["status"], "Closed")
+
     def test_update_volunteer_task_accepts_body_status(self) -> None:
         client = TestClient(main.app)
         task = main.VolunteerTask(
