@@ -1569,6 +1569,16 @@ h3 {
   border-color: #f0c4bd;
 }
 
+.task-evidence {
+  background: rgba(255, 255, 255, 0.72);
+  border-left: 3px solid #b9802f;
+  border-radius: 6px;
+  color: #59452d;
+  font-size: 0.88rem;
+  margin: 10px 0;
+  padding: 8px 10px;
+}
+
 .transcript-stack {
   display: grid;
   gap: 12px;

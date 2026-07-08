@@ -92,6 +92,12 @@ interface TranscriptHighlight {
   transcriptSegmentIndex?: number | null;
 }
 
+const transcriptHighlightPriority: Record<TranscriptHighlight["kind"], number> = {
+  safeguard: 0,
+  risk: 1,
+  emotion: 2
+};
+
 type DemoScenarioKind = "fall" | "speech" | "routine";
 
 function demoScenarioMeta(call: CallRecord): { title: string; cue: string; kind: DemoScenarioKind } {
@@ -678,7 +684,7 @@ function HighlightedEnglishTranscript({
     sentenceIndex: signal.sentenceIndex
   }));
   const emotionHighlights = emotionHighlightsForCall(call);
-  const highlights = [...safeguardHighlightsForCall(call, segments, patientSegments), ...emotionHighlights, ...riskHighlights];
+  const highlights = [...safeguardHighlightsForCall(call, segments, patientSegments), ...riskHighlights, ...emotionHighlights];
 
   return (
     <div className="highlighted-transcript">
@@ -699,7 +705,7 @@ function HighlightedEnglishTranscript({
             highlightItem.transcriptSegmentIndex === segmentIndex ||
             (!exactPatientMatchExists && highlightItem.sentenceIndex === patientIndex)
           );
-        });
+        }).sort((a, b) => transcriptHighlightPriority[a.kind] - transcriptHighlightPriority[b.kind]);
 
         if (!matches.length || !text) {
           return <p key={`${call.id}-segment-${segmentIndex}`}>{text}</p>;
@@ -1050,6 +1056,24 @@ function safeguardResourceText(call: CallRecord): string | null {
 
 function visibleAssessmentReasons(call: CallRecord): string[] {
   return call.riskAssessment.reasons.filter((reason) => !reason.toLowerCase().startsWith("safeguard review flagged"));
+}
+
+function compactEvidenceText(text: string): string {
+  const cleaned = cleanTranscriptText(text);
+  if (cleaned.length <= 160) return cleaned;
+  return `${cleaned.slice(0, 157).trim()}...`;
+}
+
+function volunteerTaskEvidence(task: VolunteerTask, calls: CallRecord[]): string | null {
+  const relatedCall = calls.find((call) => task.id === `task-${call.id}`);
+  if (!relatedCall) return null;
+  const firstSignal = relatedCall.riskSignals?.[0];
+  const evidence =
+    firstSignal?.highlightText ||
+    firstSignal?.quotedText ||
+    relatedCall.safeguardEvidence?.[0] ||
+    visibleAssessmentReasons(relatedCall)[0];
+  return evidence ? compactEvidenceText(evidence) : null;
 }
 
 function callReviewStatus(call: CallRecord): string {
@@ -1868,16 +1892,20 @@ function OfficerDashboard({
           <h3>Volunteer Tasks</h3>
           <div className="task-list">
             {selectedTasks.length ? (
-              selectedTasks.map((task) => (
-                <article key={task.id} className="task-card">
-                  <span className={`priority priority-${task.priority.toLowerCase()}`}>{task.priority}</span>
-                  <strong>{task.reason}</strong>
-                  <p>{task.recommendedAction}</p>
-                  <small>
-                    {task.assignedTo} · {task.status}
-                  </small>
-                </article>
-              ))
+              selectedTasks.map((task) => {
+                const evidence = volunteerTaskEvidence(task, selectedCalls);
+                return (
+                  <article key={task.id} className="task-card">
+                    <span className={`priority priority-${task.priority.toLowerCase()}`}>{task.priority}</span>
+                    <strong>{task.reason}</strong>
+                    <p>{task.recommendedAction}</p>
+                    {evidence ? <p className="task-evidence">Evidence: &ldquo;{evidence}&rdquo;</p> : null}
+                    <small>
+                      {task.assignedTo} · {task.status}
+                    </small>
+                  </article>
+                );
+              })
             ) : (
               <p className="empty-state">No open task for this senior.</p>
             )}
