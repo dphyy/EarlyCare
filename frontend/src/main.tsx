@@ -378,12 +378,16 @@ function multilingualAgentPrompt(senior: Senior): string {
   return [
     "You are EarlyCare, a calm and respectful wellbeing check-in voice agent for elderly people living alone in Singapore.",
     `You are calling ${senior.name}. The patient profile language is ${senior.preferredLanguage}, but the patient may speak English, Mandarin, Malay, Tamil, Hindi, Singlish, Hokkien, Cantonese, Teochew, or a mix of languages.`,
+    "Turn-taking is strict: speak once, then stop and wait for the patient to answer before continuing.",
+    "Never answer your own question. Never ask the next checklist question until the patient has responded to the current one.",
+    "If there is silence, wait. Do not continue the checklist unless the platform sends a real patient message.",
+    "Each assistant turn must contain at most one short question.",
     "Language behavior: for every spoken reply, use the language or language mix from the patient's most recent message.",
     "If the patient changes language, switch in your next reply. If they code-switch, mirror naturally.",
     "Do not force English and do not translate the patient's message before responding unless the patient asks for translation.",
     "If unsure, use simple Singapore English.",
     "If a contextual update says 'Reply language for next turn', treat it as a hard instruction for the next spoken response.",
-    "Ask one short question at a time. Keep replies warm, clear, and brief. If the patient seems confused, ask simpler yes/no questions.",
+    "Keep replies warm, clear, and brief. If the patient seems confused, ask simpler yes/no questions.",
     "Check general wellbeing, food, water, medication, falls or near-falls, head impact, headache, vomiting, blurred vision, unusual sleepiness, weakness, numbness, trouble speaking, whether they need help now, and final concerns.",
     "If the patient expresses immediate danger, suicidal intent, severe distress, abuse, or urgent medical symptoms, stay calm, do not diagnose, encourage emergency help or a trusted nearby person, and mention Singapore emergency services 995/999 or crisis support 1767 where appropriate.",
     "If the patient reports a fall with head impact, confusion, vomiting, severe headache, weakness, numbness, or trouble speaking, say: Thank you for telling me. This may be a possible concern, so EarlyCare will recommend urgent volunteer or caregiver follow-up.",
@@ -428,14 +432,13 @@ function detectReplyLanguage(text: string, profileLanguage: string): DetectedRep
   return "English";
 }
 
-function nextReplyLanguageInstruction(patientText: string, profileLanguage: string, replyLanguage = detectReplyLanguage(patientText, profileLanguage)): string {
+function nextReplyLanguageInstruction(_patientText: string, profileLanguage: string, replyLanguage = detectReplyLanguage(_patientText, profileLanguage)): string {
   return [
     `Reply language for next turn: ${replyLanguage}.`,
     `For your next spoken reply only, speak in ${replyLanguage}. Do not answer in ${profileLanguage} unless the reply language above is also ${profileLanguage}.`,
     `If the patient's latest message mixes languages, mirror that mix naturally while keeping the main spoken reply in ${replyLanguage}.`,
     "Do not translate their response into English before replying.",
-    "Keep the same medical check-in intent, but phrase it naturally in the reply language.",
-    `Previous patient response: ${patientText}`
+    "Keep the same medical check-in intent, ask at most one short question, then stop and wait for the patient."
   ].join(" ");
 }
 
@@ -1293,17 +1296,8 @@ function AgentsCall({
   const conversation = useConversation({
     onConnect: () => {
       setCallState("In call");
-      setCallMessage("Agent connected. Waiting for the first agent message...");
+      setCallMessage("Agent connected. EarlyCare will begin with one check-in question.");
       conversation.sendContextualUpdate(multilingualAgentPrompt(selectedSenior));
-      window.setTimeout(() => {
-        const hasAgentMessage = transcriptRef.current.some((line) => line.role === "Agent");
-        if (!hasAgentMessage) {
-          conversation.sendUserMessage(
-            `Begin the EarlyCare check-in for ${selectedSenior.name}. The patient may answer in ${selectedSenior.preferredLanguage}, English, Mandarin, Malay, Tamil, Hindi, Singlish, Hokkien, Cantonese, Teochew, or a mix. Detect their language and continue in the language they use.`
-          );
-          setCallMessage("Agent was silent, so EarlyCare nudged the session to begin.");
-        }
-      }, 2200);
     },
     onDisconnect: (details) => {
       const reason = JSON.stringify(details);
