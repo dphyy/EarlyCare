@@ -53,6 +53,7 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 CALL_STORAGE_ROOT = BACKEND_ROOT / "storage" / "calls"
 PARKINSONS_SPEECH_MODEL_ARTIFACT_ROOT = BACKEND_ROOT / "models" / "parkinsons_speech"
+FRONTEND_DIST_ROOT = Path(os.getenv("EARLYCARE_FRONTEND_DIST", BACKEND_ROOT.parent / "frontend" / "dist"))
 app = FastAPI(title="EarlyCare API", version="0.1.0")
 SUPPORTED_AUDIO_EXTENSIONS = {".mp3", ".ogg", ".wav", ".webm"}
 CONTENT_TYPE_AUDIO_EXTENSIONS = {
@@ -2435,3 +2436,23 @@ def update_volunteer_task(task_id: str, status: str | None = None, payload: Volu
             _upsert_volunteer_task_for_call(updated)
             return updated
     raise HTTPException(status_code=404, detail="Volunteer task not found")
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+def serve_frontend(full_path: str) -> FileResponse:
+    if not FRONTEND_DIST_ROOT.exists():
+        raise HTTPException(status_code=404, detail="Frontend build not found")
+
+    requested_path = (FRONTEND_DIST_ROOT / full_path).resolve()
+    try:
+        requested_path.relative_to(FRONTEND_DIST_ROOT.resolve())
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Frontend asset not found") from exc
+
+    if requested_path.is_file():
+        return FileResponse(requested_path)
+
+    index_path = FRONTEND_DIST_ROOT / "index.html"
+    if index_path.exists():
+        return FileResponse(index_path)
+    raise HTTPException(status_code=404, detail="Frontend entrypoint not found")

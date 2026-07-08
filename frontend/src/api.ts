@@ -1,13 +1,11 @@
 import { seniors, sessions } from "./data";
 import type { CallRecord, CheckInSession, ConsultationMemoryItem, ReadinessReport, Senior, VolunteerTask } from "./types";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string | undefined;
+const API_BASE_URL = ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "").replace(/\/$/, "");
 
 async function getJson<T>(path: string, fallback: T): Promise<T> {
-  if (!API_BASE_URL) return fallback;
-
   try {
-    const response = await fetch(`${API_BASE_URL}${path}`);
+    const response = await fetch(`${API_BASE_URL}${path}`, { credentials: "include" });
     if (!response.ok) throw new Error(`Request failed: ${response.status}`);
     return (await response.json()) as T;
   } catch {
@@ -44,7 +42,7 @@ export function fetchConsultationMemory(seniorId: string): Promise<ConsultationM
 }
 
 export function getCallAudioUrl(call: CallRecord): string | null {
-  if (!API_BASE_URL || !call.audioAvailable) return null;
+  if (!call.audioAvailable) return null;
   const path = call.audioUrl ?? `/calls/${call.id}/audio`;
   if (path.startsWith("http://") || path.startsWith("https://")) return path;
   return `${API_BASE_URL}${path}`;
@@ -91,17 +89,11 @@ async function responseErrorMessage(response: Response): Promise<string> {
 }
 
 export async function createElevenLabsSession(payload: ElevenLabsSessionRequest): Promise<ElevenLabsSessionResponse> {
-  if (!API_BASE_URL) {
-    return {
-      configured: false,
-      message: "Backend API URL is not configured. Using scripted fallback."
-    };
-  }
-
   try {
     const response = await fetch(`${API_BASE_URL}/elevenlabs/signed-url`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify(payload)
     });
 
@@ -116,13 +108,10 @@ export async function createElevenLabsSession(payload: ElevenLabsSessionRequest)
 }
 
 export async function saveCall(formData: FormData): Promise<SaveCallResult> {
-  if (!API_BASE_URL) {
-    return { ok: false, message: "Backend API URL is not configured." };
-  }
-
   try {
     const response = await fetch(`${API_BASE_URL}/calls`, {
       method: "POST",
+      credentials: "include",
       body: formData
     });
     if (!response.ok) {
