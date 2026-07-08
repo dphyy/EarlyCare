@@ -1,0 +1,133 @@
+name: deploy render image
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-production
+  cancel-in-progress: true
+
+env:
+  IMAGE_REPO: ghcr.io/saaiaravindhraja/earlycare
+  RENDER_SERVICE_ID: srv-d96uaquq1p3s7382dfqg
+  RENDER_URL: https://earlycare.onrender.com
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: set up docker buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: login to ghcr
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: SaaiAravindhRaja
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE_REPO }}:${{ github.sha }}
+            ${{ env.IMAGE_REPO }}:latest
+
+      - name: trigger render deploy
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          IMAGE_URL: ${{ env.IMAGE_REPO }}:${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          python - <<'PY' > deploy-body.json
+          import json
+          import os
+          print(json.dumps({"imageUrl": os.environ["IMAGE_URL"]}))
+          PY
+
+          curl -fsS \
+            -X POST "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/deploys" \
+            -H "Authorization: Bearer ${RENDER_API_KEY}" \
+            -H "Content-Type: application/json" \
+            --data @deploy-body.json \
+            > deploy-response.json
+
+          python - <<'PY' > deploy-id.txt
+          import json
+          import sys
+
+          data = json.load(open("deploy-response.json"))
+          candidates = [
+              data,
+              data.get("deploy") if isinstance(data, dict) else None,
+              data.get("data") if isinstance(data, dict) else None,
+          ]
+          for candidate in candidates:
+              if isinstance(candidate, dict) and candidate.get("id"):
+                  print(candidate["id"])
+                  break
+          else:
+              print(json.dumps(data), file=sys.stderr)
+              raise SystemExit("Render deploy response did not include an id")
+          PY
+
+      - name: wait for render deploy
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
+          set -euo pipefail
+          deploy_id="$(cat deploy-id.txt)"
+
+          for attempt in $(seq 1 90); do
+            curl -fsS \
+              -H "Authorization: Bearer ${RENDER_API_KEY}" \
+              "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/deploys/${deploy_id}" \
+              > deploy-status.json
+
+            status="$(python - <<'PY'
+          import json
+          data = json.load(open("deploy-status.json"))
+          deploy = data.get("deploy", data.get("data", data)) if isinstance(data, dict) else {}
+          print(deploy.get("status", "unknown"))
+          PY
+          )"
+            echo "Render deploy ${deploy_id}: ${status}"
+
+            case "$status" in
+              live|succeeded)
+                exit 0
+                ;;
+              build_failed|update_failed|failed|canceled|cancelled)
+                cat deploy-status.json
+                exit 1
+                ;;
+            esac
+
+            sleep 10
+          done
+
+          echo "Timed out waiting for Render deploy ${deploy_id}" >&2
+          exit 1
+
+      - name: smoke test live app
+        run: |
+          set -euo pipefail
+          curl -fsS "${RENDER_URL}/health"
+          printf "\n"
+          curl -fsS "${RENDER_URL}/auth/me"
+          printf "\n"
