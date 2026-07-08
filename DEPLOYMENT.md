@@ -50,16 +50,17 @@ Open `http://127.0.0.1:8000`.
 
 ## Render CLI Flow
 
-The installed local Render CLI is useful for login, service selection, deploys, logs, SSH, and restarts:
+The Render CLI is useful for login, Blueprint validation, service selection, deploys, logs, SSH, and restarts:
 
 ```bash
 render login
+render blueprints validate render.yaml --confirm -o text
 render services -o text
 render deploys create <service-id> --commit <commit-sha> --wait -o text
 render logs <service-id> -o text
 ```
 
-This machine currently has Render CLI `2.1.4`, which does not include `render blueprints validate` or service creation commands. Create the Blueprint from `render.yaml` once in Render, or upgrade the CLI before trying Blueprint validation.
+Blueprint validation and service operations require a logged-in Render CLI session.
 
 ## Post-Deploy Smoke Test
 
