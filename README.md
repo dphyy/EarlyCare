@@ -6,6 +6,8 @@ EarlyCare is a hackathon prototype for routine wellbeing calls operated as an AI
 
 EarlyCare is decision support, not diagnosis. It helps care teams notice risk signals such as falls, dizziness, sickness, confusion, weakness, poor intake, missed check-ins, or requests for help earlier.
 
+Watch the [demo!](https://youtu.be/X3kKN21HAk4)
+
 ## Key Features
 
 | Area | What EarlyCare Does |
